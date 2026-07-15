@@ -6,16 +6,30 @@ const SERIES = {
   '90': [45, 50, 52, 55, 58, 62, 65, 68, 70, 71, 72, 73],
 };
 
-export default function Desempenho({ theme, s, data, perf, setPerf }) {
+export default function Desempenho({ theme, s, data, perf, setPerf, usuarioTentativas, calcularDesempenho }) {
   const disciplinas = data.DISCIPLINAS || [];
   const period = perf.period;
   const series = SERIES[period];
 
+  const desempenhoTopicos = usuarioTentativas && calcularDesempenho ? calcularDesempenho(usuarioTentativas) : [];
+
+  const forcas = desempenhoTopicos
+    .filter(d => d.status === 'domina')
+    .sort((a, b) => b.pct - a.pct);
+
+  const fraquezas = desempenhoTopicos
+    .filter(d => d.status === 'necessita')
+    .sort((a, b) => a.pct - b.pct);
+
+  const taxaGeral = desempenhoTopicos.length > 0
+    ? Math.round(desempenhoTopicos.reduce((acc, d) => acc + d.pct, 0) / desempenhoTopicos.length)
+    : 0;
+
   const stats = [
-    { label: 'Taxa de acertos geral', value: '73%', color: theme.primary },
-    { label: 'Questões respondidas', value: '4.312', color: '#2c2530' },
-    { label: 'Tempo médio', value: '1m 45s', color: '#2c2530' },
-    { label: 'Melhor disciplina', value: 'Dir. Constitucional', color: '#10B981' },
+    { label: 'Taxa de acertos geral', value: taxaGeral + '%', color: theme.primary },
+    { label: 'Tópicos rastreados', value: desempenhoTopicos.length, color: '#2c2530' },
+    { label: 'Tópicos dominados', value: forcas.length, color: '#10B981' },
+    { label: 'Áreas para melhorar', value: fraquezas.length, color: '#EF4444' },
   ];
 
   const porDisciplina = disciplinas.map((d) => ({ nome: d.nome, pct: d.pct }));
@@ -31,6 +45,34 @@ export default function Desempenho({ theme, s, data, perf, setPerf }) {
           </div>
         ))}
       </div>
+
+      {forcas.length > 0 && (
+        <div style={s.card}>
+          <div style={s.sectionTitle}>✨ Força em {forcas.length} tópico(s)</div>
+          {forcas.map(d => (
+            <div key={d.topico} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
+                <span style={{ color: '#10B981' }}>{d.topico}</span>
+                <span style={{ color: '#10B981', fontWeight: 700 }}>{d.pct}%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {fraquezas.length > 0 && (
+        <div style={s.card}>
+          <div style={s.sectionTitle}>💪 Área para melhorar ({fraquezas.length} tópico(s))</div>
+          {fraquezas.map(d => (
+            <div key={d.topico} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
+                <span style={{ color: '#EF4444' }}>{d.topico}</span>
+                <span style={{ color: '#EF4444', fontWeight: 700 }}>{d.pct}%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={s.card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
