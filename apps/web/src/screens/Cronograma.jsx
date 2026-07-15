@@ -30,7 +30,8 @@ export default function Cronograma({ theme, s, data, cronograma, setCronograma }
       btnStyle: done
         ? { background: '#D1FAE5', color: '#047857', border: 'none', borderRadius: 10, padding: '9px 16px', fontSize: 12.5, fontWeight: 600, flex: 'none' }
         : { ...s.btnPrimary, flex: 'none' },
-      btnLabel: done ? '✓ Concluído' : (pct > 0 ? '▶ Continuar estudo' : '▶ Iniciar estudo'),
+      btnIcon: done ? 'check' : 'play',
+      btnLabel: done ? 'Concluído' : (pct > 0 ? 'Continuar estudo' : 'Iniciar estudo'),
     };
   });
 
@@ -49,7 +50,7 @@ export default function Cronograma({ theme, s, data, cronograma, setCronograma }
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}><div style={{ fontSize: 11.5, color: '#8b8391' }}>Horas disponíveis por dia</div><div style={{ fontSize: 14, fontWeight: 700, color: '#2c2530' }}>4h</div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}><div style={{ fontSize: 11.5, color: '#8b8391' }}>Início do plano</div><div style={{ fontSize: 14, fontWeight: 700, color: '#2c2530' }}>03/03/2025</div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}><div style={{ fontSize: 11.5, color: '#8b8391' }}>Término previsto</div><div style={{ fontSize: 14, fontWeight: 700, color: '#2c2530' }}>09/08/2025</div></div>
-          <button style={s.btnOutline}>✎ Editar plano</button>
+          <button style={{ ...s.btnOutline, display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="pencil" color={theme.primary} size={13} />Editar plano</button>
         </div>
 
         <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
@@ -91,7 +92,7 @@ export default function Cronograma({ theme, s, data, cronograma, setCronograma }
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#8b8391', marginBottom: 5 }}><span>Progresso do dia</span><span style={{ fontWeight: 700, color: '#2c2530' }}>{d.progresso}%</span></div>
                 <div style={s.progressTrack}><div style={d.barStyle} /></div>
               </div>
-              <button style={d.btnStyle} onClick={() => startDay(i)}>{d.btnLabel}</button>
+              <button style={{ ...d.btnStyle, display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => startDay(i)}><Icon name={d.btnIcon} color={d.done ? '#047857' : '#fff'} size={13} />{d.btnLabel}</button>
             </div>
           ))}
         </div>

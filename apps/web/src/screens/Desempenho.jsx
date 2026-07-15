@@ -1,4 +1,5 @@
 import { AreaLine, LabeledBars } from '../lib/charts';
+import { Icon } from '../lib/icons';
 
 const SERIES = {
   '7': [60, 66, 63, 70, 68, 74, 73],
@@ -48,7 +49,7 @@ export default function Desempenho({ theme, s, data, perf, setPerf, usuarioTenta
 
       {forcas.length > 0 && (
         <div style={s.card}>
-          <div style={s.sectionTitle}>✨ Força em {forcas.length} tópico(s)</div>
+          <div style={s.sectionTitle}><Icon name="trending-up" color="#10B981" size={18} />Força em {forcas.length} tópico(s)</div>
           {forcas.map(d => (
             <div key={d.topico} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
@@ -62,7 +63,7 @@ export default function Desempenho({ theme, s, data, perf, setPerf, usuarioTenta
 
       {fraquezas.length > 0 && (
         <div style={s.card}>
-          <div style={s.sectionTitle}>💪 Área para melhorar ({fraquezas.length} tópico(s))</div>
+          <div style={s.sectionTitle}><Icon name="trending-down" color="#EF4444" size={18} />Área para melhorar ({fraquezas.length} tópico(s))</div>
           {fraquezas.map(d => (
             <div key={d.topico} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>

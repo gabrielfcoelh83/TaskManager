@@ -122,9 +122,9 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
           <button
             data-testid="novo-simulado"
             onClick={() => abrirConfig(null)}
-            style={{ padding: '13px 22px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: 'pointer', flex: 'none' }}
+            style={{ padding: '13px 22px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: 'pointer', flex: 'none', display: 'flex', alignItems: 'center', gap: 8 }}
           >
-            ▶ Iniciar Simulado
+            <Icon name="play" color="#fff" size={13} /> Iniciar Simulado
           </button>
         </div>
 
@@ -154,9 +154,9 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
                     <button
                       onClick={() => temQuestoes && abrirConfig(d.nome)}
                       disabled={!temQuestoes}
-                      style={{ flex: 1, padding: '10px 12px', background: temQuestoes ? '#343a46' : '#c3c8d2', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: temQuestoes ? 'pointer' : 'not-allowed' }}
+                      style={{ flex: 1, padding: '10px 12px', background: temQuestoes ? '#343a46' : '#c3c8d2', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: temQuestoes ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
                     >
-                      ▶ Iniciar Simulado
+                      <Icon name="play" color="#fff" size={12} /> Iniciar Simulado
                     </button>
                     <button
                       onClick={() => go && go('disciplinas')}
@@ -174,7 +174,7 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
         {/* Histórico */}
         {hist.length > 0 && (
           <div style={s.card}>
-            <div style={s.sectionTitle}>📊 Histórico de Simulados</div>
+            <div style={s.sectionTitle}><Icon name="chart-column" color={theme.primary} size={18} />Histórico de Simulados</div>
             {hist.map(r => (
               <div key={r.id} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -313,8 +313,12 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div style={{ ...s.card, textAlign: 'center', padding: 28 }}>
-          <div style={{ fontSize: 56 }}>
-            {resultado.nota_final >= 70 ? '🎉' : resultado.nota_final >= 50 ? '👍' : '💪'}
+          <div style={{ width: 76, height: 76, borderRadius: '50%', margin: '0 auto', background: resultado.nota_final >= 70 ? '#D1FAE5' : resultado.nota_final >= 50 ? '#FEF3C7' : '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon
+              name={resultado.nota_final >= 70 ? 'trophy' : resultado.nota_final >= 50 ? 'target' : 'trending-up'}
+              color={resultado.nota_final >= 70 ? '#10B981' : resultado.nota_final >= 50 ? '#F59E0B' : '#EF4444'}
+              size={38}
+            />
           </div>
           <div style={{ fontSize: 14, color: '#999', marginTop: 8 }}>Nota final</div>
           <div style={{ fontSize: 48, fontWeight: 700, color: theme.primary }}>{resultado.nota_final}%</div>
@@ -324,7 +328,7 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
 
         {/* Revisão */}
         <div style={s.card}>
-          <div style={s.sectionTitle}>📝 Revisão do simulado</div>
+          <div style={s.sectionTitle}><Icon name="clipboard-list" color={theme.primary} size={18} />Revisão do simulado</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
             {simulado.questoes_pool.map((q, i) => {
               const resposta = simulado.respostas[q.id];
@@ -351,8 +355,8 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
                     )}
                   </div>
                   {q.explicacao && !acertou && (
-                    <div style={{ fontSize: 12.5, color: '#5c5462', marginTop: 8, padding: 10, background: '#fff', borderRadius: 8, lineHeight: 1.5 }}>
-                      💡 {q.explicacao}
+                    <div style={{ fontSize: 12.5, color: '#5c5462', marginTop: 8, padding: 10, background: '#fff', borderRadius: 8, lineHeight: 1.5, display: 'flex', gap: 8 }}>
+                      <Icon name="lightbulb" color="#F59E0B" size={15} style={{ marginTop: 1 }} /> <span>{q.explicacao}</span>
                     </div>
                   )}
                 </div>

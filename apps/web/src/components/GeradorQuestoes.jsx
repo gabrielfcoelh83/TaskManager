@@ -66,8 +66,8 @@ export default function GeradorQuestoes({ theme, s, onQuestoesGeradas }) {
           }}
         />
         {erro && (
-          <div style={{ background: '#FEE2E2', color: '#B91C1C', padding: 10, borderRadius: 8, fontSize: 12 }}>
-            ⚠️ {erro}
+          <div style={{ background: '#FEE2E2', color: '#B91C1C', padding: 10, borderRadius: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name="triangle-alert" color="#B91C1C" size={15} /> {erro}
           </div>
         )}
         <button
@@ -79,7 +79,7 @@ export default function GeradorQuestoes({ theme, s, onQuestoesGeradas }) {
             cursor: carregando || !tema.trim() ? 'not-allowed' : 'pointer'
           }}
         >
-          {carregando ? '⏳ Gerando...' : '✨ Gerar com IA'}
+          {carregando ? 'Gerando…' : (<><Icon name="sparkles" color="#fff" size={15} /> Gerar com IA</>)}
         </button>
       </div>
     </div>

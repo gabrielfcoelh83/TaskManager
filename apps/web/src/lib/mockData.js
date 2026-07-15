@@ -13,7 +13,7 @@ export const NAV = [
 ];
 
 export const PAGE_META = {
-  dashboard: { title: 'Olá, Maria! 💜', sub: 'Vamos continuar rumo à aprovação na OAB?' },
+  dashboard: { title: 'Olá, Maria!', sub: 'Vamos continuar rumo à aprovação na OAB?' },
   cronograma: { title: 'Cronograma', sub: 'Seu plano de estudos organizado especialmente para você.' },
   questoes: { title: 'Questões', sub: 'Pratique questões filtradas por disciplina, banca e dificuldade.' },
   simulados: { title: 'Simulados', sub: 'Treine em condições reais de prova.' },

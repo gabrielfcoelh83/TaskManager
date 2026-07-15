@@ -44,9 +44,9 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, iniciarSimu
                 <button
                   onClick={() => temQuestoes && iniciarSimuladoDe && iniciarSimuladoDe(d.nome)}
                   disabled={!temQuestoes}
-                  style={{ flex: 1, padding: '10px 12px', background: temQuestoes ? '#343a46' : '#c3c8d2', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: temQuestoes ? 'pointer' : 'not-allowed' }}
+                  style={{ flex: 1, padding: '10px 12px', background: temQuestoes ? '#343a46' : '#c3c8d2', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: temQuestoes ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
                 >
-                  ▶ Iniciar Simulado
+                  <Icon name="play" color="#fff" size={12} /> Iniciar Simulado
                 </button>
                 <button
                   onClick={() => setDisc({ openNome: d.nome })}

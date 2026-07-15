@@ -127,8 +127,8 @@ export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTe
                 onClick={() => toggleSource(nome)}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, cursor: 'pointer', background: on ? theme.primarySoft : '#faf9fb' }}
               >
-                <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${on ? theme.primary : '#d5d0da'}`, background: on ? theme.primary : '#fff', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flex: 'none' }}>
-                  {on ? '✓' : ''}
+                <div style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${on ? theme.primary : '#d5d0da'}`, background: on ? theme.primary : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                  {on && <Icon name="check" color="#fff" size={12} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: '#2c2530', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nome}</div>
@@ -156,7 +156,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTe
             <div style={{ fontSize: 13.5, color: '#8b8391', marginTop: 6, maxWidth: 420, textAlign: 'center' }}>Escolha uma ou mais disciplinas ao lado e gere um quiz com as questões dessas fontes.</div>
             <div style={{ fontSize: 12.5, color: '#5c5462', marginTop: 14 }}>{selected.length === 0 ? 'Nenhuma disciplina selecionada' : `${selected.length} disciplina(s) selecionada(s)`}</div>
             <button style={{ ...s.btnPrimary, marginTop: 18, padding: '12px 22px', fontSize: 13.5, opacity: availablePool.length === 0 ? 0.5 : 1, cursor: availablePool.length === 0 ? 'not-allowed' : 'pointer' }} onClick={startQuiz} disabled={availablePool.length === 0}>
-              ▶ Gerar quiz ({availablePool.length} questões)
+              <Icon name="play" color="#fff" size={14} /> Gerar quiz ({availablePool.length} questões)
             </button>
           </div>
         )}
@@ -232,8 +232,13 @@ export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTe
             maxWidth: 400,
             textAlign: 'center'
           }}>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
-              {quest.selectedAlt === current.correta ? 'Acertou! 🎉' : 'Errou 😔'}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
+              <Icon
+                name={quest.selectedAlt === current.correta ? 'circle-check' : 'circle-x'}
+                color={quest.selectedAlt === current.correta ? '#10B981' : '#EF4444'}
+                size={24}
+              />
+              {quest.selectedAlt === current.correta ? 'Acertou!' : 'Errou'}
             </div>
 
             <div style={{ fontSize: 14, color: '#5c5462', marginBottom: 20 }}>

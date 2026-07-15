@@ -131,7 +131,7 @@ export default function App() {
             <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
           </div>
           <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>
-            Manter a consistência é o segredo do sucesso! 💜
+            Manter a consistência é o segredo do sucesso!
           </div>
         </div>
 

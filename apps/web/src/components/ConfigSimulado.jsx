@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '../lib/icons';
 
 const QUANTIDADES = [10, 20, 30, 40, 50, 60, 70, 80];
 
@@ -86,10 +87,14 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
             borderRadius: 10,
             fontSize: 14,
             fontWeight: 600,
-            cursor: invalido ? 'not-allowed' : 'pointer'
+            cursor: invalido ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8
           }}
         >
-          ▶ Iniciar Simulado
+          <Icon name="play" color="#fff" size={14} /> Iniciar Simulado
         </button>
       </div>
     </div>
