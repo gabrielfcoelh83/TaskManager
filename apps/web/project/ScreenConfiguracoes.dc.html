@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<div style="max-width:600px;display:flex;flex-direction:column;gap:16px">
+  <div style="{{ s.card }}">
+    <div style="{{ s.sectionTitle }}">Perfil</div>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:16px">
+      <div><div style="{{ label }}">Nome</div><input style="{{ input }}" value="{{ name }}" onChange="{{ onName }}"/></div>
+      <div><div style="{{ label }}">E-mail</div><input style="{{ input }}" value="{{ email }}" onChange="{{ onEmail }}"/></div>
+      <div><div style="{{ label }}">Meta diária de questões</div><input style="{{ input }}" type="number" value="{{ meta }}" onChange="{{ onMeta }}"/></div>
+    </div>
+  </div>
+  <div style="{{ s.card }}">
+    <div style="{{ s.sectionTitle }}">Notificações</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+      <sc-for list="{{ toggles }}" as="t" hint-placeholder-count="3">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:13.5px;color:#2c2530">{{ t.label }}</div>
+          <div style="{{ t.track }}" onClick="{{ t.onClick }}"><div style="{{ t.knob }}"></div></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  state = { name:'Maria Laís', email:'maria.lais@email.com', meta:20, notif:[true,true,false] };
+
+  renderVals() {
+    const { s, theme } = this.props;
+    const labels = ['Lembrete diário de estudo','Novidades e atualizações','E-mails promocionais'];
+    return {
+      s, theme,
+      label: { fontSize:12, color:'#8b8391', marginBottom:5 },
+      input: { width:'100%', fontSize:13.5, border:'1px solid rgba(0,0,0,.1)', borderRadius:9, padding:'9px 12px', color:'#2c2530' },
+      name: this.state.name, onName: (e)=>this.setState({name:e.target.value}),
+      email: this.state.email, onEmail: (e)=>this.setState({email:e.target.value}),
+      meta: this.state.meta, onMeta: (e)=>this.setState({meta:e.target.value}),
+      toggles: labels.map((label,i) => ({
+        label,
+        onClick: () => this.setState(s2 => { const n=[...s2.notif]; n[i]=!n[i]; return {notif:n}; }),
+        track: { width:40, height:22, borderRadius:11, background: this.state.notif[i] ? theme.primary : '#e5e2ea', position:'relative', cursor:'pointer', transition:'background .15s' },
+        knob: { width:18, height:18, borderRadius:'50%', background:'#fff', position:'absolute', top:2, left: this.state.notif[i] ? 20 : 2, transition:'left .15s', boxShadow:'0 1px 3px rgba(0,0,0,.2)' },
+      })),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<div style="display:grid;grid-template-columns:270px 1fr;gap:18px;align-items:start;height:100%">
+  <div style="{{ s.card }};padding:16px;position:sticky;top:0">
+    <div style="{{ s.sectionTitle }};font-size:14px">{{ libraryIcon }}Disciplinas</div>
+    <div style="font-size:11.5px;color:#8b8391;margin-top:4px">Selecione as fontes do seu quiz</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px">
+      <sc-for list="{{ sources }}" as="src" hint-placeholder-count="6">
+        <div style="{{ src.rowStyle }}" onClick="{{ src.onToggle }}">
+          <div style="{{ src.checkStyle }}">{{ src.checkIcon }}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:600;color:#2c2530;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ src.nome }}</div>
+            <div style="font-size:10.5px;color:#8b8391">{{ src.count }} questões</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <button style="{{ selectAllBtn }}" onClick="{{ toggleAll }}">{{ selectAllLabel }}</button>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <sc-if value="{{ !quizActive }}" hint-placeholder-val="{{ true }}">
+      <div style="{{ heroCard }}">
+        <div style="{{ brainIconWrap }}">{{ brainIcon }}</div>
+        <div style="font-size:19px;font-weight:700;color:#2c2530;margin-top:14px">Monte seu quiz</div>
+        <div style="font-size:13.5px;color:#8b8391;margin-top:6px;max-width:420px;text-align:center">Escolha uma ou mais disciplinas ao lado e gere um quiz com as questões dessas fontes.</div>
+        <div style="font-size:12.5px;color:#5c5462;margin-top:14px">{{ selectedSummary }}</div>
+        <button style="{{ startBtn }}" onClick="{{ startQuiz }}" disabled="{{ startDisabled }}">▶ Gerar quiz ({{ availableCount }} questões)</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ quizActive }}" hint-placeholder-val="{{ false }}">
+      <div style="{{ s.card }}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <button style="{{ exitBtn }}" onClick="{{ exitQuiz }}">← Encerrar quiz</button>
+          <div style="font-size:12.5px;color:#8b8391">Questão {{ position }} de {{ total }}</div>
+        </div>
+        <div style="{{ s.progressTrack }};margin-top:10px"><div style="{{ quizProgressBar }}"></div></div>
+
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <span style="{{ s.pill('#f3f1f5','#8b8391') }}">{{ current.disciplina }}</span>
+          <span style="{{ s.pill('#f3f1f5','#8b8391') }}">{{ current.banca }} · {{ current.ano }}</span>
+          <span style="{{ dificuldadePill }}">{{ current.dificuldade }}</span>
+        </div>
+        <div style="font-size:15.5px;color:#2c2530;line-height:1.55;margin-top:16px">{{ current.enunciado }}</div>
+
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:18px">
+          <sc-for list="{{ alternativas }}" as="alt" hint-placeholder-count="4">
+            <div style="{{ alt.style }}" onClick="{{ alt.onClick }}">
+              <div style="{{ alt.letterStyle }}">{{ alt.letter }}</div>
+              <div style="flex:1;font-size:13.5px">{{ alt.texto }}</div>
+              <sc-if value="{{ alt.showIcon }}">{{ alt.icon }}</sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
+          <div style="font-size:12.5px;color:#8b8391">Acertos: <b style="color:#10B981">{{ score.certas }}</b> · Erros: <b style="color:#EF4444">{{ score.erradas }}</b></div>
+          <button style="{{ nextBtnStyle }}" onClick="{{ nextQuestion }}" disabled="{{ nextDisabled }}">{{ nextLabel }}</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ quizDone }}" hint-placeholder-val="{{ false }}">
+      <div style="{{ heroCard }}">
+        <div style="{{ trophyIconWrap }}">{{ trophyIcon }}</div>
+        <div style="font-size:19px;font-weight:700;color:#2c2530;margin-top:14px">Quiz concluído!</div>
+        <div style="font-size:13.5px;color:#8b8391;margin-top:6px">Você acertou {{ score.certas }} de {{ total }} questões ({{ scorePct }}%)</div>
+        <button style="{{ startBtn }}" onClick="{{ exitQuiz }}">Montar novo quiz</button>
+      </div>
+    </sc-if>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  state = { selected: null, quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false };
+
+  ICON_PATHS = {
+    library: '<path d="m16 6 4 14" /><path d="M12 6v14" /><path d="M8 8v12" /><path d="M4 4v16" />',
+    brain: '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" /><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" /><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" /><path d="M17.599 6.5a3 3 0 0 0 .399-1.375" /><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" /><path d="M3.477 10.896a4 4 0 0 1 .585-.396" /><path d="M19.938 10.5a4 4 0 0 1 .585.396" /><path d="M6 18a4 4 0 0 1-1.967-.516" /><path d="M19.967 17.484A4 4 0 0 1 18 18" />',
+    trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" /><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" /><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />',
+    check: '<path d="M20 6 9 17l-5-5" />',
+    x: '<path d="M18 6 6 18" /><path d="m6 6 12 12" />',
+  };
+
+  svgIcon(name, color, size) {
+    const px = size || 22;
+    return React.createElement('svg', {
+      viewBox: '0 0 24 24', width: px, height: px, fill: 'none', stroke: 'currentColor',
+      strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+      style: { color, display: 'block', flex: 'none' },
+      dangerouslySetInnerHTML: { __html: this.ICON_PATHS[name] || '' },
+    });
+  }
+
+  componentDidMount() {
+    const all = this.props.data.QUESTOES || [];
+    const disciplinas = Array.from(new Set(all.map(q => q.disciplina)));
+    this.setState({ selected: new Set(disciplinas) });
+  }
+
+  toggleSource = (nome) => this.setState(s => {
+    const next = new Set(s.selected);
+    next.has(nome) ? next.delete(nome) : next.add(nome);
+    return { selected: next };
+  });
+
+  toggleAll = () => {
+    const all = this.props.data.QUESTOES || [];
+    const disciplinas = Array.from(new Set(all.map(q => q.disciplina)));
+    const allSelected = this.state.selected && this.state.selected.size === disciplinas.length;
+    this.setState({ selected: allSelected ? new Set() : new Set(disciplinas) });
+  };
+
+  startQuiz = () => {
+    const all = this.props.data.QUESTOES || [];
+    const pool = all.filter(q => this.state.selected.has(q.disciplina));
+    this.setState({ quiz: pool, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false });
+  };
+
+  exitQuiz = () => this.setState({ quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false });
+
+  pickAlt = (i) => {
+    if (this.state.selectedAlt !== null) return;
+    const q = this.state.quiz[this.state.idx];
+    const correct = i === q.correta;
+    this.setState(s => ({ selectedAlt: i, certas: s.certas + (correct?1:0), erradas: s.erradas + (correct?0:1) }));
+  };
+
+  nextQuestion = () => {
+    const nextIdx = this.state.idx + 1;
+    if (nextIdx >= this.state.quiz.length) this.setState({ done: true });
+    else this.setState({ idx: nextIdx, selectedAlt: null });
+  };
+
+  renderVals() {
+    const { theme, s, data } = this.props;
+    const all = data.QUESTOES || [];
+    const disciplinas = Array.from(new Set(all.map(q => q.disciplina)));
+    const selected = this.state.selected || new Set();
+    const counts = {};
+    all.forEach(q => counts[q.disciplina] = (counts[q.disciplina]||0)+1);
+
+    const sources = disciplinas.map(nome => {
+      const on = selected.has(nome);
+      return {
+        nome, count: counts[nome], onToggle: () => this.toggleSource(nome),
+        rowStyle: { display:'flex', alignItems:'center', gap:10, padding:'9px 10px', borderRadius:10, cursor:'pointer', background: on ? theme.primarySoft : '#faf9fb' },
+        checkStyle: { width:18, height:18, borderRadius:5, border:`1.5px solid ${on?theme.primary:'#d5d0da'}`, background: on ? theme.primary : '#fff', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, flex:'none' },
+        checkIcon: on ? '✓' : '',
+      };
+    });
+
+    const availablePool = all.filter(q => selected.has(q.disciplina));
+    const quizActive = !!this.state.quiz && !this.state.done;
+    const quizDone = !!this.state.quiz && this.state.done;
+
+    let current = null, alternativas = [], dificuldadePill = {};
+    const dificuldadeCor = { 'Fácil':'#10B981','Média':'#F59E0B','Difícil':'#EF4444' };
+    if (quizActive) {
+      current = this.state.quiz[this.state.idx];
+      dificuldadePill = s.pill('#faf9fb', dificuldadeCor[current.dificuldade] || '#8b8391');
+      const answered = this.state.selectedAlt !== null;
+      alternativas = current.alternativas.map((texto, i) => {
+        const isCorrect = i === current.correta;
+        const isSelected = i === this.state.selectedAlt;
+        let bg = '#faf9fb', border = 'rgba(0,0,0,.08)', icon = '', show = false;
+        if (answered) {
+          if (isCorrect) { bg = '#D1FAE5'; border = '#10B981'; icon = this.svgIcon('check', '#10B981', 18); show = true; }
+          else if (isSelected) { bg = '#FEE2E2'; border = '#EF4444'; icon = this.svgIcon('x', '#EF4444', 18); show = true; }
+        }
+        return {
+          texto, letter: String.fromCharCode(65+i), onClick: () => this.pickAlt(i),
+          showIcon: show, icon,
+          style: { display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderRadius:12, border:`1.5px solid ${border}`, background:bg, cursor: answered ? 'default' : 'pointer' },
+          letterStyle: { width:26, height:26, borderRadius:'50%', background: answered && isCorrect ? '#10B981' : (answered && isSelected ? '#EF4444' : theme.primarySoft), color: answered && (isCorrect||isSelected) ? '#fff' : theme.primaryDark, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12.5, fontWeight:700, flex:'none' },
+        };
+      });
+    }
+
+    const total = this.state.quiz ? this.state.quiz.length : 0;
+    const position = Math.min(this.state.idx+1, total);
+    const score = { certas: this.state.certas, erradas: this.state.erradas };
+
+    return {
+      s, theme, sources,
+      selectAllBtn: { width:'100%', marginTop:14, background:'#fff', border:`1px solid ${theme.primarySoft}`, color:theme.primary, borderRadius:9, padding:'8px', fontSize:12, fontWeight:600 },
+      selectAllLabel: selected.size === disciplinas.length ? 'Limpar seleção' : 'Selecionar todas',
+      toggleAll: this.toggleAll,
+      heroCard: { background:'#fff', border:'1px solid rgba(0,0,0,.05)', borderRadius:18, padding:'48px 24px', display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center' },
+      selectedSummary: selected.size === 0 ? 'Nenhuma disciplina selecionada' : `${selected.size} disciplina(s) selecionada(s)`,
+      startBtn: { ...s.btnPrimary, marginTop:18, padding:'12px 22px', fontSize:13.5 },
+      startDisabled: availablePool.length === 0,
+      availableCount: availablePool.length,
+      startQuiz: this.startQuiz,
+      quizActive, quizDone,
+      exitBtn: { background:'none', border:'none', color:theme.primary, fontSize:13, fontWeight:600 },
+      exitQuiz: this.exitQuiz,
+      position, total,
+      quizProgressBar: { width: total ? (position/total*100)+'%' : '0%', height:'100%', background:`linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})`, borderRadius:5 },
+      current, alternativas, dificuldadePill,
+      score, scorePct: total ? Math.round(score.certas/total*100) : 0,
+      nextBtnStyle: { ...s.btnPrimary, opacity: this.state.selectedAlt===null ? 0.4 : 1 },
+      nextDisabled: this.state.selectedAlt === null,
+      nextLabel: (this.state.idx+1 >= total) ? 'Finalizar quiz' : 'Próxima questão →',
+      nextQuestion: this.nextQuestion,
+      libraryIcon: this.svgIcon('library', theme.primary, 20),
+      brainIconWrap: { width:72, height:72, borderRadius:22, background:`linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto' },
+      brainIcon: this.svgIcon('brain', '#fff', 34),
+      trophyIconWrap: { width:72, height:72, borderRadius:22, background:'linear-gradient(135deg, #FBBF24, #D97706)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto' },
+      trophyIcon: this.svgIcon('trophy', '#fff', 34),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

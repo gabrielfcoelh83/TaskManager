@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<div style="display:flex;flex-direction:column;gap:18px;padding-top:2px">
+  <div style="{{ rowStyle }}">
+    <sc-for list="{{ stats }}" as="st" hint-placeholder-count="5">
+      <div style="{{ s.card }}">
+        <div style="{{ st.iconWrap }}">{{ st.iconEl }}</div>
+        <div style="font-size:11.5px;color:#8b8391;margin-top:10px">{{ st.label }}</div>
+        <div style="{{ s.statNum }}">{{ st.value }}</div>
+        <div style="{{ s.statLabel }}">{{ st.sub }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:18px;align-items:start">
+    <div style="{{ s.card }}">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="{{ s.sectionTitle }}">{{ cronogramaIcon }}Cronograma</div>
+        <a href="#" onClick="{{ openCronograma }}" style="{{ s.link }}">Ver calendário</a>
+      </div>
+      <div style="margin-top:16px">
+        <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#5c5462;margin-bottom:8px">
+          <span>Progresso do cronograma</span><span style="font-weight:700;color:#2c2530">65%</span>
+        </div>
+        <div style="{{ s.progressTrack }}"><div style="{{ progressBarFill }}"></div></div>
+        <div style="font-size:12px;color:#8b8391;margin-top:8px">Você está no dia 52 de 180</div>
+      </div>
+      <div style="{{ nextTaskWrap }}">
+        <div style="font-size:11.5px;font-weight:700;color:{{ theme.primary }};text-transform:uppercase;letter-spacing:.3px">Próximo de hoje</div>
+        <div style="display:flex;align-items:center;gap:14px;margin-top:10px">
+          <div style="{{ nextTaskIconWrap }}">{{ nextTaskIcon }}</div>
+          <div style="flex:1">
+            <div style="font-size:14.5px;font-weight:700;color:#2c2530">Direito Constitucional</div>
+            <div style="font-size:12.5px;color:#8b8391">Direitos e Garantias Fundamentais</div>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <span style="{{ s.pill('#fff','#8b8391') }}">30 questões</span>
+              <span style="{{ s.pill('#fff','#8b8391') }}">2h de estudo</span>
+            </div>
+          </div>
+          <button style="{{ s.btnPrimary }}" onClick="{{ openCronograma }}">▶ Iniciar estudo</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="{{ s.card }}">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="{{ s.sectionTitle }}">Desempenho geral</div>
+        <select style="{{ selectStyle }}" value="{{ period }}" onChange="{{ onPeriodChange }}">
+          <option value="7">Últimos 7 dias</option>
+          <option value="30">Últimos 30 dias</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <div style="{{ miniStat }}"><div style="font-size:11px;color:#8b8391">Acertos</div><div style="font-size:15px;font-weight:700;color:#10B981">{{ perf.acertos }}</div></div>
+        <div style="{{ miniStat }}"><div style="font-size:11px;color:#8b8391">Erros</div><div style="font-size:15px;font-weight:700;color:#EF4444">{{ perf.erros }}</div></div>
+        <div style="{{ miniStat }}"><div style="font-size:11px;color:#8b8391">% Acertos</div><div style="font-size:15px;font-weight:700;color:{{ theme.primary }}">{{ perf.pct }}%</div></div>
+      </div>
+      <div style="margin-top:14px">{{ sparkline }}</div>
+    </div>
+  </div>
+
+  <div style="{{ s.card }}">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="{{ s.sectionTitle }}">Evolução dos estudos</div>
+      <span style="{{ s.link }}">Ver mais</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:16px">
+      <sc-for list="{{ evolucao }}" as="ev" hint-placeholder-count="3">
+        <div>
+          <div style="font-size:12px;color:#8b8391">{{ ev.label }}</div>
+          <div style="font-size:22px;font-weight:700;color:{{ ev.color }};margin-top:2px">{{ ev.value }}</div>
+          <div style="font-size:11.5px;color:#8b8391">{{ ev.sub }}</div>
+          <div style="margin-top:10px">{{ ev.chart }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+    <div style="{{ s.card }}">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="{{ s.sectionTitle }}">Matérias mais estudadas</div><span style="{{ s.link }}">ver todas</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+        <sc-for list="{{ maisEstudadas }}" as="d" hint-placeholder-count="3">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#2c2530;font-weight:500">{{ d.nome }}</span><span style="color:#8b8391">{{ d.horas }}</span></div>
+            <div style="{{ s.progressTrack }};margin-top:6px"><div style="{{ d.barStyle }}"></div></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="{{ s.card }}">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="{{ s.sectionTitle }}">Menor desempenho</div><span style="{{ s.link }}">ver todas</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+        <sc-for list="{{ menorDesempenho }}" as="d" hint-placeholder-count="3">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#2c2530;font-weight:500">{{ d.nome }}</span><span style="color:#EF4444;font-weight:600">{{ d.pct }}%</span></div>
+            <div style="{{ s.progressTrack }};margin-top:6px"><div style="{{ d.barStyleRed }}"></div></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <div style="{{ ctaWrap }}">
+    <div>
+      <div style="font-size:17px;font-weight:700;display:flex;align-items:center;gap:10px">{{ trophyIcon }}Continue assim!</div>
+      <div style="font-size:13px;opacity:.92;margin-top:4px;max-width:520px">Você está cada dia mais perto da aprovação!</div>
+    </div>
+    <button style="{{ ctaBtn }}" onClick="{{ openDesempenho }}">Ver desempenho completo</button>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  state = { period: '7' };
+
+  ICON_PATHS = {
+    'book-open': '<path d="M12 7v14" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />',
+    target: '<circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" />',
+    timer: '<line x1="10" x2="14" y1="2" y2="2" /><line x1="12" x2="15" y1="14" y2="11" /><circle cx="12" cy="14" r="8" />',
+    'trending-up': '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" />',
+    flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" />',
+    scale: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" /><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" /><path d="M7 21h10" /><path d="M12 3v18" /><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />',
+    calendar: '<path d="M8 2v4" /><path d="M16 2v4" /><rect width="18" height="18" x="3" y="4" rx="2" /><path d="M3 10h18" />',
+    trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" /><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" /><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />',
+  };
+
+  svgIcon(name, color, size) {
+    const px = size || 22;
+    return React.createElement('svg', {
+      viewBox: '0 0 24 24', width: px, height: px, fill: 'none', stroke: 'currentColor',
+      strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+      style: { color, display: 'block', flex: 'none' },
+      dangerouslySetInnerHTML: { __html: this.ICON_PATHS[name] || '' },
+    });
+  }
+
+  onPeriodChange = (e) => this.setState({ period: e.target.value });
+
+  makeSpark(points, color) {
+    const w = 380, h = 90, max = Math.max(...points), min = Math.min(...points);
+    const stepX = w / (points.length - 1);
+    const norm = (v) => h - 10 - ((v - min) / (max - min || 1)) * (h - 20);
+    const coords = points.map((v, i) => [i * stepX, norm(v)]);
+    const path = coords.map((c, i) => (i === 0 ? 'M' : 'L') + c[0] + ',' + c[1]).join(' ');
+    return React.createElement('svg', { width: '100%', height: h, viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'none' },
+      React.createElement('path', { d: path, fill: 'none', stroke: color, strokeWidth: 2.5, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      ...coords.map((c, i) => React.createElement('circle', { key: i, cx: c[0], cy: c[1], r: 3.5, fill: color }))
+    );
+  }
+
+  makeBars(points, color) {
+    const w = 120, h = 60, max = Math.max(...points);
+    const bw = w / points.length - 4;
+    return React.createElement('svg', { width: '100%', height: h, viewBox: `0 0 ${w} ${h}` },
+      ...points.map((v, i) => React.createElement('rect', {
+        key: i, x: i * (bw + 4), y: h - (v / max) * h, width: bw, height: (v / max) * h, rx: 3, fill: color
+      }))
+    );
+  }
+
+  renderVals() {
+    const theme = this.props.theme, s = this.props.s, data = this.props.data || {};
+    const disciplinas = data.DISCIPLINAS || [];
+    const period = this.state.period;
+    const perf = period === '7'
+      ? { acertos: 512, erros: 188, pct: 73, series: [40,55,48,62,58,70,68] }
+      : { acertos: 1980, erros: 720, pct: 71, series: [30,45,42,60,55,68,64,72,66,80,75,90] };
+
+    return {
+      s, theme,
+      rowStyle: { display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:14 },
+      stats: [
+        { iconWrap: iw('#4F8EF7','#2F6FE0'), iconEl: this.svgIcon('book-open', '#fff', 20), label:'Questões respondidas', value:'1.248', sub:'questões' },
+        { iconWrap: iw('#F472B6','#DB2777'), iconEl: this.svgIcon('target', '#fff', 20), label:'Taxa de acertos', value:'73%', sub:'média geral' },
+        { iconWrap: iw('#2DD4BF','#0D9488'), iconEl: this.svgIcon('timer', '#fff', 20), label:'Tempo médio', value:'1m 45s', sub:'por questão' },
+        { iconWrap: iw('#34D399','#059669'), iconEl: this.svgIcon('trending-up', '#fff', 20), label:'Sequência atual', value:'18 dias', sub:'estudando' },
+        { iconWrap: iw('#FBBF24','#D97706'), iconEl: this.svgIcon('flag', '#fff', 20), label:'Meta diária', value:'20 questões', sub:'15/20' },
+      ],
+      progressBarFill: { width:'65%', height:'100%', background:`linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})`, borderRadius:5 },
+      nextTaskWrap: { marginTop:18, background: theme.primarySoft, borderRadius:14, padding:16 },
+      nextTaskIconWrap: { width:44, height:44, borderRadius:12, background:`linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display:'flex', alignItems:'center', justifyContent:'center', flex:'none' },
+      nextTaskIcon: this.svgIcon('scale', '#fff', 20),
+      cronogramaIcon: this.svgIcon('calendar', theme.primary, 20),
+      selectStyle: { fontSize:12, border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:'5px 8px', color:'#5c5462', background:'#fff' },
+      period, onPeriodChange: this.onPeriodChange, perf,
+      miniStat: { flex:1, background:'#faf9fb', borderRadius:10, padding:'8px 10px' },
+      sparkline: this.makeSpark(perf.series, theme.primary),
+      evolucao: [
+        { label:'Evolução semanal', value:'+12%', sub:'em relação à semana passada', color:'#10B981', chart: this.makeSpark([20,25,22,30,28,34,32], '#EC4899') },
+        { label:'Evolução mensal', value:'+28%', sub:'em relação ao mês passado', color:'#10B981', chart: this.makeSpark([10,18,15,25,22,32,30,40], theme.primary) },
+        { label:'Questões este mês', value:'1.248', sub:'+320 em relação ao mês passado', color:'#2c2530', chart: this.makeBars([30,45,38,55,48,60,52], theme.accent) },
+      ],
+      maisEstudadas: disciplinas.slice(0,3).map(d => ({ nome:d.nome, horas:d.horas, barStyle:{ width:d.pct+'%', height:'100%', background:d.cor, borderRadius:5 } })),
+      menorDesempenho: [...disciplinas].sort((a,b)=>a.pct-b.pct).slice(0,3).map(d => ({ nome:d.nome, pct:d.pct, barStyleRed:{ width:d.pct+'%', height:'100%', background:'#EF4444', borderRadius:5 } })),
+      ctaWrap: { marginTop:4, background:`linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, borderRadius:18, padding:'24px 28px', display:'flex', alignItems:'center', justifyContent:'space-between', color:'#fff', gap:20, flexWrap:'wrap' },
+      ctaBtn: { background:'rgba(255,255,255,.18)', border:'1px solid rgba(255,255,255,.5)', color:'#fff', borderRadius:10, padding:'10px 18px', fontSize:13, fontWeight:600, flex:'none' },
+      openCronograma: () => this.props.go && this.props.go('cronograma'),
+      openDesempenho: () => this.props.go && this.props.go('desempenho'),
+      trophyIcon: this.svgIcon('trophy', '#fff', 28),
+    };
+
+    function iw(from,to) { return { width:38, height:38, borderRadius:11, background:`linear-gradient(135deg, ${from}, ${to})`, display:'flex', alignItems:'center', justifyContent:'center', flex:'none' }; }
+  }
+}
+
+</script>
+</body>
+</html>
