@@ -195,7 +195,15 @@ export default function App() {
             <Estatisticas {...screenProps} filtros={state.estatisticas} setFiltros={(p) => updateSlice('estatisticas', p)} />
           )}
           {state.screen === 'disciplinas' && (
-            <Disciplinas {...screenProps} disc={state.disciplinas} setDisc={(p) => updateSlice('disciplinas', p)} />
+            <Disciplinas
+              {...screenProps}
+              disc={state.disciplinas}
+              setDisc={(p) => updateSlice('disciplinas', p)}
+              iniciarSimuladoDe={(nome) => {
+                updateSlice('simulados', { preDisciplina: nome });
+                goTo('simulados');
+              }}
+            />
           )}
           {state.screen === 'anotacoes' && (
             <Anotacoes {...screenProps} notas={state.anotacoes} setNotas={(p) => updateSlice('anotacoes', p)} />

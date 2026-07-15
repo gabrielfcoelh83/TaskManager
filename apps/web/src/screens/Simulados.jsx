@@ -3,14 +3,39 @@ import { Icon } from '../lib/icons';
 import ConfigSimulado from '../components/ConfigSimulado';
 import Cronometro from '../components/Cronometro';
 
-export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico }) {
-  const [etapa, setEtapa] = useState('lista'); // lista | config | execucao | resultado
+const DISC_ICONS = {
+  'Direito Constitucional': 'landmark',
+  'Direito Administrativo': 'scale',
+  'Direito Civil': 'users',
+  'Direito Penal': 'gavel',
+  'Direito do Trabalho': 'briefcase',
+  'Direito Tributário': 'file-text',
+  'Direito Empresarial': 'building-2',
+  'Direito Internacional': 'book-open',
+};
+
+export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico, go }) {
+  const preDisciplina = sim?.preDisciplina || null;
+  const [etapa, setEtapa] = useState(preDisciplina ? 'config' : 'lista');
   const [simulado, setSimulado] = useState(null);
+  const [configInicial, setConfigInicial] = useState(preDisciplina);
 
   const QUESTOES = data.QUESTOES || [];
+  const DISCIPLINAS = data.DISCIPLINAS || [];
+  const disciplinasComQuestoes = Array.from(new Set(QUESTOES.map(q => q.disciplina)));
+
+  const limparPreSelecao = () => {
+    if (preDisciplina) setSim({ preDisciplina: null });
+  };
+
+  const abrirConfig = (disciplina = null) => {
+    setConfigInicial(disciplina);
+    setEtapa('config');
+  };
 
   const iniciarSimulado = (config) => {
     const { tipo, disciplina, quantidade } = config;
+    limparPreSelecao();
 
     let pool = [...QUESTOES];
     if (tipo === 'disciplina' && disciplina) {
@@ -19,7 +44,7 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
 
     pool = pool.sort(() => Math.random() - 0.5).slice(0, Math.min(quantidade, pool.length));
 
-    const novo = {
+    setSimulado({
       id: `sim-${Date.now()}`,
       tipo,
       disciplina,
@@ -27,44 +52,21 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
       questoes_pool: pool,
       tempo_inicio: Date.now(),
       tempo_total_minutos: Math.ceil(pool.length * 1.5),
-      idx_atual: 0,
-      respostas: {},
-      acertos: 0
-    };
-
-    setSimulado(novo);
+      respostas: {}
+    });
     setEtapa('execucao');
   };
 
-  const responderQuestao = (respostaIdx) => {
-    const q = simulado.questoes_pool[simulado.idx_atual];
-    const acertou = respostaIdx === q.correta;
-
-    const novasRespostas = {
-      ...simulado.respostas,
-      [q.id]: {
-        resposta: respostaIdx,
-        correta: acertou,
-        tempo_gasto: Math.round((Date.now() - simulado.tempo_inicio) / 1000)
-      }
-    };
-
-    const novosAcertos = simulado.acertos + (acertou ? 1 : 0);
-
-    if (simulado.idx_atual < simulado.questoes_pool.length - 1) {
-      setSimulado({
-        ...simulado,
-        idx_atual: simulado.idx_atual + 1,
-        respostas: novasRespostas,
-        acertos: novosAcertos
-      });
-    } else {
-      finalizarSimulado(novasRespostas, novosAcertos);
-    }
+  const selecionarResposta = (questaoId, respostaIdx) => {
+    setSimulado(prev => ({
+      ...prev,
+      respostas: { ...prev.respostas, [questaoId]: respostaIdx }
+    }));
   };
 
-  const finalizarSimulado = (respostas, acertos) => {
-    const tempoTotalMinutos = Math.round((Date.now() - simulado.tempo_inicio) / 60000);
+  const finalizarSimulado = () => {
+    const acertos = simulado.questoes_pool.filter(q => simulado.respostas[q.id] === q.correta).length;
+    const tempoTotalMinutos = Math.max(1, Math.round((Date.now() - simulado.tempo_inicio) / 60000));
     const notaFinal = Math.round((acertos / simulado.quantidade) * 100);
 
     const resultado = {
@@ -84,21 +86,21 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
     // Forma funcional: updateSlice faz spread de objetos em partials diretos,
     // o que corromperia um array ({0: ...}); a função substitui o valor inteiro.
     setResultadosHistorico((prev) => [...(prev || []), resultado]);
-
     setEtapa('resultado');
   };
 
-  // ETAPA: Lista de simulados anteriores
+  // ---- ETAPA: Lista / Treino por Matéria ----
   if (etapa === 'lista') {
+    const hist = resultados_historico || [];
     const stats = [
-      { label: 'Simulados realizados', value: (resultados_historico || []).length },
-      { label: 'Melhor nota', value: resultados_historico && resultados_historico.length > 0 ? Math.max(...resultados_historico.map(r => r.nota_final)) + '%' : '-' },
-      { label: 'Média de acertos', value: resultados_historico && resultados_historico.length > 0 ? Math.round(resultados_historico.reduce((a, b) => a + b.nota_final, 0) / resultados_historico.length) + '%' : '-' },
-      { label: 'Tempo total', value: resultados_historico && resultados_historico.length > 0 ? resultados_historico.reduce((a, b) => a + b.tempo_total_minutos, 0) + 'min' : '-' },
+      { label: 'Simulados realizados', value: hist.length },
+      { label: 'Melhor nota', value: hist.length > 0 ? Math.max(...hist.map(r => r.nota_final)) + '%' : '-' },
+      { label: 'Média de acertos', value: hist.length > 0 ? Math.round(hist.reduce((a, b) => a + b.nota_final, 0) / hist.length) + '%' : '-' },
+      { label: 'Tempo total', value: hist.length > 0 ? hist.reduce((a, b) => a + b.tempo_total_minutos, 0) + 'min' : '-' },
     ];
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
           {stats.map((st, i) => (
             <div key={i} style={s.card}>
@@ -108,10 +110,72 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
           ))}
         </div>
 
-        {resultados_historico && resultados_historico.length > 0 && (
+        {/* Hero: Simulado Geral */}
+        <div style={{ ...s.card, display: 'flex', alignItems: 'center', gap: 20, padding: 24, background: `linear-gradient(120deg, ${theme.gradA}12, ${theme.gradB}10), #fff` }}>
+          <div style={{ width: 60, height: 60, borderRadius: 16, background: `linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+            <Icon name="graduation-cap" color="#fff" size={30} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#2c2530' }}>Simulado Geral — OAB 1ª Fase</div>
+            <div style={{ fontSize: 13, color: '#8b8391', marginTop: 4 }}>Questões sortidas de diversos editais, com tempo de prova real.</div>
+          </div>
+          <button
+            data-testid="novo-simulado"
+            onClick={() => abrirConfig(null)}
+            style={{ padding: '13px 22px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: 'pointer', flex: 'none' }}
+          >
+            ▶ Iniciar Simulado
+          </button>
+        </div>
+
+        {/* Treino por Matéria */}
+        <div>
+          <div style={{ textAlign: 'center', margin: '8px 0 4px' }}>
+            <div style={{ fontSize: 21, fontWeight: 700, color: '#2c2530' }}>Treino por Matéria</div>
+            <div style={{ width: 120, height: 3, borderRadius: 2, margin: '8px auto 0', background: `linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})` }} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginTop: 18 }}>
+            {DISCIPLINAS.map((d) => {
+              const qtd = QUESTOES.filter(q => q.disciplina === d.nome).length;
+              const temQuestoes = qtd > 0;
+              return (
+                <div key={d.nome} style={{ ...s.card, display: 'flex', flexDirection: 'column', gap: 12, padding: 22, opacity: temQuestoes ? 1 : 0.6 }}>
+                  <div style={{ width: 52, height: 52, borderRadius: 14, background: `${d.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={DISC_ICONS[d.nome] || 'library'} color={d.cor} size={26} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{d.nome}</div>
+                    <div style={{ fontSize: 12.5, color: '#8b8391', marginTop: 3 }}>
+                      {temQuestoes ? `${qtd} questões focadas e comentadas.` : 'Em breve.'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                    <button
+                      onClick={() => temQuestoes && abrirConfig(d.nome)}
+                      disabled={!temQuestoes}
+                      style={{ flex: 1, padding: '10px 12px', background: temQuestoes ? '#343a46' : '#c3c8d2', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: temQuestoes ? 'pointer' : 'not-allowed' }}
+                    >
+                      ▶ Iniciar Simulado
+                    </button>
+                    <button
+                      onClick={() => go && go('disciplinas')}
+                      style={{ padding: '10px 14px', background: '#fff', color: '#5c5462', border: '1px solid #e3e7ee', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Estudar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Histórico */}
+        {hist.length > 0 && (
           <div style={s.card}>
             <div style={s.sectionTitle}>📊 Histórico de Simulados</div>
-            {resultados_historico.map(r => (
+            {hist.map(r => (
               <div key={r.id} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -120,51 +184,23 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
                       {r.acertos}/{r.quantidade} acertos • {r.tempo_total_minutos}min
                     </div>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: theme.primary }}>
-                    {r.nota_final}%
-                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: theme.primary }}>{r.nota_final}%</div>
                 </div>
               </div>
             ))}
           </div>
         )}
-
-        <button
-          onClick={() => setEtapa('config')}
-          style={{
-            padding: 16,
-            background: theme.primary,
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: 'pointer'
-          }}
-        >
-          + Novo Simulado
-        </button>
       </div>
     );
   }
 
-  // ETAPA: Configuração
+  // ---- ETAPA: Configuração ----
   if (etapa === 'config') {
     return (
       <div>
         <button
-          onClick={() => setEtapa('lista')}
-          style={{
-            marginBottom: 16,
-            padding: 8,
-            border: `1px solid ${theme.primary}`,
-            background: 'transparent',
-            color: theme.primary,
-            borderRadius: 6,
-            fontSize: 12,
-            cursor: 'pointer',
-            fontWeight: 600
-          }}
+          onClick={() => { limparPreSelecao(); setEtapa('lista'); }}
+          style={{ marginBottom: 16, padding: '8px 14px', border: '1px solid #e3e7ee', background: '#fff', color: '#5c5462', borderRadius: 8, fontSize: 12.5, cursor: 'pointer', fontWeight: 600 }}
         >
           ← Voltar
         </button>
@@ -172,175 +208,162 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
           theme={theme}
           s={s}
           onConfirm={iniciarSimulado}
+          disciplinas={disciplinasComQuestoes}
+          disciplinaInicial={configInicial}
         />
       </div>
     );
   }
 
-  // ETAPA: Execução
+  // ---- ETAPA: Execução (todas as questões em uma página, sem feedback) ----
   if (etapa === 'execucao' && simulado) {
-    const questaoAtual = simulado.questoes_pool[simulado.idx_atual];
-    const progresso = Math.round(((simulado.idx_atual + 1) / simulado.quantidade) * 100);
-    const errados = simulado.idx_atual - simulado.acertos;
+    const respondidas = Object.keys(simulado.respostas).length;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, position: 'relative' }}>
+        <div style={{ ...s.card, textAlign: 'center', padding: 20 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#2c2530' }}>
+            {simulado.tipo === 'geral' ? 'Simulado Geral — OAB 1ª Fase' : `Simulado — ${simulado.disciplina}`}
+          </div>
+          <div style={{ fontSize: 13, color: '#8b8391', marginTop: 4 }}>
+            Você selecionou <b style={{ color: '#2c2530' }}>{simulado.quantidade} questões</b>. Gerencie seu tempo e boa sorte!
+          </div>
+        </div>
+
+        {simulado.questoes_pool.map((q, i) => (
+          <div key={q.id} data-testid={`sim-q-${i}`} style={s.card}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 14, borderBottom: '1px solid #eef0f4' }}>
+              <span style={{ background: theme.primarySoft, color: theme.primaryDark, fontWeight: 700, fontSize: 12.5, padding: '5px 14px', borderRadius: 8 }}>
+                Questão {i + 1}
+              </span>
+              <span style={{ fontSize: 11.5, color: '#8b93a1', fontWeight: 600, letterSpacing: '.4px' }}>
+                PROVA-{(q.banca || 'OAB').toUpperCase()}-BR/{q.ano}
+              </span>
+            </div>
+
+            <div style={{ fontSize: 14.5, color: '#2c2530', lineHeight: 1.65, margin: '16px 0' }}>{q.enunciado}</div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {q.alternativas.map((alt, idx) => {
+                const escolhida = simulado.respostas[q.id] === idx;
+                return (
+                  <button
+                    key={idx}
+                    data-testid={`alt-${idx}`}
+                    onClick={() => selecionarResposta(q.id, idx)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '13px 16px',
+                      borderRadius: 10,
+                      border: escolhida ? `1.5px solid ${theme.primary}` : '1px solid #e3e7ee',
+                      background: escolhida ? theme.primarySoft : '#fff',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: 13.5,
+                      color: '#2c2530',
+                      fontFamily: 'inherit',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <div style={{
+                      width: 18, height: 18, borderRadius: '50%', flex: 'none',
+                      border: escolhida ? `5px solid ${theme.primary}` : '2px solid #cfd6e0',
+                      background: '#fff', boxSizing: 'border-box'
+                    }} />
+                    <div>{alt}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {/* Barra fixa inferior */}
+        <div style={{
+          position: 'sticky', bottom: 12, zIndex: 20,
+          background: '#fff', border: '1px solid rgba(0,0,0,.06)', borderRadius: 14,
+          boxShadow: '0 6px 24px rgba(0,0,0,.12)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 20px'
+        }}>
+          <Cronometro tempoTotalMinutos={simulado.tempo_total_minutos} aoTerminar={finalizarSimulado} />
+          <div style={{ fontSize: 13, color: '#8b8391', fontWeight: 600 }}>
+            {respondidas}/{simulado.quantidade} respondidas
+          </div>
+          <button
+            data-testid="finalizar-simulado"
+            onClick={finalizarSimulado}
+            style={{ padding: '11px 24px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 24, fontSize: 13.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+          >
+            Finalizar <Icon name="check" color="#fff" size={16} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- ETAPA: Resultado + revisão ----
+  if (etapa === 'resultado' && simulado) {
+    const hist = resultados_historico || [];
+    const resultado = hist[hist.length - 1];
+    if (!resultado) return null;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Cronometro
-          tempoTotalMinutos={simulado.tempo_total_minutos}
-          aoTerminar={() => finalizarSimulado(simulado.respostas, simulado.acertos)}
-          theme={theme}
-        />
+        <div style={{ ...s.card, textAlign: 'center', padding: 28 }}>
+          <div style={{ fontSize: 56 }}>
+            {resultado.nota_final >= 70 ? '🎉' : resultado.nota_final >= 50 ? '👍' : '💪'}
+          </div>
+          <div style={{ fontSize: 14, color: '#999', marginTop: 8 }}>Nota final</div>
+          <div style={{ fontSize: 48, fontWeight: 700, color: theme.primary }}>{resultado.nota_final}%</div>
+          <div style={{ fontSize: 13, marginTop: 12 }}>{resultado.acertos} acertos em {resultado.quantidade} questões</div>
+          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Tempo total: {resultado.tempo_total_minutos} minutos</div>
+        </div>
 
+        {/* Revisão */}
         <div style={s.card}>
-          <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
-            Questão {simulado.idx_atual + 1} de {simulado.quantidade}
-          </div>
-          <div style={{
-            width: '100%',
-            height: 4,
-            background: '#f0f0f0',
-            borderRadius: 2,
-            marginBottom: 16,
-            overflow: 'hidden'
-          }}>
-            <div style={{
-              width: `${progresso}%`,
-              height: '100%',
-              background: theme.primary,
-              transition: 'width 0.3s'
-            }} />
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            <span style={s.pill('#f3f1f5', '#8b8391')}>{questaoAtual.disciplina}</span>
-            <span style={s.pill('#f3f1f5', '#8b8391')}>{questaoAtual.banca} · {questaoAtual.ano}</span>
-            <span style={s.pill('#faf9fb', '#8b8391')}>{questaoAtual.dificuldade}</span>
-          </div>
-
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, lineHeight: 1.6 }}>
-            {questaoAtual.enunciado}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {questaoAtual.alternativas.map((alt, idx) => {
-              const jaRespondeu = questaoAtual.id in simulado.respostas;
-              const ehCorreta = idx === questaoAtual.correta;
-              const foiEscolhida = simulado.respostas[questaoAtual.id]?.resposta === idx;
-
-              let bg = '#faf9fb', border = 'rgba(0,0,0,.08)';
-              if (jaRespondeu) {
-                if (ehCorreta) {
-                  bg = '#D1FAE5';
-                  border = '#10B981';
-                } else if (foiEscolhida) {
-                  bg = '#FEE2E2';
-                  border = '#EF4444';
-                }
-              }
-
+          <div style={s.sectionTitle}>📝 Revisão do simulado</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+            {simulado.questoes_pool.map((q, i) => {
+              const resposta = simulado.respostas[q.id];
+              const acertou = resposta === q.correta;
+              const naoRespondeu = resposta === undefined;
               return (
-                <button
-                  key={idx}
-                  data-testid={`alt-${idx}`}
-                  onClick={() => !jaRespondeu && responderQuestao(idx)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '12px 14px',
-                    borderRadius: 12,
-                    border: `1.5px solid ${border}`,
-                    background: bg,
-                    cursor: jaRespondeu ? 'default' : 'pointer',
-                    textAlign: 'left',
-                    fontSize: 13.5,
-                    fontFamily: 'inherit',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <div style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: '50%',
-                    background: jaRespondeu && (ehCorreta || foiEscolhida)
-                      ? (ehCorreta ? '#10B981' : '#EF4444')
-                      : theme.primarySoft,
-                    color: jaRespondeu && (ehCorreta || foiEscolhida) ? '#fff' : theme.primaryDark,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    flex: 'none'
-                  }}>
-                    {String.fromCharCode(65 + idx)}
+                <div key={q.id} style={{ padding: 16, borderRadius: 12, border: `1px solid ${acertou ? '#10B98140' : '#EF444440'}`, background: acertou ? '#10B98108' : '#EF444408' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Icon name={acertou ? 'check' : 'circle-x'} color={acertou ? '#10B981' : '#EF4444'} size={18} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#2c2530' }}>Questão {i + 1}</span>
+                    <span style={{ fontSize: 11.5, color: '#8b93a1' }}>{q.disciplina}</span>
                   </div>
-                  <div>{alt}</div>
-                  {jaRespondeu && ehCorreta && <Icon name="check" color="#10B981" size={18} style={{ marginLeft: 'auto' }} />}
-                  {jaRespondeu && foiEscolhida && !ehCorreta && <Icon name="x" color="#EF4444" size={18} style={{ marginLeft: 'auto' }} />}
-                </button>
+                  <div style={{ fontSize: 13, color: '#5c5462', marginTop: 8, lineHeight: 1.55 }}>{q.enunciado}</div>
+                  <div style={{ fontSize: 12.5, marginTop: 10 }}>
+                    {naoRespondeu
+                      ? <span style={{ color: '#F59E0B', fontWeight: 600 }}>Não respondida</span>
+                      : <span style={{ color: acertou ? '#10B981' : '#EF4444', fontWeight: 600 }}>
+                          Sua resposta: {String.fromCharCode(65 + resposta)}
+                        </span>}
+                    {!acertou && (
+                      <span style={{ color: '#10B981', fontWeight: 600, marginLeft: 12 }}>
+                        Gabarito: {String.fromCharCode(65 + q.correta)}
+                      </span>
+                    )}
+                  </div>
+                  {q.explicacao && !acertou && (
+                    <div style={{ fontSize: 12.5, color: '#5c5462', marginTop: 8, padding: 10, background: '#fff', borderRadius: 8, lineHeight: 1.5 }}>
+                      💡 {q.explicacao}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
         </div>
 
-        <div style={s.card}>
-          <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#10B981' }}>{simulado.acertos}</div>
-              <div style={{ fontSize: 12, color: '#8b8391' }}>Acertos</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#EF4444' }}>{errados}</div>
-              <div style={{ fontSize: 12, color: '#8b8391' }}>Erros</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#F59E0B' }}>{simulado.quantidade - simulado.idx_atual - 1}</div>
-              <div style={{ fontSize: 12, color: '#8b8391' }}>Faltam</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ETAPA: Resultado
-  if (etapa === 'resultado' && resultados_historico && resultados_historico.length > 0) {
-    const resultado = resultados_historico[resultados_historico.length - 1];
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ fontSize: 64, marginTop: 20 }}>
-          {resultado.nota_final >= 70 ? '🎉' : resultado.nota_final >= 50 ? '👍' : '💪'}
-        </div>
-
-        <div style={{ ...s.card, width: '100%', textAlign: 'center', padding: 24 }}>
-          <div style={{ fontSize: 14, color: '#999', marginBottom: 8 }}>
-            Nota final
-          </div>
-          <div style={{ fontSize: 48, fontWeight: 700, color: theme.primary }}>
-            {resultado.nota_final}%
-          </div>
-          <div style={{ fontSize: 13, marginTop: 16 }}>
-            {resultado.acertos} acertos em {resultado.quantidade} questões
-          </div>
-          <div style={{ fontSize: 12, color: '#999', marginTop: 8 }}>
-            Tempo total: {resultado.tempo_total_minutos} minutos
-          </div>
-        </div>
-
         <button
-          onClick={() => setEtapa('lista')}
-          style={{
-            padding: 12,
-            background: theme.primary,
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: 'pointer'
-          }}
+          onClick={() => { setSimulado(null); setEtapa('lista'); }}
+          style={{ padding: 13, background: '#343a46', color: 'white', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
         >
           Voltar para simulados
         </button>

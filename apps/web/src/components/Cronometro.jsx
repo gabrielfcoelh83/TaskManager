@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Icon } from '../lib/icons';
 
-export default function Cronometro({ tempoTotalMinutos, aoTerminar, theme }) {
+export default function Cronometro({ tempoTotalMinutos, aoTerminar }) {
   const [tempoRestante, setTempoRestante] = useState(tempoTotalMinutos * 60);
+  const aoTerminarRef = useRef(aoTerminar);
+  aoTerminarRef.current = aoTerminar;
 
   useEffect(() => {
     const interval = setInterval(() => {
       setTempoRestante(prev => {
         if (prev <= 1) {
           clearInterval(interval);
-          aoTerminar();
+          aoTerminarRef.current();
           return 0;
         }
         return prev - 1;
@@ -16,48 +19,23 @@ export default function Cronometro({ tempoTotalMinutos, aoTerminar, theme }) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [aoTerminar]);
+  }, []);
 
-  const minutos = Math.floor(tempoRestante / 60);
+  const horas = Math.floor(tempoRestante / 3600);
+  const minutos = Math.floor((tempoRestante % 3600) / 60);
   const segundos = tempoRestante % 60;
   const pct = (tempoRestante / (tempoTotalMinutos * 60)) * 100;
 
-  let cor = '#10B981'; // verde
-  if (pct <= 25) cor = '#EF4444'; // vermelho
-  else if (pct <= 50) cor = '#F59E0B'; // âmbar
+  let cor = '#2c2530';
+  if (pct <= 25) cor = '#EF4444';
+  else if (pct <= 50) cor = '#F59E0B';
 
   return (
-    <div style={{
-      padding: 16,
-      background: `${cor}10`,
-      border: `2px solid ${cor}`,
-      borderRadius: 12,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 16
-    }}>
-      <div style={{
-        fontSize: 40,
-        fontWeight: 700,
-        fontFamily: 'monospace',
-        color: cor,
-        letterSpacing: '0.1em'
-      }}>
-        {String(minutos).padStart(2, '0')}:{String(segundos).padStart(2, '0')}
-      </div>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4
-      }}>
-        <div style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>
-          Tempo restante
-        </div>
-        <div style={{ fontSize: 11, color: '#999' }}>
-          {pct > 50 ? '✅ No ritmo' : pct > 25 ? '⚠️ Acelera' : '🔴 Pouco tempo'}
-        </div>
-      </div>
+    <div data-testid="cronometro" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Icon name="clock" color={cor} size={18} />
+      <span style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color: cor, letterSpacing: '0.05em' }}>
+        {String(horas).padStart(2, '0')}:{String(minutos).padStart(2, '0')}:{String(segundos).padStart(2, '0')}
+      </span>
     </div>
   );
 }

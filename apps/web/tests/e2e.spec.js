@@ -49,53 +49,42 @@ test.describe('MA Questões E2E', () => {
 
   test('Fluxo de Simulado: config → cronometro → questoes → resultado', async ({ page }) => {
     // 1. Ir para Simulados
-    const simuladosNav = page.locator('[data-testid="nav-simulados"]');
-    if (await simuladosNav.isVisible()) {
-      await simuladosNav.click();
-      await page.waitForTimeout(500);
-    }
+    await page.click('[data-testid="nav-simulados"]');
+    await page.waitForTimeout(300);
 
-    // 2. Novo Simulado
-    const novoButton = page.locator('button:has-text("Novo")').first();
-    if (await novoButton.isVisible()) {
-      await novoButton.click();
-      await page.waitForTimeout(500);
-    }
+    // 2. Iniciar Simulado Geral (hero)
+    await page.click('[data-testid="novo-simulado"]');
+    await page.waitForTimeout(300);
 
-    // 3. Configurar: tipo
-    const tipoRadio = page.locator('input[type="radio"]').first();
-    if (await tipoRadio.isVisible()) {
-      await tipoRadio.check();
-    }
+    // 3. Configurar: quantidade (dropdown "Vamos começar!")
+    await page.selectOption('[data-testid="qtd-questoes"]', '10');
 
-    // 4. Configurar: quantidade (slider)
-    const slider = page.locator('input[type="range"]');
-    if (await slider.isVisible()) {
-      await slider.fill('30');
-    }
+    // 4. Iniciar (botão de confirmação do config)
+    await page.click('button:has-text("Iniciar Simulado")');
+    await page.waitForTimeout(500);
 
-    // 5. Iniciar
-    const iniciarButton = page.locator('button:has-text("Iniciar")').first();
-    if (await iniciarButton.isVisible()) {
-      await iniciarButton.click();
-      await page.waitForTimeout(1000);
-    }
-
-    // 6. Verificar cronometro visível
+    // 5. Cronômetro visível na barra inferior
     const cronometro = page.locator('[data-testid="cronometro"]');
-    if (await cronometro.isVisible()) {
-      expect(cronometro).toContainText(':');
+    await expect(cronometro).toBeVisible();
+    await expect(cronometro).toContainText(':');
+
+    // 6. Responder todas as questões (todas listadas na mesma página)
+    const questoes = await page.locator('[data-testid^="sim-q-"]').count();
+    expect(questoes).toBeGreaterThan(0);
+    for (let i = 0; i < questoes; i++) {
+      await page.click(`[data-testid="sim-q-${i}"] [data-testid="alt-0"]`);
     }
 
-    // 7. Responder algumas questões (primeiras 3)
-    for (let i = 0; i < 3; i++) {
-      await page.waitForTimeout(500);
-      const alternatives = await page.locator('[data-testid^="alt-"]').count();
-      if (alternatives > 0) {
-        const randomOption = Math.floor(Math.random() * alternatives);
-        await page.click(`[data-testid="alt-${randomOption}"]`);
-      }
-    }
+    // 7. Contador de respondidas na barra inferior
+    await expect(page.locator(`text=${questoes}/${questoes} respondidas`)).toBeVisible();
+
+    // 8. Finalizar → tela de resultado
+    await page.click('[data-testid="finalizar-simulado"]');
+    await expect(page.locator('text=Nota final').first()).toBeVisible();
+
+    // 9. Histórico persistido no localStorage
+    const storage = await page.evaluate(() => JSON.parse(localStorage.getItem('ma-questoes-state-v1') || '{}'));
+    expect((storage.resultados_historico || []).length).toBeGreaterThan(0);
   });
 
   test('localStorage persiste após refresh', async ({ page }) => {

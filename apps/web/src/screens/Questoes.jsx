@@ -96,15 +96,15 @@ export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTe
     alternativas = current.alternativas.map((texto, i) => {
       const isCorrect = i === current.correta;
       const isSelected = i === quest.selectedAlt;
-      let bg = '#faf9fb', border = 'rgba(0,0,0,.08)', icon = null, show = false;
+      let bg = '#fff', border = '#e3e7ee', icon = null, show = false, radioBorder = '2px solid #cfd6e0';
       if (answered) {
-        if (isCorrect) { bg = '#D1FAE5'; border = '#10B981'; icon = <Icon name="check" color="#10B981" size={18} />; show = true; }
-        else if (isSelected) { bg = '#FEE2E2'; border = '#EF4444'; icon = <Icon name="x" color="#EF4444" size={18} />; show = true; }
+        if (isCorrect) { bg = '#D1FAE5'; border = '#10B981'; icon = <Icon name="check" color="#10B981" size={18} />; show = true; radioBorder = '5px solid #10B981'; }
+        else if (isSelected) { bg = '#FEE2E2'; border = '#EF4444'; icon = <Icon name="x" color="#EF4444" size={18} />; show = true; radioBorder = '5px solid #EF4444'; }
       }
       return {
-        texto, letter: String.fromCharCode(65 + i), i, showIcon: show, icon,
-        style: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, border: `1.5px solid ${border}`, background: bg, cursor: answered ? 'default' : 'pointer' },
-        letterStyle: { width: 26, height: 26, borderRadius: '50%', background: answered && isCorrect ? '#10B981' : (answered && isSelected ? '#EF4444' : theme.primarySoft), color: answered && (isCorrect || isSelected) ? '#fff' : theme.primaryDark, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 700, flex: 'none' },
+        texto, i, showIcon: show, icon,
+        style: { display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', borderRadius: 10, border: `1px solid ${border}`, background: bg, cursor: answered ? 'default' : 'pointer', transition: 'all 0.15s' },
+        radioStyle: { width: 18, height: 18, borderRadius: '50%', flex: 'none', border: radioBorder, background: '#fff', boxSizing: 'border-box' },
       };
     });
   }
@@ -169,17 +169,21 @@ export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTe
             </div>
             <div style={{ ...s.progressTrack, marginTop: 10 }}><div style={{ width: total ? (position / total * 100) + '%' : '0%', height: '100%', background: `linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})`, borderRadius: 5 }} /></div>
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <span style={s.pill('#f3f1f5', '#8b8391')}>{current.disciplina}</span>
-              <span style={s.pill('#f3f1f5', '#8b8391')}>{current.banca} · {current.ano}</span>
-              <span style={dificuldadePill}>{current.dificuldade}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, paddingBottom: 14, borderBottom: '1px solid #eef0f4' }}>
+              <span style={{ background: theme.primarySoft, color: theme.primaryDark, fontWeight: 700, fontSize: 12.5, padding: '5px 14px', borderRadius: 8 }}>
+                Questão {position}
+              </span>
+              <span style={{ fontSize: 11.5, color: '#8b93a1', fontWeight: 600, letterSpacing: '.4px' }}>
+                PROVA-{(current.banca || 'OAB').toUpperCase()}-BR/{current.ano}
+              </span>
+              <span style={{ ...dificuldadePill, marginLeft: 'auto' }}>{current.dificuldade}</span>
             </div>
-            <div style={{ fontSize: 15.5, color: '#2c2530', lineHeight: 1.55, marginTop: 16 }}>{current.enunciado}</div>
+            <div style={{ fontSize: 15, color: '#2c2530', lineHeight: 1.65, marginTop: 16 }}>{current.enunciado}</div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
               {alternativas.map((alt) => (
                 <div key={alt.i} data-testid={`alt-${alt.i}`} style={alt.style} onClick={() => pickAlt(alt.i)}>
-                  <div style={alt.letterStyle}>{alt.letter}</div>
+                  <div style={alt.radioStyle} />
                   <div style={{ flex: 1, fontSize: 13.5 }}>{alt.texto}</div>
                   {alt.showIcon && alt.icon}
                 </div>
