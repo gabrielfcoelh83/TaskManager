@@ -23,7 +23,7 @@ const DEFAULT_STATE = {
   dashboard: { period: '7' },
   cronograma: { tab: 'semanal', progress: null },
   questoes: { selected: null, quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
-  simulados: { running: {} },
+  simulados: { running: {}, resultados_historico: [] },
   revisoes: { tab: 'todas' },
   desempenho: { period: '7' },
   estatisticas: { range: '30d', disc: 'Todas' },
@@ -31,7 +31,34 @@ const DEFAULT_STATE = {
   anotacoes: { folder: 'Todas', activeId: null, edits: {}, extra: [] },
   favoritos: [],
   configuracoes: { name: 'Maria Laís', email: 'maria.lais@email.com', meta: 20, notif: [true, true, false] },
+  usuarioTentativas: {},
+  resultados_historico: [],
 };
+
+function calcularDesempenho(usuarioTentativas) {
+  const porTopico = {};
+
+  Object.entries(usuarioTentativas).forEach(([qId, hist]) => {
+    const questao = QUESTOES.find(q => q.id === parseInt(qId));
+    if (!questao) return;
+
+    const topico = questao.topico;
+    if (!porTopico[topico]) {
+      porTopico[topico] = { acertos: 0, total: 0 };
+    }
+
+    const tentativas = hist.tentativas || [];
+    porTopico[topico].total += tentativas.length;
+    porTopico[topico].acertos += tentativas.filter(t => t.correta === true).length;
+  });
+
+  return Object.entries(porTopico).map(([topico, stats]) => ({
+    topico,
+    pct: stats.total > 0 ? Math.round((stats.acertos / stats.total) * 100) : 0,
+    status: stats.total === 0 ? 'novo' : (stats.acertos / stats.total) > 0.8 ? 'domina' :
+            (stats.acertos / stats.total) > 0.4 ? 'em-desenvolvimento' : 'necessita'
+  }));
+}
 
 const DATA = { DISCIPLINAS, QUESTOES, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS };
 
@@ -75,7 +102,7 @@ export default function App() {
     };
   });
 
-  const screenProps = { theme, s, data: DATA, go: goTo };
+  const screenProps = { theme, s, data: DATA, go: goTo, usuarioTentativas: state.usuarioTentativas, calcularDesempenho, resultados_historico: state.resultados_historico };
 
   return (
     <div style={s.app}>
@@ -147,10 +174,10 @@ export default function App() {
             <Cronograma {...screenProps} cronograma={state.cronograma} setCronograma={(p) => updateSlice('cronograma', p)} />
           )}
           {state.screen === 'questoes' && (
-            <Questoes {...screenProps} quest={state.questoes} setQuest={(p) => updateSlice('questoes', p)} />
+            <Questoes {...screenProps} quest={state.questoes} setQuest={(p) => updateSlice('questoes', p)} setUsuarioTentativas={(p) => updateSlice('usuarioTentativas', p)} />
           )}
           {state.screen === 'simulados' && (
-            <Simulados {...screenProps} sim={state.simulados} setSim={(p) => updateSlice('simulados', p)} />
+            <Simulados {...screenProps} sim={state.simulados} setSim={(p) => updateSlice('simulados', p)} setResultadosHistorico={(p) => updateSlice('resultados_historico', p)} />
           )}
           {state.screen === 'revisoes' && (
             <Revisoes
@@ -162,7 +189,7 @@ export default function App() {
             />
           )}
           {state.screen === 'desempenho' && (
-            <Desempenho {...screenProps} perf={state.desempenho} setPerf={(p) => updateSlice('desempenho', p)} />
+            <Desempenho {...screenProps} perf={state.desempenho} setPerf={(p) => updateSlice('desempenho', p)} usuarioTentativas={state.usuarioTentativas} calcularDesempenho={calcularDesempenho} />
           )}
           {state.screen === 'estatisticas' && (
             <Estatisticas {...screenProps} filtros={state.estatisticas} setFiltros={(p) => updateSlice('estatisticas', p)} />

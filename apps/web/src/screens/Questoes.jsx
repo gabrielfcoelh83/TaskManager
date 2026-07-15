@@ -1,8 +1,12 @@
+import { useState } from 'react';
 import { Icon } from '../lib/icons';
 
 const DIFICULDADE_COR = { 'Fácil': '#10B981', 'Média': '#F59E0B', 'Difícil': '#EF4444' };
 
-export default function Questoes({ theme, s, data, quest, setQuest }) {
+export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTentativas, usuarioTentativas }) {
+  const [tempoInicio, setTempoInicio] = useState(null);
+  const [feedbackAberto, setFeedbackAberto] = useState(null);
+
   const all = data.QUESTOES || [];
   const disciplinas = Array.from(new Set(all.map((q) => q.disciplina)));
   const selected = quest.selected ?? disciplinas;
@@ -21,21 +25,63 @@ export default function Questoes({ theme, s, data, quest, setQuest }) {
   const startQuiz = () => {
     const pool = all.filter((q) => selected.includes(q.disciplina));
     setQuest({ quiz: pool, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false });
+    setTempoInicio(Date.now());
   };
 
-  const exitQuiz = () => setQuest({ quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false });
+  const exitQuiz = () => {
+    setQuest({ quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false });
+    setTempoInicio(null);
+    setFeedbackAberto(null);
+  };
 
   const pickAlt = (i) => {
     if (quest.selectedAlt !== null) return;
     const q = quest.quiz[quest.idx];
     const correct = i === q.correta;
+
+    const tempoGasto = Math.round((Date.now() - tempoInicio) / 1000);
+
+    const novaTentativa = {
+      data: new Date().toISOString(),
+      resposta: i,
+      correta: correct,
+      tempo_gasto_segundos: tempoGasto,
+      tipo: null,
+      certeza: 50
+    };
+
+    const novasAlt = usuarioTentativas || {};
+    if (!novasAlt[q.id]) {
+      novasAlt[q.id] = { tentativas: [], desempenho: 'necessita' };
+    }
+    novasAlt[q.id].tentativas.push(novaTentativa);
+
+    setUsuarioTentativas(novasAlt);
     setQuest({ selectedAlt: i, certas: quest.certas + (correct ? 1 : 0), erradas: quest.erradas + (correct ? 0 : 1) });
+    setFeedbackAberto(q.id);
+  };
+
+  const avancarProxima = (tipo, certeza) => {
+    const q = quest.quiz[quest.idx];
+    const novasAlt = usuarioTentativas || {};
+    if (novasAlt[q.id]) {
+      const tentativas = novasAlt[q.id].tentativas;
+      tentativas[tentativas.length - 1].tipo = tipo;
+      tentativas[tentativas.length - 1].certeza = certeza;
+    }
+
+    setUsuarioTentativas(novasAlt);
+    setFeedbackAberto(null);
+    nextQuestion();
   };
 
   const nextQuestion = () => {
     const nextIdx = quest.idx + 1;
     if (nextIdx >= quest.quiz.length) setQuest({ done: true });
-    else setQuest({ idx: nextIdx, selectedAlt: null });
+    else {
+      setQuest({ idx: nextIdx, selectedAlt: null });
+      setTempoInicio(Date.now());
+    }
   };
 
   const availablePool = all.filter((q) => selected.includes(q.disciplina));
@@ -132,7 +178,7 @@ export default function Questoes({ theme, s, data, quest, setQuest }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
               {alternativas.map((alt) => (
-                <div key={alt.i} style={alt.style} onClick={() => pickAlt(alt.i)}>
+                <div key={alt.i} data-testid={`alt-${alt.i}`} style={alt.style} onClick={() => pickAlt(alt.i)}>
                   <div style={alt.letterStyle}>{alt.letter}</div>
                   <div style={{ flex: 1, fontSize: 13.5 }}>{alt.texto}</div>
                   {alt.showIcon && alt.icon}
@@ -164,6 +210,62 @@ export default function Questoes({ theme, s, data, quest, setQuest }) {
           </div>
         )}
       </div>
+
+      {feedbackAberto && current && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 16,
+            padding: 32,
+            maxWidth: 400,
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
+              {quest.selectedAlt === current.correta ? 'Acertou! 🎉' : 'Errou 😔'}
+            </div>
+
+            <div style={{ fontSize: 14, color: '#5c5462', marginBottom: 20 }}>
+              Como você chegou nessa resposta?
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                { label: 'Tinha certeza absoluta', tipo: 'acerto-conceitual', certeza: 95 },
+                { label: 'Tive uma boa intuição', tipo: 'acerto-conceitual', certeza: 70 },
+                { label: 'Eliminei as erradas', tipo: 'acerto-chute', certeza: 50 },
+                { label: 'Foi chute', tipo: 'chute', certeza: 30 }
+              ].map(opt => (
+                <button
+                  key={opt.label}
+                  onClick={() => avancarProxima(opt.tipo, opt.certeza)}
+                  style={{
+                    padding: 10,
+                    border: '1px solid rgba(0,0,0,.1)',
+                    borderRadius: 8,
+                    background: '#faf9fb',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    transition: 'all 0.2s',
+                    ':hover': { background: theme.primarySoft }
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
