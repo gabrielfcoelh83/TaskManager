@@ -4,6 +4,7 @@ import { buildStyles } from './lib/theme';
 import { Icon } from './lib/icons';
 import { NAV, PAGE_META, DISCIPLINAS, QUESTOES, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS } from './lib/mockData';
 import { loadState, saveState } from './lib/storage';
+import { diasAteProva } from './lib/metrics';
 
 import Dashboard from './screens/Dashboard';
 import Cronograma from './screens/Cronograma';
@@ -30,7 +31,7 @@ const DEFAULT_STATE = {
   disciplinas: { openNome: null },
   anotacoes: { folder: 'Todas', activeId: null, edits: {}, extra: [] },
   favoritos: [],
-  configuracoes: { name: 'Maria Laís', email: 'maria.lais@email.com', meta: 20, notif: [true, true, false] },
+  configuracoes: { name: 'Maria Laís', email: 'maria.lais@email.com', meta: 20, dataProva: '2027-02-28', notif: [true, true, false] },
   usuarioTentativas: {},
   resultados_historico: [],
 };
@@ -85,6 +86,7 @@ export default function App() {
 
   const meta = PAGE_META[state.screen];
   const notifCount = notifOpen ? 0 : 3;
+  const diasProva = diasAteProva(state.configuracoes);
 
   const navItems = NAV.map((n) => {
     const active = n.key === state.screen;
@@ -155,7 +157,7 @@ export default function App() {
               <Icon name="graduation-cap" color={theme.primary} size={20} />
               <div>
                 <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Faltam</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>128 dias</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{diasProva != null ? `${diasProva} dias` : '—'}</div>
                 <div style={{ fontSize: 10.5, color: '#8b8391' }}>para a prova da OAB</div>
               </div>
             </div>
@@ -168,7 +170,7 @@ export default function App() {
 
         <div style={s.content}>
           {state.screen === 'dashboard' && (
-            <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} />
+            <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} config={state.configuracoes} />
           )}
           {state.screen === 'cronograma' && (
             <Cronograma {...screenProps} cronograma={state.cronograma} setCronograma={(p) => updateSlice('cronograma', p)} />
