@@ -13,6 +13,7 @@ jest.mock('axios', () => ({
 
 process.env.ADMIN_USER_IDS = '9001';
 const { app, pool } = require('../app');
+const { migrate } = require('../migrate');
 
 const DONO = 1001;
 const OUTRO = 1002;
@@ -21,6 +22,7 @@ const ADMIN = 9001;
 const como = (id) => `user:${id}`;
 
 beforeAll(async () => {
+  await migrate(pool); // o teste também exercita as migrations
   for (const [uid, nome] of [[DONO, 'Dono'], [OUTRO, 'Outro'], [ADMIN, 'Admin']]) {
     await pool.query(
       `INSERT INTO users (user_id, name, email) VALUES ($1, $2, $3)

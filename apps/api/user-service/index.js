@@ -1,13 +1,21 @@
 const { app, pool, escutarEventos } = require('./app');
+const { migrate } = require('./migrate');
 
 const PORT = process.env.PORT || 3002;
 
-escutarEventos().catch((err) => console.error('Falha ao escutar eventos:', err.message));
+// Migrations antes de aceitar tráfego. Se falharem, o processo morre: o
+// smoke test não passa, e o rollback devolve a versão anterior. Subir com
+// schema errado seria pior — a aplicação responderia dando erro em cada
+// requisição, e o pipeline consideraria o deploy bem-sucedido.
+migrate(pool)
+  .then(() => {
+    escutarEventos().catch((err) => console.error('Falha ao escutar eventos:', err.message));
 
-app.listen(PORT, () => {
-  console.log(`👥 User Service rodando em http://localhost:${PORT}`);
-  pool.query('SELECT NOW()', (err) => {
-    if (err) console.error('Erro ao conectar ao BD:', err);
-    else console.log('✅ Conectado ao banco de dados');
+    app.listen(PORT, () => {
+      console.log(`👥 User Service rodando em http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ Falha nas migrations:', err.message);
+    process.exit(1);
   });
-});

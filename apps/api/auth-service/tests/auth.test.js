@@ -1,6 +1,7 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const { app, pool, redis } = require('../app');
+const { migrate } = require('../migrate');
 
 // Estes testes falam com um Postgres de verdade — é o ponto de serem de
 // integração. Hash de senha, constraint de unicidade e assinatura do JWT
@@ -9,6 +10,7 @@ const { app, pool, redis } = require('../app');
 const email = () => `teste-${Date.now()}-${Math.random().toString(36).slice(2)}@exemplo.local`;
 
 beforeAll(async () => {
+  await migrate(pool); // o teste também exercita as migrations
   await pool.query('SELECT 1');
 });
 
