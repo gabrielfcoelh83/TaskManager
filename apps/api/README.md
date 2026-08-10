@@ -110,7 +110,6 @@ Cada item abaixo é uma modificação real neste código. Faça na ordem.
 
 Estes são pontos de estudo, não bugs a corrigir cegamente:
 
-- `JWT_SECRET` está hardcoded no compose — mova para `.env` / secrets
 - Não há migrations, só `init.sql` que roda uma vez na criação do volume
 - `GET /users` não tem controle de acesso (qualquer autenticado lista todos)
 - Não há testes
@@ -126,4 +125,3 @@ docker compose logs -f <serviço>   # acompanhar logs
 docker compose ps                  # status
 docker compose exec <serviço> sh   # shell no container
 ```
-# TaskManager
