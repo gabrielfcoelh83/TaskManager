@@ -283,11 +283,14 @@ jobs:
           set -euo pipefail
           cd ~/microservices-project
 
-          echo "Aguardando o gateway responder..."
+          echo "Aguardando a stack responder..."
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:3000/health > /dev/null; then
-              echo "Gateway UP"
-              curl -fsS http://localhost:3000/health/services
+            # Porta 80 = nginx. Passar por ele valida a cadeia inteira:
+            # proxy, gateway e os três serviços por trás.
+            if curl -fsS http://localhost/nginx-health > /dev/null \
+               && curl -fsS http://localhost/health > /dev/null; then
+              echo "nginx e gateway UP"
+              curl -fsS http://localhost/health/services
               echo
               # Só aqui a tag é promovida a "última boa": depois de a stack
               # ter provado que sobe e responde. É o que torna o rollback
@@ -299,7 +302,7 @@ jobs:
             sleep 2
           done
 
-          echo "Gateway não respondeu em 60s. Logs:"
+          echo "A stack não respondeu em 60s. Logs:"
           docker compose -f docker-compose.prod.yml logs --tail=50
           exit 1
           REMOTE
@@ -350,9 +353,9 @@ jobs:
           # Um rollback que não é verificado é só mais um deploy no escuro.
           echo "Verificando a versão revertida..."
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:3000/health > /dev/null; then
+            if curl -fsS http://localhost/health > /dev/null; then
               echo "Rollback concluído: rodando $GOOD"
-              curl -fsS http://localhost:3000/health/services
+              curl -fsS http://localhost/health/services
               echo
               exit 0
             fi
