@@ -72,7 +72,7 @@ services:
       DB_NAME: user_db
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD}
-      AUTH_SERVICE_URL: http://auth-service:3001
+      JWT_SECRET: ${JWT_SECRET}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -94,8 +94,7 @@ services:
       DB_NAME: task_db
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD}
-      AUTH_SERVICE_URL: http://auth-service:3001
-      USER_SERVICE_URL: http://user-service:3002
+      JWT_SECRET: ${JWT_SECRET}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:

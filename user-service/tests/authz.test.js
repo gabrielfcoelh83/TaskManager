@@ -1,17 +1,12 @@
 const request = require('supertest');
 
-// verifyToken chama o auth-service por HTTP. Aqui o alvo é a camada de
-// autorização do user-service, então a identidade é injetada direto: o
-// token "user:42" vira o usuário de id 42. Emitir JWT de verdade só
-// acrescentaria dependência sem exercitar nada a mais deste serviço.
-jest.mock('axios', () => ({
-  post: jest.fn(async (_url, _body, config) => {
-    const id = String(config.headers.authorization).replace('user:', '');
-    return { data: { user: { id: Number(id), email: `u${id}@exemplo.local` } } };
-  }),
-}));
-
+// A verificação do token agora é local, então o teste assina JWT de
+// verdade em vez de simular a resposta do auth-service — passou a
+// exercitar o mesmo caminho que roda em produção.
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'segredo-de-teste';
 process.env.ADMIN_USER_IDS = '9001';
+
+const jwt = require('jsonwebtoken');
 const { app, pool } = require('../app');
 const { migrate } = require('../migrate');
 
@@ -19,7 +14,8 @@ const DONO = 1001;
 const OUTRO = 1002;
 const ADMIN = 9001;
 
-const como = (id) => `user:${id}`;
+const como = (id) =>
+  `Bearer ${jwt.sign({ id, email: `u${id}@exemplo.local` }, process.env.JWT_SECRET)}`;
 
 beforeAll(async () => {
   await migrate(pool); // o teste também exercita as migrations
@@ -95,5 +91,25 @@ describe('GET /users — listagem restrita', () => {
     const res = await request(app).get('/users').set('Authorization', como(ADMIN));
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
+  });
+});
+
+describe('verificação local do token', () => {
+  it('recusa token assinado com outro segredo', async () => {
+    const falso = jwt.sign({ id: DONO, email: 'x@exemplo.local' }, 'segredo-errado');
+    const res = await request(app).get(`/users/${DONO}`).set('Authorization', `Bearer ${falso}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('recusa token expirado', async () => {
+    const expirado = jwt.sign({ id: DONO }, process.env.JWT_SECRET, { expiresIn: '-1s' });
+    const res = await request(app).get(`/users/${DONO}`).set('Authorization', `Bearer ${expirado}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('aceita o token sem o prefixo Bearer', async () => {
+    const cru = jwt.sign({ id: DONO, email: 'x@exemplo.local' }, process.env.JWT_SECRET);
+    const res = await request(app).get(`/users/${DONO}`).set('Authorization', cru);
+    expect(res.status).toBe(200);
   });
 });

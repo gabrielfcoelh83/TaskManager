@@ -1,6 +1,5 @@
 const express = require('express');
 const pg = require('pg');
-const axios = require('axios');
 const { createClient } = require('redis');
 require('dotenv').config();
 
@@ -18,7 +17,6 @@ const pool = new pg.Pool({
   password: process.env.DB_PASSWORD,
 });
 
-const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3001';
 
 const STREAM = 'user-events';
 const GRUPO = 'user-service';
@@ -86,19 +84,36 @@ async function escutarEventos() {
   }
 }
 
-// Middleware para verificar autenticação
-const verifyToken = async (req, res, next) => {
-  const token = req.headers.authorization;
+const jwt = require('jsonwebtoken');
 
-  if (!token) {
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  // Falhar no arranque é melhor que subir aceitando o que não deveria.
+  throw new Error('JWT_SECRET não definido');
+}
+
+// Verificação local da assinatura, sem ida ao auth-service.
+//
+// Antes, toda requisição custava uma chamada HTTP e ficava refém da
+// disponibilidade daquele serviço: auth-service fora do ar derrubava
+// user-service e task-service junto, mesmo saudáveis.
+//
+// O preço é revogação: um token roubado continua válido até expirar, em
+// vez de poder ser invalidado na hora. Com expiração de 7 dias, essa é a
+// janela. Reduzir o prazo, ou manter uma denylist no Redis, são os
+// caminhos para recuperar isso sem voltar à chamada por requisição.
+const verifyToken = (req, res, next) => {
+  const header = req.headers.authorization;
+
+  if (!header) {
     return res.status(401).json({ error: 'Token não fornecido' });
   }
 
+  // O gateway repassa o header como veio do cliente, com ou sem "Bearer ".
+  const token = header.startsWith('Bearer ') ? header.slice(7) : header;
+
   try {
-    const response = await axios.post(`${AUTH_SERVICE_URL}/verify`, {}, {
-      headers: { authorization: token },
-    });
-    req.user = response.data.user;
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (error) {
     res.status(401).json({ error: 'Token inválido' });
