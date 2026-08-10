@@ -31,14 +31,9 @@ jobs:
         with:
           node-version: '18'
 
-      # Este projeto ainda não versiona package-lock.json, e `npm audit`
-      # exige um lockfile. Resolvemos a árvore de dependências sem instalar
-      # nada. Quando os lockfiles forem commitados, troque este passo por
-      # `npm ci` e reative o cache do setup-node.
-      - name: Resolver árvore de dependências
-        working-directory: ${{ matrix.service }}
-        run: npm install --package-lock-only
-
+      # Os package-lock.json são versionados, então `npm audit` roda direto,
+      # sem resolver nem instalar nada. A checagem de lockfile fora de
+      # sincronia com o package.json fica por conta do `npm ci` no build.
       - name: Auditar dependências
         working-directory: ${{ matrix.service }}
         run: npm audit --audit-level=high
