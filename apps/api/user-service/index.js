@@ -1,0 +1,195 @@
+const express = require('express');
+const pg = require('pg');
+const axios = require('axios');
+const { createClient } = require('redis');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3002;
+
+app.use(express.json());
+
+// Configuração do Banco de Dados
+const pool = new pg.Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+});
+
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3001';
+
+const STREAM = 'user-events';
+const GRUPO = 'user-service';
+const CONSUMIDOR = process.env.HOSTNAME || 'worker-1';
+
+// Cria o perfil a partir de um evento da fila
+async function processarEvento(evento) {
+  if (evento.tipo !== 'user.registered') return;
+
+  // ON CONFLICT: se a mesma mensagem for reentregue, não duplica o perfil.
+  // Repetir a operação precisa ser inofensivo — isso se chama idempotência.
+  await pool.query(
+    'INSERT INTO users (user_id, name, email) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING',
+    [Number(evento.id), evento.name, evento.email]
+  );
+  console.log(`👤 Perfil criado para ${evento.email} (user_id=${evento.id})`);
+}
+
+async function escutarEventos() {
+  const redis = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+  redis.on('error', (err) => console.error('Erro no Redis:', err.message));
+  await redis.connect();
+
+  // Registra o grupo de consumo a partir do início da fila ('0').
+  // MKSTREAM cria a fila caso o auth-service ainda não tenha gravado nada.
+  try {
+    await redis.xGroupCreate(STREAM, GRUPO, '0', { MKSTREAM: true });
+    console.log(`🆕 Grupo de consumo "${GRUPO}" criado`);
+  } catch (err) {
+    if (!err.message.includes('BUSYGROUP')) throw err;
+    console.log(`♻️  Grupo "${GRUPO}" já existia, retomando de onde parou`);
+  }
+
+  console.log('👂 Lendo a fila user-events');
+
+  while (true) {
+    try {
+      // '>' = só o que este grupo ainda não recebeu.
+      // BLOCK: espera até 5s por novidade em vez de ficar perguntando sem parar.
+      const resposta = await redis.xReadGroup(
+        GRUPO,
+        CONSUMIDOR,
+        [{ key: STREAM, id: '>' }],
+        { COUNT: 10, BLOCK: 5000 }
+      );
+
+      if (!resposta) continue; // nada chegou nesses 5s
+
+      for (const fila of resposta) {
+        for (const { id: msgId, message } of fila.messages) {
+          try {
+            await processarEvento(message);
+            // Só confirma depois de gravar. Se travar antes daqui,
+            // a mensagem segue pendente e é reentregue.
+            await redis.xAck(STREAM, GRUPO, msgId);
+          } catch (err) {
+            console.error(`Falha ao processar ${msgId}:`, err.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao ler a fila:', err.message);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
+
+escutarEventos().catch((err) => console.error('Falha ao escutar eventos:', err.message));
+
+// Middleware para verificar autenticação
+const verifyToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+
+  if (!token) {
+    return res.status(401).json({ error: 'Token não fornecido' });
+  }
+
+  try {
+    const response = await axios.post(`${AUTH_SERVICE_URL}/verify`, {}, {
+      headers: { authorization: token },
+    });
+    req.user = response.data.user;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Token inválido' });
+  }
+};
+
+// Health Check
+app.get('/health', (req, res) => {
+  res.json({ status: 'User Service is running', timestamp: new Date().toISOString() });
+});
+
+// Obter perfil do usuário
+app.get('/users/:id', verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, user_id, name, email, profile_data, created_at FROM users WHERE user_id = $1',
+      [req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao buscar usuário:', error);
+    res.status(500).json({ error: 'Erro ao buscar usuário' });
+  }
+});
+
+// Criar perfil de usuário (chamado após registro)
+app.post('/users', verifyToken, async (req, res) => {
+  const { name, email } = req.body;
+  const userId = req.user.id;
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Nome e email são obrigatórios' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO users (user_id, name, email) VALUES ($1, $2, $3) RETURNING *',
+      [userId, name, email]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao criar perfil:', error);
+    res.status(500).json({ error: 'Erro ao criar perfil' });
+  }
+});
+
+// Atualizar perfil de usuário
+app.put('/users/:id', verifyToken, async (req, res) => {
+  const { name, email, profile_data } = req.body;
+
+  try {
+    const result = await pool.query(
+      'UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), profile_data = COALESCE($3, profile_data), updated_at = NOW() WHERE user_id = $4 RETURNING *',
+      [name, email, profile_data ? JSON.stringify(profile_data) : null, req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao atualizar usuário:', error);
+    res.status(500).json({ error: 'Erro ao atualizar usuário' });
+  }
+});
+
+// Listar todos os usuários (apenas para admin)
+app.get('/users', verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, user_id, name, email, created_at FROM users LIMIT 100');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao listar usuários:', error);
+    res.status(500).json({ error: 'Erro ao listar usuários' });
+  }
+});
+
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log(`👥 User Service rodando em http://localhost:${PORT}`);
+  pool.query('SELECT NOW()', (err) => {
+    if (err) console.error('Erro ao conectar ao BD:', err);
+    else console.log('✅ Conectado ao banco de dados');
+  });
+});
