@@ -1,0 +1,12 @@
+# node_modules da máquina local não pode entrar na imagem: sobrescreveria
+# o que o `npm ci` instalou, podendo trazer binários da arquitetura errada.
+node_modules
+npm-debug.log*
+
+# Credenciais nunca vão para dentro da imagem.
+.env
+.env.*
+
+# Não têm utilidade dentro do container.
+Dockerfile
+.dockerignore
