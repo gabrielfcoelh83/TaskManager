@@ -24,9 +24,7 @@ app.use((req, res, next) => {
 
 // Health Check
 app.get('/health', (req, res) => {
-  // FALHA DELIBERADA — teste controlado do rollback automático.
-  // Este commit será revertido logo em seguida.
-  res.status(500).json({ status: 'falha proposital para testar rollback' });
+  res.json({ status: 'Gateway is running', timestamp: new Date().toISOString() });
 });
 
 // ===== ROTAS DE AUTENTICAÇÃO =====
