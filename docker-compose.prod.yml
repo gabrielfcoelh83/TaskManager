@@ -3,7 +3,7 @@
 # As variáveis vêm do .env gerado na VM a cada deploy (nunca commitado).
 services:
   api-gateway:
-    image: ${DOCKERHUB_USERNAME}/microservices-gateway:${IMAGE_TAG}
+    image: ${REGISTRY}/${GHCR_OWNER}/microservices-gateway:${IMAGE_TAG}
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -21,7 +21,7 @@ services:
       - microservices-network
 
   auth-service:
-    image: ${DOCKERHUB_USERNAME}/microservices-auth-service:${IMAGE_TAG}
+    image: ${REGISTRY}/${GHCR_OWNER}/microservices-auth-service:${IMAGE_TAG}
     restart: unless-stopped
     environment:
       PORT: 3001
@@ -41,7 +41,7 @@ services:
       - microservices-network
 
   user-service:
-    image: ${DOCKERHUB_USERNAME}/microservices-user-service:${IMAGE_TAG}
+    image: ${REGISTRY}/${GHCR_OWNER}/microservices-user-service:${IMAGE_TAG}
     restart: unless-stopped
     environment:
       PORT: 3002
@@ -61,7 +61,7 @@ services:
       - microservices-network
 
   task-service:
-    image: ${DOCKERHUB_USERNAME}/microservices-task-service:${IMAGE_TAG}
+    image: ${REGISTRY}/${GHCR_OWNER}/microservices-task-service:${IMAGE_TAG}
     restart: unless-stopped
     environment:
       PORT: 3003
