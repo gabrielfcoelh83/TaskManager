@@ -110,89 +110,94 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Preparar chave SSH
+        env:
+          KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # Secret em base64 (linha única): imune a quebras de linha
+          # perdidas na colagem, que é o que quebrou o deploy anterior.
+          echo "$KEY_B64" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Falha cedo e com mensagem clara se a chave não for válida.
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null \
+            || { echo "::error::SSH_PRIVATE_KEY_B64 inválido ou truncado"; exit 1; }
+          ssh-keyscan -p "${SSH_PORT:-22}" -H "$SSH_HOST" \
+            >> ~/.ssh/known_hosts 2>/dev/null
+
       - name: Enviar arquivos de orquestração
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          source: docker-compose.prod.yml,init.sql
-          target: ~/microservices-project
-          overwrite: true
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
+            "mkdir -p ~/microservices-project"
+          scp -i ~/.ssh/deploy_key -P "${SSH_PORT:-22}" \
+            docker-compose.prod.yml init.sql \
+            "$SSH_USER@$SSH_HOST:~/microservices-project/"
 
       - name: Subir a stack
-        uses: appleboy/ssh-action@v1.2.0
         env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           IMAGE_TAG: ${{ github.sha }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DOCKERHUB_USERNAME,IMAGE_TAG,DB_PASSWORD,JWT_SECRET
-          script_stop: true
-          script: |
-            set -euo pipefail
-            cd ~/microservices-project
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
+            DOCKERHUB_USERNAME="$DOCKERHUB_USERNAME" \
+            IMAGE_TAG="$IMAGE_TAG" \
+            DB_PASSWORD="$DB_PASSWORD" \
+            JWT_SECRET="$JWT_SECRET" \
+            'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd ~/microservices-project
 
-            # O .env fica só na VM, gerado a cada deploy a partir dos
-            # secrets do GitHub. Nunca é commitado.
-            umask 077
-            cat > .env <<EOF
-            DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
-            IMAGE_TAG=${IMAGE_TAG}
-            DB_PASSWORD=${DB_PASSWORD}
-            JWT_SECRET=${JWT_SECRET}
-            EOF
+          # O .env fica só na VM, gerado a cada deploy a partir dos
+          # secrets do GitHub. Nunca é commitado.
+          umask 077
+          cat > .env <<EOF
+          DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+          IMAGE_TAG=${IMAGE_TAG}
+          DB_PASSWORD=${DB_PASSWORD}
+          JWT_SECRET=${JWT_SECRET}
+          EOF
 
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            docker image prune -f
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          docker image prune -f
+          REMOTE
 
       - name: Smoke test
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          script_stop: true
-          script: |
-            set -euo pipefail
-            echo "Aguardando o gateway responder..."
-            for i in $(seq 1 30); do
-              if curl -fsS http://localhost:3000/health > /dev/null; then
-                echo "Gateway UP"
-                curl -fsS http://localhost:3000/health/services
-                exit 0
-              fi
-              sleep 2
-            done
-
-            echo "Gateway não respondeu em 60s. Logs:"
-            cd ~/microservices-project
-            docker compose -f docker-compose.prod.yml logs --tail=50
-            exit 1
-
-      - name: Rollback para a imagem anterior
-        if: failure()
-        uses: appleboy/ssh-action@v1.2.0
         env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          IMAGE_TAG: ${{ github.event.before }}
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DOCKERHUB_USERNAME,IMAGE_TAG
-          script: |
-            set -euo pipefail
-            cd ~/microservices-project
-            echo "Deploy falhou — voltando para ${IMAGE_TAG}"
-            sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env
-            docker compose -f docker-compose.prod.yml up -d
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "Aguardando o gateway responder..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health > /dev/null; then
+              echo "Gateway UP"
+              curl -fsS http://localhost:3000/health/services
+              echo
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Gateway não respondeu em 60s. Logs:"
+          cd ~/microservices-project
+          docker compose -f docker-compose.prod.yml logs --tail=50
+          exit 1
+          REMOTE
