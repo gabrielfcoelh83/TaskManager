@@ -5,6 +5,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# O compose monta estes caminhos; se o Docker os criar, vêm como root.
+mkdir -p nginx/certs certbot/www certbot/conf
+
 if [ -f nginx/certs/fullchain.pem ] && [ -f nginx/certs/privkey.pem ]; then
   echo "Certificado já existe em nginx/certs — nada a fazer."
   exit 0
