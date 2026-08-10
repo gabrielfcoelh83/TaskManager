@@ -191,10 +191,66 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+          cd ~/microservices-project
+
           echo "Aguardando o gateway responder..."
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:3000/health > /dev/null; then
               echo "Gateway UP"
+              curl -fsS http://localhost:3000/health/services
+              echo
+              # Só aqui a tag é promovida a "última boa": depois de a stack
+              # ter provado que sobe e responde. É o que torna o rollback
+              # confiável — .last_good_tag nunca aponta para algo não testado.
+              grep '^IMAGE_TAG=' .env | cut -d= -f2 > .last_good_tag
+              echo "Tag registrada como última boa: $(cat .last_good_tag)"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Gateway não respondeu em 60s. Logs:"
+          docker compose -f docker-compose.prod.yml logs --tail=50
+          exit 1
+          REMOTE
+
+      - name: Rollback para a última versão boa
+        if: failure()
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd ~/microservices-project
+
+          if [ ! -f .last_good_tag ]; then
+            echo "::error::Nenhum deploy bom registrado — não há para onde voltar."
+            echo "A stack pode ter ficado num estado intermediário; verifique manualmente:"
+            docker compose -f docker-compose.prod.yml ps || true
+            exit 1
+          fi
+
+          GOOD=$(cat .last_good_tag)
+          ATUAL=$(grep '^IMAGE_TAG=' .env | cut -d= -f2 || echo "")
+
+          if [ "$GOOD" = "$ATUAL" ]; then
+            echo "A stack já roda a última versão boa ($GOOD); nada a reverter."
+            exit 0
+          fi
+
+          echo "Revertendo de $ATUAL para $GOOD"
+          sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$GOOD/" .env
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+          # Um rollback que não é verificado é só mais um deploy no escuro.
+          echo "Verificando a versão revertida..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health > /dev/null; then
+              echo "Rollback concluído: rodando $GOOD"
               curl -fsS http://localhost:3000/health/services
               echo
               exit 0
@@ -202,8 +258,7 @@ jobs:
             sleep 2
           done
 
-          echo "Gateway não respondeu em 60s. Logs:"
-          cd ~/microservices-project
+          echo "::error::O rollback para $GOOD também não respondeu. Logs:"
           docker compose -f docker-compose.prod.yml logs --tail=50
           exit 1
           REMOTE
