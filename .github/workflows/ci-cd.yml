@@ -220,8 +220,8 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
             "mkdir -p ~/microservices-project"
-          scp -i ~/.ssh/deploy_key -P "${SSH_PORT:-22}" \
-            docker-compose.prod.yml init.sql \
+          scp -i ~/.ssh/deploy_key -P "${SSH_PORT:-22}" -r \
+            docker-compose.prod.yml init.sql nginx scripts \
             "$SSH_USER@$SSH_HOST:~/microservices-project/"
 
       - name: Subir a stack
@@ -267,6 +267,11 @@ jobs:
           echo "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
           trap 'docker logout "$REGISTRY" > /dev/null 2>&1 || true' EXIT
 
+          # O nginx não inicia um bloco 443 sem certificado no lugar.
+          # Só cria se não houver — nunca sobrescreve o do Let's Encrypt.
+          chmod +x scripts/*.sh
+          DOMINIO=163-176-30-179.sslip.io ./scripts/bootstrap-cert.sh
+
           docker compose -f docker-compose.prod.yml pull
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
           docker image prune -f
@@ -285,12 +290,14 @@ jobs:
 
           echo "Aguardando a stack responder..."
           for i in $(seq 1 30); do
-            # Porta 80 = nginx. Passar por ele valida a cadeia inteira:
-            # proxy, gateway e os três serviços por trás.
-            if curl -fsS http://localhost/nginx-health > /dev/null \
-               && curl -fsS http://localhost/health > /dev/null; then
-              echo "nginx e gateway UP"
-              curl -fsS http://localhost/health/services
+            # HTTPS, não HTTP: a porta 80 só redireciona, e um 301 faria
+            # o curl sair com sucesso sem ter verificado coisa alguma.
+            # -k porque o certificado pode ainda ser o autoassinado; aqui
+            # o alvo é a cadeia proxy -> gateway -> serviços, não a PKI.
+            if curl -fsSk https://localhost/nginx-health > /dev/null \
+               && curl -fsSk https://localhost/health > /dev/null; then
+              echo "nginx (TLS) e gateway UP"
+              curl -fsSk https://localhost/health/services
               echo
               # Só aqui a tag é promovida a "última boa": depois de a stack
               # ter provado que sobe e responde. É o que torna o rollback
@@ -353,9 +360,9 @@ jobs:
           # Um rollback que não é verificado é só mais um deploy no escuro.
           echo "Verificando a versão revertida..."
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost/health > /dev/null; then
+            if curl -fsSk https://localhost/health > /dev/null; then
               echo "Rollback concluído: rodando $GOOD"
-              curl -fsS http://localhost/health/services
+              curl -fsSk https://localhost/health/services
               echo
               exit 0
             fi
