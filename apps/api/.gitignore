@@ -2,3 +2,9 @@ node_modules/
 .env
 npm-debug.log*
 .last_good_tag
+
+# Certificados e chaves privadas nunca são versionados.
+# Gerados na VM pelo scripts/bootstrap-cert.sh e pelo certbot.
+nginx/certs/
+certbot/conf/
+certbot/www/
