@@ -270,6 +270,9 @@ jobs:
           # O nginx não inicia um bloco 443 sem certificado no lugar.
           # Só cria se não houver — nunca sobrescreve o do Let's Encrypt.
           chmod +x scripts/*.sh
+          # Criados aqui para pertencerem ao usuário; se o Docker os criar
+          # ao montar, vêm como root e o backup falha ao escrever.
+          mkdir -p backups
           DOMINIO=163-176-30-179.sslip.io ./scripts/bootstrap-cert.sh
 
           docker compose -f docker-compose.prod.yml pull

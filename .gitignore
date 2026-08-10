@@ -8,3 +8,4 @@ npm-debug.log*
 nginx/certs/
 certbot/conf/
 certbot/www/
+backups/

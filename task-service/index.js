@@ -137,11 +137,17 @@ app.delete('/tasks/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`✅ Task Service rodando em http://localhost:${PORT}`);
-  pool.query('SELECT NOW()', (err) => {
-    if (err) console.error('Erro ao conectar ao BD:', err);
-    else console.log('✅ Conectado ao banco de dados');
+const { migrate } = require('./migrate');
+
+// Migrations antes de aceitar tráfego. Se falharem, o processo morre: o
+// smoke test não passa, e o rollback devolve a versão anterior.
+migrate(pool)
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`✅ Task Service rodando em http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ Falha nas migrations:', err.message);
+    process.exit(1);
   });
-});
