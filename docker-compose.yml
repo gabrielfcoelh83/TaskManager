@@ -28,8 +28,8 @@ services:
       DB_PORT: 5432
       DB_NAME: auth_db
       DB_USER: postgres
-      DB_PASSWORD: postgres123
-      JWT_SECRET: seu_jwt_secret_muito_seguro_aqui
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -50,7 +50,7 @@ services:
       DB_PORT: 5432
       DB_NAME: user_db
       DB_USER: postgres
-      DB_PASSWORD: postgres123
+      DB_PASSWORD: ${DB_PASSWORD}
       AUTH_SERVICE_URL: http://auth-service:3001
       REDIS_URL: redis://redis:6379
     depends_on:
@@ -72,7 +72,7 @@ services:
       DB_PORT: 5432
       DB_NAME: task_db
       DB_USER: postgres
-      DB_PASSWORD: postgres123
+      DB_PASSWORD: ${DB_PASSWORD}
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
       REDIS_URL: redis://redis:6379
@@ -87,11 +87,11 @@ services:
   # Banco de Dados PostgreSQL
   postgres:
     image: postgres:15-alpine
-    ports:
-      - "5432:5432"
+    # Sem `ports:` — acessivel apenas pela rede interna do compose.
+    # Para acesso local use: docker compose exec postgres psql -U postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: microservices_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -107,8 +107,7 @@ services:
   # Redis para Cache e Message Broker
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Sem `ports:` — acessivel apenas pela rede interna do compose.
     networks:
       - microservices-network
 
