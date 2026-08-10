@@ -11,6 +11,11 @@ services:
       - ./nginx/proxy.conf:/etc/nginx/snippets/proxy.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
       - ./certbot/www:/var/www/certbot:ro
+    # Recarrega a cada 6h para adotar o certificado renovado sem reiniciar:
+    # o nginx só relê os arquivos de certificado em um reload.
+    command: >
+      sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      nginx -g "daemon off;"'
     depends_on:
       - api-gateway
     networks:
@@ -97,6 +102,31 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    networks:
+      - microservices-network
+
+  # Renovação automática do certificado. Let's Encrypt dura 90 dias; sem
+  # isto o HTTPS quebra sozinho. Verifica a cada 12h e só age quando falta
+  # menos de 30 dias, que é o comportamento padrão do `certbot renew`.
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+      - ./nginx/certs:/certs
+    entrypoint: >
+      sh -c 'trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        cp /etc/letsencrypt/live/163-176-30-179.sslip.io/fullchain.pem /certs/fullchain.pem 2>/dev/null || true;
+        cp /etc/letsencrypt/live/163-176-30-179.sslip.io/privkey.pem /certs/privkey.pem 2>/dev/null || true;
+        chmod 644 /certs/fullchain.pem 2>/dev/null || true;
+        chmod 600 /certs/privkey.pem 2>/dev/null || true;
+        sleep 12h & wait $${!};
+      done'
+    depends_on:
+      - nginx
     networks:
       - microservices-network
 
