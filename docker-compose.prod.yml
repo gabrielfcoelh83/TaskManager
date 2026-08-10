@@ -1,0 +1,115 @@
+# Compose de produção: consome as imagens publicadas no Docker Hub pelo
+# workflow de CI/CD, em vez de buildar a partir do código-fonte.
+# As variáveis vêm do .env gerado na VM a cada deploy (nunca commitado).
+services:
+  api-gateway:
+    image: ${DOCKERHUB_USERNAME}/microservices-gateway:${IMAGE_TAG}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:3001
+      USER_SERVICE_URL: http://user-service:3002
+      TASK_SERVICE_URL: http://task-service:3003
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - auth-service
+      - user-service
+      - task-service
+      - redis
+    networks:
+      - microservices-network
+
+  auth-service:
+    image: ${DOCKERHUB_USERNAME}/microservices-auth-service:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - microservices-network
+
+  user-service:
+    image: ${DOCKERHUB_USERNAME}/microservices-user-service:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: user_db
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - microservices-network
+
+  task-service:
+    image: ${DOCKERHUB_USERNAME}/microservices-task-service:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      PORT: 3003
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: task_db
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      USER_SERVICE_URL: http://user-service:3002
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - microservices-network
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    # Sem `ports:` — o banco só é alcançável pela rede interna do compose.
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: microservices_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - microservices-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Sem `ports:` — idem.
+    networks:
+      - microservices-network
+
+volumes:
+  postgres_data:
+
+networks:
+  microservices-network:
+    driver: bridge
