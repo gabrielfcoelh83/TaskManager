@@ -126,3 +126,4 @@ docker compose logs -f <serviço>   # acompanhar logs
 docker compose ps                  # status
 docker compose exec <serviço> sh   # shell no container
 ```
+# TaskManager
