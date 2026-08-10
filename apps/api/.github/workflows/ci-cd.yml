@@ -3,8 +3,19 @@ name: CI/CD
 on:
   push:
     branches: [main]
+    # Mudança só de documentação não justifica rebuildar as imagens nem
+    # reiniciar a stack em produção. workflow_dispatch continua disponível
+    # para forçar uma execução quando necessário.
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
 
 env:
