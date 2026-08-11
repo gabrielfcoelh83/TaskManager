@@ -10,3 +10,5 @@ npm-debug.log*
 # Não têm utilidade dentro do container.
 Dockerfile
 .dockerignore
+importador/
+*.json.bak
