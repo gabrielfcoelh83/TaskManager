@@ -294,6 +294,7 @@ jobs:
           cd ~/microservices-project
 
           echo "Aguardando a stack responder..."
+          ESTADO=""
           for i in $(seq 1 30); do
             # HTTPS, não HTTP: a porta 80 só redireciona, e um 301 faria
             # o curl sair com sucesso sem ter verificado coisa alguma.
@@ -301,20 +302,34 @@ jobs:
             # o alvo é a cadeia proxy -> gateway -> serviços, não a PKI.
             if curl -fsSk https://localhost/nginx-health > /dev/null \
                && curl -fsSk https://localhost/health > /dev/null; then
-              echo "nginx (TLS) e gateway UP"
-              curl -fsSk https://localhost/health/services
-              echo
-              # Só aqui a tag é promovida a "última boa": depois de a stack
-              # ter provado que sobe e responde. É o que torna o rollback
-              # confiável — .last_good_tag nunca aponta para algo não testado.
-              grep '^IMAGE_TAG=' .env | cut -d= -f2 > .last_good_tag
-              echo "Tag registrada como última boa: $(cat .last_good_tag)"
-              exit 0
+              # /health é só o gateway falando de si mesmo, e
+              # /health/services responde 200 mesmo com serviço DOWN — o
+              # corpo é que carrega o veredito. Sem olhar para ele, um
+              # serviço em crash loop passaria por deploy bem-sucedido.
+              ESTADO=$(curl -fsSk https://localhost/health/services || echo "")
+              if [ -n "$ESTADO" ] && ! printf '%s' "$ESTADO" | grep -q 'DOWN'; then
+                echo "nginx (TLS), gateway e serviços UP"
+                printf '%s\n' "$ESTADO"
+                # Só aqui a tag é promovida a "última boa": depois de a stack
+                # ter provado que sobe e responde. É o que torna o rollback
+                # confiável — .last_good_tag nunca aponta para algo não testado.
+                grep '^IMAGE_TAG=' .env | cut -d= -f2 > .last_good_tag
+                echo "Tag registrada como última boa: $(cat .last_good_tag)"
+                exit 0
+              fi
             fi
             sleep 2
           done
 
-          echo "A stack não respondeu em 60s. Logs:"
+          # Serviço que nunca subiu é indistinguível de serviço lento até o
+          # tempo acabar; por isso a espera vale para os dois casos e o
+          # diagnóstico só aparece aqui.
+          echo "::error::A stack não ficou saudável em 60s."
+          if [ -n "$ESTADO" ]; then
+            echo "Último /health/services: $ESTADO"
+          else
+            echo "nginx ou gateway não responderam."
+          fi
           docker compose -f docker-compose.prod.yml logs --tail=50
           exit 1
           REMOTE
@@ -362,19 +377,27 @@ jobs:
           docker compose -f docker-compose.prod.yml pull
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-          # Um rollback que não é verificado é só mais um deploy no escuro.
+          # Um rollback que não é verificado é só mais um deploy no escuro —
+          # e o critério tem de ser o mesmo do smoke test, senão a versão
+          # "boa" é aprovada por uma régua mais frouxa que a que reprovou a nova.
           echo "Verificando a versão revertida..."
+          ESTADO=""
           for i in $(seq 1 30); do
             if curl -fsSk https://localhost/health > /dev/null; then
-              echo "Rollback concluído: rodando $GOOD"
-              curl -fsSk https://localhost/health/services
-              echo
-              exit 0
+              ESTADO=$(curl -fsSk https://localhost/health/services || echo "")
+              if [ -n "$ESTADO" ] && ! printf '%s' "$ESTADO" | grep -q 'DOWN'; then
+                echo "Rollback concluído: rodando $GOOD"
+                printf '%s\n' "$ESTADO"
+                exit 0
+              fi
             fi
             sleep 2
           done
 
-          echo "::error::O rollback para $GOOD também não respondeu. Logs:"
+          if [ -n "$ESTADO" ]; then
+            echo "Último /health/services: $ESTADO"
+          fi
+          echo "::error::O rollback para $GOOD também não ficou saudável. Logs:"
           docker compose -f docker-compose.prod.yml logs --tail=50
           exit 1
           REMOTE
