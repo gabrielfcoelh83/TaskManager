@@ -4,7 +4,9 @@ set -eu
 
 DESTINO="${DESTINO:-/backups}"
 RETENCAO_DIAS="${RETENCAO_DIAS:-7}"
-BANCOS="${BANCOS:-auth_db user_db task_db}"
+# Banco novo entra aqui. Esquecer esta linha ao criar um serviço é uma
+# falha silenciosa: o backup segue "passando", só que sem os dados novos.
+BANCOS="${BANCOS:-auth_db user_db task_db estudo_db}"
 ts=$(date +%Y%m%d-%H%M%S)
 
 for db in $BANCOS; do
