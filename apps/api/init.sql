@@ -7,3 +7,4 @@ CREATE DATABASE auth_db;
 CREATE DATABASE user_db;
 CREATE DATABASE task_db;
 CREATE DATABASE estudo_db;
+CREATE DATABASE questoes_db;

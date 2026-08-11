@@ -18,6 +18,7 @@ const services = {
   user: process.env.USER_SERVICE_URL || 'http://localhost:3002',
   task: process.env.TASK_SERVICE_URL || 'http://localhost:3003',
   estudo: process.env.ESTUDO_SERVICE_URL || 'http://localhost:3004',
+  questoes: process.env.QUESTOES_SERVICE_URL || 'http://localhost:3005',
 };
 
 // Middleware para logging de requisições
@@ -160,6 +161,56 @@ app.get('/api/tentativas', async (req, res) => {
   } catch (error) {
     res.status(error.response?.status || 500).json({
       error: error.response?.data?.error || 'Erro ao buscar tentativas',
+    });
+  }
+});
+
+// ===== ROTAS DE QUESTÕES (acervo da OAB) =====
+//
+// Só leitura. A carga do acervo é feita por `carregar.js`, rodado à mão
+// contra o banco — não existe rota de escrita, e é de propósito: um POST
+// que aceite questão nova seria o caminho para um gabarito não oficial
+// entrar no acervo, que é exatamente o que este serviço evita.
+app.get('/api/questoes', async (req, res) => {
+  try {
+    const response = await axios.get(`${services.questoes}/questoes`, {
+      headers: { authorization: req.headers.authorization },
+      // Sem isto, `disciplina`, `limite` e `aleatorio` somem no caminho e o
+      // serviço recebe a rota nua — o mesmo detalhe de /api/tentativas.
+      params: req.query,
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar questões',
+    });
+  }
+});
+
+// Antes de /api/questoes/:id — o Express casa na ordem, e invertido
+// "disciplinas" cairia no :id.
+app.get('/api/questoes/disciplinas', async (req, res) => {
+  try {
+    const response = await axios.get(`${services.questoes}/questoes/disciplinas`, {
+      headers: { authorization: req.headers.authorization },
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar disciplinas',
+    });
+  }
+});
+
+app.get('/api/questoes/:id', async (req, res) => {
+  try {
+    const response = await axios.get(`${services.questoes}/questoes/${req.params.id}`, {
+      headers: { authorization: req.headers.authorization },
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar questão',
     });
   }
 });
