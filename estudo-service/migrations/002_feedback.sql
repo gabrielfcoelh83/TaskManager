@@ -19,6 +19,22 @@ ALTER TABLE tentativas ADD COLUMN IF NOT EXISTS certeza SMALLINT;
 -- propósito — ele é do produto e muda quando a tela de feedback ganhar
 -- opção. Um CHECK ali significaria uma migration por mudança de rótulo.
 -- Ver ADR-001 em /shared/context/adr/.
-ALTER TABLE tentativas DROP CONSTRAINT IF EXISTS certeza_percentual;
-ALTER TABLE tentativas ADD CONSTRAINT certeza_percentual
-  CHECK (certeza IS NULL OR (certeza >= 0 AND certeza <= 100));
+--
+-- Criada por DO block, e não por `DROP IF EXISTS` + `ADD`, porque o par
+-- DROP/ADD deixa a tabela sem constraint nenhuma se o ADD falhar. Dentro do
+-- migrate.js isso seria revertido pela transação, mas este projeto aplica
+-- SQL à mão de vez em quando (a §5 do briefing obriga a criar banco assim),
+-- e nesse caminho não há transação para desfazer. Acrescentar `BEGIN;` aqui
+-- não serve: o migrate.js já abre uma, e um COMMIT no meio do arquivo
+-- fecharia a transação dele antes da hora.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'certeza_percentual'
+       AND conrelid = 'tentativas'::regclass
+  ) THEN
+    ALTER TABLE tentativas ADD CONSTRAINT certeza_percentual
+      CHECK (certeza IS NULL OR (certeza >= 0 AND certeza <= 100));
+  END IF;
+END $$;

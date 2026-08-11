@@ -328,6 +328,80 @@ describe('PATCH /tentativas/:id — feedback', () => {
     expect(res.status).toBe(400);
   });
 
+  it('devolve 400 para id numérico que estoura o bigint, e não 500', async () => {
+    const res = await request(app)
+      .patch('/tentativas/99999999999999999999999')
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute' });
+
+    // "Só dígitos" não basta: este id passa pela regex ingênua e morre no
+    // Postgres com 22003 (out of range for type bigint), que vira 500 e
+    // enche o log de stack trace a cada varredura de id.
+    expect(res.status).toBe(400);
+  });
+
+  it('ignora user_id e id forjados no corpo do PATCH', async () => {
+    const meu = await criar(DONO, 'q-minha');
+    const alheio = await criar(OUTRO, 'q-nao-minha');
+
+    const res = await request(app)
+      .patch(`/tentativas/${meu}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'invasor', certeza: 99, user_id: OUTRO, id: alheio, correta: false });
+
+    expect(res.status).toBe(200);
+
+    // A regra inegociável do projeto vale em toda rota que a aplica, não só
+    // no POST: o corpo não escolhe nem o dono nem a linha.
+    const { rows } = await pool.query(
+      'SELECT id, user_id, tipo FROM tentativas WHERE id = ANY($1) ORDER BY id',
+      [[meu, alheio]]
+    );
+    const porId = Object.fromEntries(rows.map((r) => [String(r.id), r]));
+
+    expect(porId[String(meu)].tipo).toBe('invasor');
+    expect(porId[String(meu)].user_id).toBe(DONO);
+    expect(porId[String(alheio)].tipo).toBeNull(); // a linha alheia não foi tocada
+  });
+
+  it('aceita certeza = 0, porque ausência não é o mesmo que zero', async () => {
+    const id = await criar(DONO, 'q-zero');
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ certeza: 0 });
+
+    // Um `if (corpo.certeza)` ingênuo trataria 0 como "não informado" e
+    // devolveria 400. Zero é uma resposta legítima: certeza nenhuma.
+    expect(res.status).toBe(200);
+    expect(res.body.certeza).toBe(0);
+  });
+
+  it('mede o tamanho de tipo depois do trim, que é o que vai ser gravado', async () => {
+    const id = await criar(DONO, 'q-espacos');
+    const quarenta = 'x'.repeat(40);
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: `   ${quarenta}   ` });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tipo).toBe(quarenta);
+  });
+
+  it('o banco recusa certeza fora da faixa mesmo por fora da rota', async () => {
+    const id = await criar(DONO, 'q-constraint');
+
+    // A validação da aplicação sempre responde primeiro, então o CHECK
+    // nunca é exercitado pela rota. Ele existe para o dia em que alguém
+    // escrever na tabela por outro caminho — e isso precisa ser verdade.
+    await expect(
+      pool.query('UPDATE tentativas SET certeza = 200 WHERE id = $1', [id])
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
   it('devolve 404 para tentativa inexistente', async () => {
     const res = await request(app)
       .patch('/tentativas/999999999')

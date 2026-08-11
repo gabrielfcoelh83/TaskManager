@@ -154,7 +154,12 @@ app.patch('/tentativas/:id', verifyToken, async (req, res) => {
   // O id vai para uma coluna BIGSERIAL; um "abc" aqui viraria erro de
   // sintaxe do Postgres e sairia como 500, culpando o servidor por um
   // pedido malformado do cliente.
-  if (!/^\d+$/.test(req.params.id)) {
+  //
+  // O teto de 18 dígitos é a segunda metade da mesma guarda: "só dígitos"
+  // não impede 99999999999999999999999, que estoura o bigint e produz
+  // exatamente o mesmo 500 pelo mesmo motivo. 18 dígitos cabem sempre
+  // (bigint vai até 9.22e18), e um id real nunca chega perto disso.
+  if (!/^\d{1,18}$/.test(req.params.id)) {
     return res.status(400).json({ error: 'id deve ser um inteiro' });
   }
 
@@ -173,7 +178,10 @@ app.patch('/tentativas/:id', verifyToken, async (req, res) => {
     if (typeof corpo.tipo !== 'string' || corpo.tipo.trim() === '') {
       return res.status(400).json({ error: 'tipo deve ser um texto não vazio ou null' });
     }
-    if (corpo.tipo.length > TIPO_MAX) {
+    // Mede o que vai ser gravado, e não o que chegou: quem grava usa
+    // `.trim()`, então validar antes recusaria um valor de 40 caracteres
+    // por causa de espaço de sobra, com uma mensagem que engana.
+    if (corpo.tipo.trim().length > TIPO_MAX) {
       return res.status(400).json({ error: `tipo deve ter no máximo ${TIPO_MAX} caracteres` });
     }
   }
