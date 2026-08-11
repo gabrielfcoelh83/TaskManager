@@ -1,10 +1,42 @@
 import { test, expect } from '@playwright/test';
 
+// As tentativas passaram a morar no servidor, então a suíte deixou de rodar
+// só com o navegador: precisa da plataforma no ar (docker compose up) e de um
+// usuário cadastrado. É o mesmo princípio dos testes de integração do backend
+// — mockar a API esconderia justamente o que estas telas agora dependem.
+const EMAIL = process.env.E2E_EMAIL || 'maria.lais@email.com';
+const SENHA = process.env.E2E_SENHA || 'senha-de-teste-123';
+
+// Lê direto da API, com o token que o app guardou: mede o que está gravado,
+// não o que a tela desenhou.
+function contarTentativas(page) {
+  return page.evaluate(async () => {
+    const token = localStorage.getItem('ma-questoes-token-v1');
+    if (!token) return -1;
+    const res = await fetch('/api/tentativas?limite=1000', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return -1;
+    return (await res.json()).length;
+  });
+}
+
+async function entrar(page) {
+  await page.goto('/');
+  // Limpar antes de logar: a sessão não pode vazar de um teste para o outro.
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+
+  await page.fill('input[type="email"]', EMAIL);
+  await page.fill('input[type="password"]', SENHA);
+  await page.click('button[type="submit"]');
+
+  await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+}
+
 test.describe('MA Questões E2E', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    // Clear localStorage before each test
-    await page.evaluate(() => localStorage.clear());
+    await entrar(page);
   });
 
   test('Fluxo completo: selecionar → responder → desempenho', async ({ page }) => {
@@ -116,6 +148,50 @@ test.describe('MA Questões E2E', () => {
       const stateAfter = JSON.parse(storageAfter);
       expect(stateAfter).toBeDefined();
     }
+  });
+
+  // O critério de pronto da fatia 1, tal como escrito em "Arquitetura da
+  // fusão": responder, apagar o localStorage, recarregar, e a tentativa
+  // continuar lá. Apagar o localStorage derruba a sessão junto, então o
+  // teste loga de novo — é justamente isso que prova que o dado veio do
+  // servidor, e não de algum resto guardado no navegador.
+  test('a tentativa sobrevive ao localStorage apagado', async ({ page }) => {
+    // Contagem relativa, não absoluta: os outros testes desta suíte também
+    // respondem questões e deixam linhas no banco do mesmo usuário. Afirmar
+    // "existe pelo menos uma tentativa" passaria mesmo que este clique não
+    // gravasse nada.
+    const inicial = await contarTentativas(page);
+
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('button:has-text("Gerar quiz")');
+
+    const alternativa = page.locator('[data-testid="alt-0"]');
+    await expect(alternativa).toBeVisible();
+    await alternativa.click();
+
+    // poll em vez de timeout fixo: espera o POST que a tela disparou, sem
+    // inventar um número de milissegundos que ora sobra, ora falta.
+    await expect.poll(() => contarTentativas(page)).toBe(inicial + 1);
+
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+
+    // Sem token o app volta para o login: nada do histórico sobrou local.
+    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await page.fill('input[type="email"]', EMAIL);
+    await page.fill('input[type="password"]', SENHA);
+    await page.click('button[type="submit"]');
+    await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+
+    // A tentativa continua lá, e veio do servidor.
+    expect(await contarTentativas(page)).toBe(inicial + 1);
+
+    // A outra metade da afirmação: o estado salvo no navegador não carrega
+    // mais tentativa nenhuma, então a sobrevivência não pode ser mérito dele.
+    const salvoLocal = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('ma-questoes-state-v1') || '{}')
+    );
+    expect(salvoLocal.usuarioTentativas).toBeUndefined();
   });
 
   test('Gerar questões com IA (API)', async ({ page }) => {

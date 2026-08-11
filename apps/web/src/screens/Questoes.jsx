@@ -3,7 +3,7 @@ import { Icon } from '../lib/icons';
 
 const DIFICULDADE_COR = { 'Fácil': '#10B981', 'Média': '#F59E0B', 'Difícil': '#EF4444' };
 
-export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTentativas, usuarioTentativas }) {
+export default function Questoes({ theme, s, data, quest, setQuest, registrar, anotarFeedback }) {
   const [tempoInicio, setTempoInicio] = useState(null);
   const [feedbackAberto, setFeedbackAberto] = useState(null);
 
@@ -39,38 +39,22 @@ export default function Questoes({ theme, s, data, quest, setQuest, setUsuarioTe
     const q = quest.quiz[quest.idx];
     const correct = i === q.correta;
 
-    const tempoGasto = Math.round((Date.now() - tempoInicio) / 1000);
+    // tempoInicio é null se o quiz foi retomado sem passar por startQuiz;
+    // mandar um tempo inventado seria pior que mandar nulo.
+    const tempoGasto = tempoInicio === null ? null : Math.round((Date.now() - tempoInicio) / 1000);
 
-    const novaTentativa = {
-      data: new Date().toISOString(),
-      resposta: i,
-      correta: correct,
-      tempo_gasto_segundos: tempoGasto,
-      tipo: null,
-      certeza: 50
-    };
-
-    const novasAlt = usuarioTentativas || {};
-    if (!novasAlt[q.id]) {
-      novasAlt[q.id] = { tentativas: [], desempenho: 'necessita' };
-    }
-    novasAlt[q.id].tentativas.push(novaTentativa);
-
-    setUsuarioTentativas(novasAlt);
+    // A alternativa marca a tela imediatamente — travar a interface até o
+    // servidor responder faria o quiz parecer quebrado numa rede ruim. O
+    // registro vai junto e, se falhar, o App avisa em vez de fingir que salvou.
     setQuest({ selectedAlt: i, certas: quest.certas + (correct ? 1 : 0), erradas: quest.erradas + (correct ? 0 : 1) });
     setFeedbackAberto(q.id);
+
+    registrar({ questaoId: q.id, correta: correct, alternativa: i, tempoSeg: tempoGasto });
   };
 
   const avancarProxima = (tipo, certeza) => {
     const q = quest.quiz[quest.idx];
-    const novasAlt = usuarioTentativas || {};
-    if (novasAlt[q.id]) {
-      const tentativas = novasAlt[q.id].tentativas;
-      tentativas[tentativas.length - 1].tipo = tipo;
-      tentativas[tentativas.length - 1].certeza = certeza;
-    }
-
-    setUsuarioTentativas(novasAlt);
+    anotarFeedback(q.id, tipo, certeza);
     setFeedbackAberto(null);
     nextQuestion();
   };
