@@ -341,6 +341,32 @@ jobs:
               if [ -n "$ESTADO" ] && ! printf '%s' "$ESTADO" | grep -q 'DOWN'; then
                 echo "nginx (TLS), gateway e serviços UP"
                 printf '%s\n' "$ESTADO"
+
+                # CORS é a única parte desta stack que só quebra no
+                # navegador: o curl não liga para o cabeçalho, e
+                # /health/services responde igual com ele certo, errado ou
+                # ausente. Foi por isso que uma config inerte sobreviveu a
+                # todos os deploys — nada nunca olhou. Aqui ela vira porta:
+                # deploy que derruba o front não vira "última versão boa".
+                CABECALHOS=$(curl -fsSk -o /dev/null -D - \
+                  -H 'Origin: https://ml-direito.vercel.app' \
+                  https://localhost/health || echo "")
+                ORIGENS=$(printf '%s' "$CABECALHOS" \
+                  | grep -ci '^access-control-allow-origin:' || true)
+                CERTA=$(printf '%s' "$CABECALHOS" \
+                  | grep -ci '^access-control-allow-origin: *https://ml-direito.vercel.app' || true)
+
+                # Duas checagens, não uma: zero significa front sem acesso,
+                # e dois significa front igualmente sem acesso — o navegador
+                # recusa resposta com o cabeçalho repetido. Só "exatamente
+                # um, e o certo" serve.
+                if [ "$ORIGENS" != "1" ] || [ "$CERTA" != "1" ]; then
+                  echo "::error::CORS quebrado: $ORIGENS cabeçalhos Allow-Origin, $CERTA com a origem esperada."
+                  printf '%s\n' "$CABECALHOS" | grep -i '^access-control' || echo "(nenhum)"
+                  exit 1
+                fi
+                echo "CORS: um Access-Control-Allow-Origin, com a origem do front"
+
                 # Só aqui a tag é promovida a "última boa": depois de a stack
                 # ter provado que sobe e responde. É o que torna o rollback
                 # confiável — .last_good_tag nunca aponta para algo não testado.
