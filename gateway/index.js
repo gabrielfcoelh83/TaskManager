@@ -165,6 +165,24 @@ app.get('/api/tentativas', async (req, res) => {
   }
 });
 
+// O feedback ("foi chute?") chega depois da tentativa já gravada, então é
+// PATCH sobre uma linha existente e não parte do POST. O `:id` entra na URL
+// do serviço; o corpo segue como veio.
+app.patch('/api/tentativas/:id', async (req, res) => {
+  try {
+    const response = await axios.patch(
+      `${services.estudo}/tentativas/${encodeURIComponent(req.params.id)}`,
+      req.body,
+      { headers: { authorization: req.headers.authorization } }
+    );
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao atualizar tentativa',
+    });
+  }
+});
+
 // ===== ROTAS DE QUESTÕES (acervo da OAB) =====
 //
 // Só leitura. A carga do acervo é feita por `carregar.js`, rodado à mão

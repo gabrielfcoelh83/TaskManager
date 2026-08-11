@@ -76,7 +76,7 @@ app.post('/tentativas', verifyToken, async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO tentativas (user_id, questao_id, correta, alternativa, tempo_seg)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, questao_id, correta, alternativa, tempo_seg, respondida_em`,
+       RETURNING id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em`,
       [
         req.user.id,
         String(questao_id),
@@ -124,7 +124,7 @@ app.get('/tentativas', verifyToken, async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT id, questao_id, correta, alternativa, tempo_seg, respondida_em
+      `SELECT id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em
          FROM tentativas
         WHERE user_id = $1
           AND ($2::timestamptz IS NULL OR respondida_em >= $2)
@@ -136,6 +136,88 @@ app.get('/tentativas', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Erro ao listar tentativas:', error);
     res.status(500).json({ error: 'Erro ao listar tentativas' });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────
+// PATCH /tentativas/:id — feedback de como a pessoa chegou na resposta
+// ───────────────────────────────────────────────────────────────
+//
+// Rota separada do POST porque o feedback é coletado depois: a tentativa é
+// gravada no instante em que a alternativa é marcada, e só então o app
+// pergunta "foi chute ou tinha certeza?". Mandar os dois juntos exigiria
+// adiar a gravação até a segunda pergunta — e quem fechasse a aba no meio
+// perderia a resposta inteira, em vez de só o feedback. Ver ADR-001.
+const TIPO_MAX = 40;
+
+app.patch('/tentativas/:id', verifyToken, async (req, res) => {
+  // O id vai para uma coluna BIGSERIAL; um "abc" aqui viraria erro de
+  // sintaxe do Postgres e sairia como 500, culpando o servidor por um
+  // pedido malformado do cliente.
+  if (!/^\d+$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'id deve ser um inteiro' });
+  }
+
+  const corpo = req.body || {};
+  const temTipo = Object.prototype.hasOwnProperty.call(corpo, 'tipo');
+  const temCerteza = Object.prototype.hasOwnProperty.call(corpo, 'certeza');
+
+  // Ausência não é valor: corpo sem nenhum dos dois campos é engano do
+  // cliente, e responder 200 a um UPDATE que não mudou nada esconderia o
+  // engano. Mandar `null` explícito, esse sim, limpa o campo.
+  if (!temTipo && !temCerteza) {
+    return res.status(400).json({ error: 'informe tipo e/ou certeza' });
+  }
+
+  if (temTipo && corpo.tipo !== null) {
+    if (typeof corpo.tipo !== 'string' || corpo.tipo.trim() === '') {
+      return res.status(400).json({ error: 'tipo deve ser um texto não vazio ou null' });
+    }
+    if (corpo.tipo.length > TIPO_MAX) {
+      return res.status(400).json({ error: `tipo deve ter no máximo ${TIPO_MAX} caracteres` });
+    }
+  }
+
+  if (temCerteza && corpo.certeza !== null) {
+    if (!Number.isInteger(corpo.certeza) || corpo.certeza < 0 || corpo.certeza > 100) {
+      return res.status(400).json({ error: 'certeza deve ser um inteiro entre 0 e 100' });
+    }
+  }
+
+  // SET montado a partir do que veio, para que atualizar só `certeza` não
+  // apague o `tipo` já gravado — semântica de PATCH, não de PUT.
+  const campos = [];
+  const valores = [];
+  if (temTipo) {
+    valores.push(corpo.tipo === null ? null : corpo.tipo.trim());
+    campos.push(`tipo = $${valores.length}`);
+  }
+  if (temCerteza) {
+    valores.push(corpo.certeza);
+    campos.push(`certeza = $${valores.length}`);
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE tentativas
+          SET ${campos.join(', ')}
+        WHERE id = $${valores.length + 1}
+          AND user_id = $${valores.length + 2}
+       RETURNING id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em`,
+      [...valores, req.params.id, req.user.id]
+    );
+
+    // 404 e não 403 para tentativa de outro dono: o mesmo critério do
+    // user-service. Um 403 confirmaria que aquele id existe, que é
+    // justamente o que quem sonda a base quer descobrir.
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Tentativa não encontrada' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Erro ao atualizar feedback da tentativa:', error);
+    res.status(500).json({ error: 'Erro ao atualizar tentativa' });
   }
 });
 

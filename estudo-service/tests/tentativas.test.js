@@ -173,3 +173,174 @@ describe('GET /tentativas — leitura por dono', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('PATCH /tentativas/:id — feedback', () => {
+  // Cada teste precisa de uma linha própria: o PATCH altera estado, e
+  // reaproveitar a mesma tentativa faria um teste depender da ordem do outro.
+  const criar = async (userId = DONO, questaoId = 'q-feedback') => {
+    const { rows } = await pool.query(
+      `INSERT INTO tentativas (user_id, questao_id, correta) VALUES ($1, $2, true)
+       RETURNING id`,
+      [userId, questaoId]
+    );
+    return rows[0].id;
+  };
+
+  beforeAll(limpar);
+
+  it('grava tipo e certeza na tentativa do próprio usuário', async () => {
+    const id = await criar();
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute', certeza: 30 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tipo).toBe('chute');
+    expect(res.body.certeza).toBe(30);
+
+    // O 200 é o que a rota diz; isto é o que o banco tem.
+    const { rows } = await pool.query('SELECT tipo, certeza FROM tentativas WHERE id = $1', [id]);
+    expect(rows[0]).toEqual({ tipo: 'chute', certeza: 30 });
+  });
+
+  it('devolve tipo e certeza no GET seguinte — é o ponto da fatia', async () => {
+    const id = await criar(DONO, 'q-sobrevive');
+    await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'acerto-conceitual', certeza: 95 });
+
+    const res = await request(app).get('/tentativas').set('Authorization', como(DONO));
+    const linha = res.body.find((t) => t.questao_id === 'q-sobrevive');
+
+    expect(linha.tipo).toBe('acerto-conceitual');
+    expect(linha.certeza).toBe(95);
+  });
+
+  it('atualiza só o campo enviado, sem apagar o outro', async () => {
+    const id = await criar(DONO, 'q-parcial');
+    await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute', certeza: 30 });
+
+    // PATCH, não PUT: mandar certeza sozinha não pode zerar o tipo.
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ certeza: 60 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.certeza).toBe(60);
+    expect(res.body.tipo).toBe('chute');
+  });
+
+  it('não deixa alterar tentativa de outro dono, e responde 404 em vez de 403', async () => {
+    const id = await criar(OUTRO, 'q-alheia');
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute', certeza: 30 });
+
+    // 403 confirmaria que esse id existe. 404 não diz nada.
+    expect(res.status).toBe(404);
+
+    // E o mais importante: nada foi escrito na linha alheia.
+    const { rows } = await pool.query('SELECT tipo FROM tentativas WHERE id = $1', [id]);
+    expect(rows[0].tipo).toBeNull();
+  });
+
+  it('recusa corpo sem tipo nem certeza em vez de fingir que atualizou', async () => {
+    const id = await criar(DONO, 'q-vazio');
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+
+  it('aceita null explícito para limpar o campo', async () => {
+    const id = await criar(DONO, 'q-limpa');
+    await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute' });
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tipo).toBeNull();
+  });
+
+  it('recusa certeza fora de 0..100', async () => {
+    const id = await criar(DONO, 'q-faixa');
+
+    for (const certeza of [-1, 101]) {
+      const res = await request(app)
+        .patch(`/tentativas/${id}`)
+        .set('Authorization', como(DONO))
+        .send({ certeza });
+      expect(res.status).toBe(400);
+    }
+
+    const { rows } = await pool.query('SELECT certeza FROM tentativas WHERE id = $1', [id]);
+    expect(rows[0].certeza).toBeNull();
+  });
+
+  it('recusa certeza não inteira', async () => {
+    const id = await criar(DONO, 'q-decimal');
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ certeza: 30.5 });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('recusa tipo vazio e tipo longo demais', async () => {
+    const id = await criar(DONO, 'q-tipo-ruim');
+
+    for (const tipo of ['', '   ', 'x'.repeat(41)]) {
+      const res = await request(app)
+        .patch(`/tentativas/${id}`)
+        .set('Authorization', como(DONO))
+        .send({ tipo });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('devolve 400 para id não numérico em vez de 500', async () => {
+    const res = await request(app)
+      .patch('/tentativas/abc')
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute' });
+
+    // Sem a validação do :id, o Postgres reclamaria da sintaxe e o erro
+    // sairia como 500 — culpando o servidor por um pedido malformado.
+    expect(res.status).toBe(400);
+  });
+
+  it('devolve 404 para tentativa inexistente', async () => {
+    const res = await request(app)
+      .patch('/tentativas/999999999')
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('exige autenticação', async () => {
+    const id = await criar(DONO, 'q-sem-token');
+    const res = await request(app).patch(`/tentativas/${id}`).send({ tipo: 'chute' });
+
+    expect(res.status).toBe(401);
+  });
+});
