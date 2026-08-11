@@ -1,12 +1,15 @@
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
 const PORT = 3000;
 
-app.use(cors());
+// Sem `cors()` aqui de propósito: em produção o gateway não tem porta
+// publicada, então tudo chega pelo nginx, e é lá que a lista de origens
+// autorizadas mora. Dois responsáveis pelo mesmo cabeçalho não somam
+// segurança — somam literalmente o cabeçalho, e o navegador recusa a
+// resposta com dois Access-Control-Allow-Origin. Ver nginx/proxy.conf.
 app.use(express.json());
 
 // URLs dos serviços
