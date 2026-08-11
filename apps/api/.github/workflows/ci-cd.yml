@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, auth-service, user-service, task-service]
+        service: [gateway, auth-service, user-service, task-service, estudo-service]
 
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +79,8 @@ jobs:
             db: auth_db
           - service: user-service
             db: user_db
+          - service: estudo-service
+            db: estudo_db
 
     # Bancos de verdade, não mocks: hash de senha, constraint de unicidade
     # e autorização por dono são justamente onde mock esconderia o erro.
@@ -149,7 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, auth-service, user-service, task-service]
+        service: [gateway, auth-service, user-service, task-service, estudo-service]
 
     steps:
       - uses: actions/checkout@v4
