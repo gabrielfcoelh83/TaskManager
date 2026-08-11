@@ -14,6 +14,7 @@ const services = {
   auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
   user: process.env.USER_SERVICE_URL || 'http://localhost:3002',
   task: process.env.TASK_SERVICE_URL || 'http://localhost:3003',
+  estudo: process.env.ESTUDO_SERVICE_URL || 'http://localhost:3004',
 };
 
 // Middleware para logging de requisições
@@ -126,6 +127,36 @@ app.delete('/api/tasks/:id', async (req, res) => {
   } catch (error) {
     res.status(error.response?.status || 500).json({
       error: error.response?.data?.error || 'Erro ao deletar tarefa',
+    });
+  }
+});
+
+// ===== ROTAS DE ESTUDO (MA Questões) =====
+app.post('/api/tentativas', async (req, res) => {
+  try {
+    const response = await axios.post(`${services.estudo}/tentativas`, req.body, {
+      headers: { authorization: req.headers.authorization },
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao registrar tentativa',
+    });
+  }
+});
+
+app.get('/api/tentativas', async (req, res) => {
+  try {
+    const response = await axios.get(`${services.estudo}/tentativas`, {
+      headers: { authorization: req.headers.authorization },
+      // A query string precisa ser repassada explicitamente: `desde` e
+      // `limite` vivem nela, e sem isto o serviço receberia a rota nua.
+      params: req.query,
+    });
+    res.json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar tentativas',
     });
   }
 });
