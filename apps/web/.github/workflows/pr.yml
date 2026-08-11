@@ -30,9 +30,19 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      - name: Subir o backend (auth + estudo + gateway)
+        run: ./scripts/e2e-backend.sh
+
+      # ⚠️ continue-on-error deixa este passo incapaz de reprovar o check. Quem
+      # de fato barra o PR é o job test-e2e do ci.yml. Mantido como estava para
+      # não mudar a política de merge junto com a mudança de infra.
       - name: Run E2E tests
         run: npm run test:e2e
         continue-on-error: true
+
+      - name: Derrubar o backend
+        if: always()
+        run: ./scripts/e2e-backend.sh down
 
       - name: Security audit
         run: npm audit --audit-level=moderate || true

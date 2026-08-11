@@ -14,8 +14,10 @@ import react from '@vitejs/plugin-react';
 // Em produção não há ambiguidade: as primeiras são relativas à Vercel e as
 // segundas usam a URL absoluta de VITE_API_URL. É só em dev, com tudo em
 // localhost, que os prefixos se cruzam — daí a divisão explícita abaixo.
-const GATEWAY = 'http://localhost:3000';
-const DEV_API = 'http://localhost:3100';
+// A porta do gateway é configurável só para dar saída quando a 3000 já está
+// ocupada na máquina — o backend de e2e lê a mesma variável.
+const GATEWAY = `http://localhost:${process.env.GATEWAY_PORT || 3000}`;
+const DEV_API = `http://localhost:${process.env.DEV_API_PORT || 3100}`;
 
 export default defineConfig({
   plugins: [react()],

@@ -1,0 +1,102 @@
+# Backend real para os testes e2e.
+#
+# Desde que as tentativas passaram a viver no servidor, a suíte deixou de rodar
+# só com o navegador: ela exerce login de verdade e gravação de verdade. Mockar
+# a API aqui esconderia exatamente o que esses testes existem para verificar.
+#
+# As imagens são as mesmas publicadas pelo pipeline da plataforma (repo
+# TaskManager) e são públicas no ghcr, então não há login nem token envolvido.
+#
+# Roda igual no CI e na sua máquina:
+#   docker compose -f docker-compose.e2e.yml up -d --wait
+#   ./scripts/e2e-backend.sh          # sobe e já cria o usuário
+#
+# `latest` e não um SHA fixo: é intencional. O front passa a quebrar no CI
+# quando o backend muda de contrato, que é a hora certa de descobrir. O preço é
+# que um build vermelho aqui pode ter origem no outro repo.
+name: ma-questoes-e2e
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: e2e
+    volumes:
+      - ./tests/e2e-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # Sem `ports:` — só a rede interna precisa alcançar o banco.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    # O auth-service publica `user.registered` aqui. Ele tolera o Redis fora do
+    # ar (o xAdd está protegido), mas sem o container o log enche de erro e
+    # esconde qualquer falha de verdade.
+
+  auth-service:
+    image: ghcr.io/gabrielfcoelh83/microservices-auth-service:latest
+    environment:
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: postgres
+      DB_PASSWORD: e2e
+      # O MESMO segredo do estudo-service, obrigatoriamente: quem emite o token
+      # é este serviço e quem o valida é o outro. Segredos diferentes dariam
+      # 401 em toda tentativa, com o login funcionando — confusão garantida.
+      JWT_SECRET: segredo-de-e2e
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  estudo-service:
+    image: ghcr.io/gabrielfcoelh83/microservices-estudo-service:latest
+    environment:
+      PORT: 3004
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: estudo_db
+      DB_USER: postgres
+      DB_PASSWORD: e2e
+      JWT_SECRET: segredo-de-e2e
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api-gateway:
+    image: ghcr.io/gabrielfcoelh83/microservices-gateway:latest
+    # A única porta publicada: é onde o proxy do Vite vai bater.
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:3001
+      ESTUDO_SERVICE_URL: http://estudo-service:3004
+      REDIS_URL: redis://redis:6379
+      # user-service e task-service ficam de fora: o front não usa rota
+      # nenhuma deles. Aparecem como DOWN em /health/services, e só.
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      estudo-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

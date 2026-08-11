@@ -44,11 +44,28 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      # A suíte exerce login e gravação de verdade desde que as tentativas
+      # saíram do localStorage. Sobe o mesmo backend que roda em produção, a
+      # partir das imagens publicadas pelo pipeline da plataforma — mockar aqui
+      # esconderia justamente o que estes testes verificam.
+      - name: Subir o backend (auth + estudo + gateway)
+        run: ./scripts/e2e-backend.sh
+
       # O dev server (porta 5173) é iniciado pelo webServer do playwright.config.js
       - name: Run E2E tests
         run: npm run test:e2e
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      # Sem isto, uma falha de teste vira "elemento não encontrado" sem pista
+      # de que a causa foi um serviço que não subiu.
+      - name: Logs do backend (só quando falha)
+        if: failure()
+        run: docker compose -f docker-compose.e2e.yml logs --tail=50
+
+      - name: Derrubar o backend
+        if: always()
+        run: ./scripts/e2e-backend.sh down
 
       - name: Run API tests
         run: |
