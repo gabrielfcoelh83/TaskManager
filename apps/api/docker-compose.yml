@@ -29,6 +29,7 @@ services:
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
       TASK_SERVICE_URL: http://task-service:3003
+      ESTUDO_SERVICE_URL: http://estudo-service:3004
       REDIS_URL: redis://redis:6379
     depends_on:
       - auth-service
@@ -150,6 +151,26 @@ services:
         sh /backup.sh || echo "backup falhou";
         sleep 24h & wait $${!};
       done'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
+  estudo-service:
+    build: ./estudo-service
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: estudo_db
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    # Sem REDIS_URL: este serviço ainda não publica nem consome evento.
+    # Declarar dependência que não existe atrasa o arranque sem motivo.
     depends_on:
       postgres:
         condition: service_healthy
