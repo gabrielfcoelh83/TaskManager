@@ -5,7 +5,9 @@ import { Icon } from './lib/icons';
 import { NAV, PAGE_META, DISCIPLINAS, QUESTOES, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS } from './lib/mockData';
 import { loadState, saveState } from './lib/storage';
 import { diasAteProva } from './lib/metrics';
+import { getToken, logout, listarTentativas, registrarTentativa } from './lib/api';
 
+import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';
 import Cronograma from './screens/Cronograma';
 import Questoes from './screens/Questoes';
@@ -40,7 +42,10 @@ function calcularDesempenho(usuarioTentativas) {
   const porTopico = {};
 
   Object.entries(usuarioTentativas).forEach(([qId, hist]) => {
-    const questao = QUESTOES.find(q => q.id === parseInt(qId));
+    // Comparação por texto: a chave vem do banco como string, e o id gerado
+    // por IA ("q-1786...-a3f9x") não é numérico. Um parseInt aqui devolveria
+    // NaN e a questão sumiria da conta sem erro nenhum.
+    const questao = QUESTOES.find(q => String(q.id) === String(qId));
     if (!questao) return;
 
     const topico = questao.topico;
@@ -66,8 +71,37 @@ const DATA = { DISCIPLINAS, QUESTOES, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANO
 export default function App() {
   const [state, setState] = useState(() => loadState(DEFAULT_STATE));
   const [notifOpen, setNotifOpen] = useState(false);
+  const [sessao, setSessao] = useState(() => (getToken() ? 'ativa' : 'ausente'));
+  const [erroSync, setErroSync] = useState(null);
 
-  useEffect(() => { saveState(state); }, [state]);
+  useEffect(() => {
+    // `usuarioTentativas` fica de fora do localStorage: a fonte de verdade
+    // passou a ser o servidor. Uma cópia local viraria uma segunda fonte,
+    // que diverge em silêncio no primeiro POST que falhar.
+    const local = { ...state };
+    delete local.usuarioTentativas;
+    saveState(local);
+  }, [state]);
+
+  useEffect(() => {
+    if (sessao !== 'ativa') return undefined;
+
+    // Sem isto o histórico só existiria enquanto a aba estivesse aberta —
+    // é esta carga que faz a tentativa sobreviver ao localStorage limpo.
+    let cancelado = false;
+
+    listarTentativas()
+      .then((tentativas) => {
+        if (!cancelado) setState((st) => ({ ...st, usuarioTentativas: tentativas }));
+      })
+      .catch((err) => {
+        if (cancelado) return;
+        if (err.status === 401) { setSessao('ausente'); return; }
+        setErroSync(`Não foi possível carregar seu histórico: ${err.message}`);
+      });
+
+    return () => { cancelado = true; };
+  }, [sessao]);
 
   const theme = THEMES[state.theme] || THEMES.rosa;
   const s = useMemo(() => buildStyles(theme), [theme]);
@@ -83,6 +117,60 @@ export default function App() {
     }));
 
   const setTheme = (themeKey) => setState((st) => ({ ...st, theme: themeKey }));
+
+  // Grava no servidor primeiro e só depois no estado: o que aparece na tela
+  // como respondido é o que a API confirmou ter gravado.
+  const registrar = async ({ questaoId, correta, alternativa, tempoSeg }) => {
+    setErroSync(null);
+    try {
+      const tentativa = await registrarTentativa({ questaoId, correta, alternativa, tempoSeg });
+      setState((st) => {
+        const registro = st.usuarioTentativas[questaoId] || { tentativas: [], desempenho: 'necessita' };
+        return {
+          ...st,
+          usuarioTentativas: {
+            ...st.usuarioTentativas,
+            [questaoId]: { ...registro, tentativas: [...registro.tentativas, tentativa] },
+          },
+        };
+      });
+      return true;
+    } catch (err) {
+      if (err.status === 401) { setSessao('ausente'); return false; }
+      // O quiz continua andando; o que se perdeu foi o registro. Dizer isso
+      // é melhor que deixar a pessoa achar que estudou e nada ficou gravado.
+      setErroSync(`Esta resposta não foi salva: ${err.message}`);
+      return false;
+    }
+  };
+
+  // `tipo` e `certeza` não têm coluna na tabela: valem só para esta sessão.
+  const anotarFeedback = (questaoId, tipo, certeza) =>
+    setState((st) => {
+      const registro = st.usuarioTentativas[questaoId];
+      if (!registro || registro.tentativas.length === 0) return st;
+
+      const tentativas = registro.tentativas.slice();
+      tentativas[tentativas.length - 1] = { ...tentativas[tentativas.length - 1], tipo, certeza };
+
+      return {
+        ...st,
+        usuarioTentativas: { ...st.usuarioTentativas, [questaoId]: { ...registro, tentativas } },
+      };
+    });
+
+  const sair = () => {
+    logout();
+    // O histórico sai da memória junto com a sessão: ele pertence a quem
+    // estava logado, não à aba.
+    setState((st) => ({ ...st, usuarioTentativas: {} }));
+    setErroSync(null);
+    setSessao('ausente');
+  };
+
+  if (sessao !== 'ativa') {
+    return <Login theme={theme} s={s} onEntrar={() => setSessao('ativa')} />;
+  }
 
   const meta = PAGE_META[state.screen];
   const notifCount = notifOpen ? 0 : 3;
@@ -143,6 +231,9 @@ export default function App() {
             <div style={{ fontSize: 13.5, fontWeight: 600, color: '#2c2530' }}>Maria Laís</div>
             <div style={{ fontSize: 11.5, color: '#8b8391' }}>Ver perfil ›</div>
           </div>
+          <div data-testid="sair" onClick={sair} style={{ fontSize: 11.5, color: theme.primary, fontWeight: 600 }}>
+            Sair
+          </div>
         </div>
       </div>
 
@@ -169,6 +260,20 @@ export default function App() {
         </div>
 
         <div style={s.content}>
+          {erroSync && (
+            <div
+              role="alert"
+              data-testid="erro-sync"
+              style={{
+                background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA',
+                borderRadius: 12, padding: '10px 14px', fontSize: 12.5, marginBottom: 14,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              }}
+            >
+              <span>{erroSync}</span>
+              <span onClick={() => setErroSync(null)} style={{ fontWeight: 700 }}>×</span>
+            </div>
+          )}
           {state.screen === 'dashboard' && (
             <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} config={state.configuracoes} />
           )}
@@ -176,7 +281,7 @@ export default function App() {
             <Cronograma {...screenProps} cronograma={state.cronograma} setCronograma={(p) => updateSlice('cronograma', p)} />
           )}
           {state.screen === 'questoes' && (
-            <Questoes {...screenProps} quest={state.questoes} setQuest={(p) => updateSlice('questoes', p)} setUsuarioTentativas={(p) => updateSlice('usuarioTentativas', p)} />
+            <Questoes {...screenProps} quest={state.questoes} setQuest={(p) => updateSlice('questoes', p)} registrar={registrar} anotarFeedback={anotarFeedback} />
           )}
           {state.screen === 'simulados' && (
             <Simulados {...screenProps} sim={state.simulados} setSim={(p) => updateSlice('simulados', p)} setResultadosHistorico={(p) => updateSlice('resultados_historico', p)} />
