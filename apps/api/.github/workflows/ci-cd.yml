@@ -278,8 +278,39 @@ jobs:
           DOMINIO=163-176-30-179.sslip.io ./scripts/bootstrap-cert.sh
 
           docker compose -f docker-compose.prod.yml pull
+
+          # A config do nginx é testada num container DESCARTÁVEL, montando
+          # exatamente os arquivos que acabaram de chegar. `exec nginx -t` no
+          # container em pé testaria o que ele já tem, que é justamente o que
+          # não se quer saber. Aqui um erro de sintaxe reprova o deploy antes
+          # de qualquer imagem ser trocada, com a produção intacta.
+          docker run --rm \
+            -v "$PWD/nginx/conf.d:/etc/nginx/conf.d:ro" \
+            -v "$PWD/nginx/snippets:/etc/nginx/snippets:ro" \
+            -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+            nginx:1.27-alpine nginx -t
+
+          # O nginx vem antes do resto, e não junto, porque quem responde o
+          # CORS é ele: subir o gateway novo primeiro abriria uma janela em
+          # que nenhum dos dois responde o cabeçalho e o front tomaria erro.
+          # `--no-deps` para não arrastar o gateway junto pelo depends_on.
+          docker compose -f docker-compose.prod.yml up -d --no-deps nginx
+
+          # `up -d` só recria o container quando a DEFINIÇÃO muda; mudança de
+          # conteúdo de arquivo montado não conta, e sem este reload a config
+          # nova ficaria em disco sem nunca entrar em vigor. Recarregar um
+          # nginx recém-criado é inofensivo, então não vale ramificar.
+          docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload
+
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
           docker image prune -f
+
+          # Sobras do layout antigo, quando nginx.conf e proxy.conf eram
+          # montados um a um. O scp não apaga o que saiu do repositório, e um
+          # arquivo de config que não é mais lido por ninguém é exatamente o
+          # tipo de pista falsa que custou caro aqui. Linha descartável assim
+          # que nenhuma VM tiver mais o layout antigo.
+          rm -f nginx/nginx.conf nginx/proxy.conf
           REMOTE
 
       - name: Smoke test
@@ -310,6 +341,32 @@ jobs:
               if [ -n "$ESTADO" ] && ! printf '%s' "$ESTADO" | grep -q 'DOWN'; then
                 echo "nginx (TLS), gateway e serviços UP"
                 printf '%s\n' "$ESTADO"
+
+                # CORS é a única parte desta stack que só quebra no
+                # navegador: o curl não liga para o cabeçalho, e
+                # /health/services responde igual com ele certo, errado ou
+                # ausente. Foi por isso que uma config inerte sobreviveu a
+                # todos os deploys — nada nunca olhou. Aqui ela vira porta:
+                # deploy que derruba o front não vira "última versão boa".
+                CABECALHOS=$(curl -fsSk -o /dev/null -D - \
+                  -H 'Origin: https://ml-direito.vercel.app' \
+                  https://localhost/health || echo "")
+                ORIGENS=$(printf '%s' "$CABECALHOS" \
+                  | grep -ci '^access-control-allow-origin:' || true)
+                CERTA=$(printf '%s' "$CABECALHOS" \
+                  | grep -ci '^access-control-allow-origin: *https://ml-direito.vercel.app' || true)
+
+                # Duas checagens, não uma: zero significa front sem acesso,
+                # e dois significa front igualmente sem acesso — o navegador
+                # recusa resposta com o cabeçalho repetido. Só "exatamente
+                # um, e o certo" serve.
+                if [ "$ORIGENS" != "1" ] || [ "$CERTA" != "1" ]; then
+                  echo "::error::CORS quebrado: $ORIGENS cabeçalhos Allow-Origin, $CERTA com a origem esperada."
+                  printf '%s\n' "$CABECALHOS" | grep -i '^access-control' || echo "(nenhum)"
+                  exit 1
+                fi
+                echo "CORS: um Access-Control-Allow-Origin, com a origem do front"
+
                 # Só aqui a tag é promovida a "última boa": depois de a stack
                 # ter provado que sobe e responde. É o que torna o rollback
                 # confiável — .last_good_tag nunca aponta para algo não testado.
