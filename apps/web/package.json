@@ -11,7 +11,8 @@
     "test:e2e": "playwright test",
     "test:api": "node tests/api.test.js",
     "test:all": "npm run test:e2e && npm run test:api",
-    "ci": "npm run lint && npm run build"
+    "ci": "npm run lint && npm run test:questoes && npm run build",
+    "test:questoes": "node tests/questoes.test.js"
   },
   "dependencies": {
     "axios": "^1.18.1",
