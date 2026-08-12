@@ -23,10 +23,16 @@ if [ "${1:-up}" = "down" ]; then
   exit 0
 fi
 
-echo "Subindo o backend (postgres, redis, auth, estudo, gateway)…"
+echo "Subindo o backend (postgres, redis, auth, estudo, questoes, gateway)…"
 # --wait respeita os healthchecks do compose: quando ele volta, os serviços
 # responderam de verdade. Sem isso restaria adivinhar um `sleep`.
 $COMPOSE up -d --wait
+
+# O acervo entra depois do `--wait` de propósito: a tabela `questoes` nasce da
+# migration do questoes-service, que só roda quando o container sobe. Aplicar
+# antes daria "relation does not exist".
+echo "Semeando o acervo de questões…"
+$COMPOSE exec -T postgres psql -q -U postgres -d questoes_db < tests/e2e-questoes.sql
 
 echo "Criando o usuário de teste…"
 # 400 quando o e-mail já existe é resultado esperado, não erro: o script tem de
@@ -69,5 +75,18 @@ if [ "$STATUS" != "200" ]; then
   $COMPOSE logs --tail=30 estudo-service >&2
   exit 1
 fi
+
+# Mesma verificação para o acervo. A tela de questões fica inutilizável se esta
+# rota falhar, e o sintoma no Playwright seria "botão não encontrado" — que faz
+# procurar bug no front por um bom tempo antes de olhar para o backend.
+QUANTAS=$(curl -s "http://localhost:${PORTA}/api/questoes?limite=200" \
+  -H "Authorization: Bearer ${TOKEN}" | jq 'length // 0')
+
+if [ "${QUANTAS:-0}" -lt 1 ]; then
+  echo "  ✗ GET /api/questoes não devolveu questão nenhuma" >&2
+  $COMPOSE logs --tail=30 questoes-service api-gateway >&2
+  exit 1
+fi
+echo "  acervo com ${QUANTAS} questões"
 
 echo "Backend pronto em http://localhost:${PORTA}"

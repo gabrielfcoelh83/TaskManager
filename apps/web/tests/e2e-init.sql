@@ -9,3 +9,4 @@
 -- existe há muito tempo, e lá o banco precisou ser criado à mão.
 CREATE DATABASE auth_db;
 CREATE DATABASE estudo_db;
+CREATE DATABASE questoes_db;

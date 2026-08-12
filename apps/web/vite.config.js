@@ -24,8 +24,12 @@ export default defineConfig({
   server: {
     proxy: {
       // As mais específicas primeiro: o Vite casa na ordem de declaração.
+      // Sem a linha de /api/questoes aqui, o acervo cairia no DEV_API — o
+      // servidorzinho do gerador por IA, que não tem essa rota — e a tela
+      // mostraria "o acervo não carregou" com o backend inteiro no ar.
       '/api/auth': GATEWAY,
       '/api/tentativas': GATEWAY,
+      '/api/questoes': GATEWAY,
       '/api': DEV_API,
     },
   },

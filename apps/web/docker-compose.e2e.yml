@@ -79,6 +79,25 @@ services:
       timeout: 3s
       retries: 20
 
+  questoes-service:
+    image: ghcr.io/gabrielfcoelh83/microservices-questoes-service:latest
+    environment:
+      PORT: 3005
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: questoes_db
+      DB_USER: postgres
+      DB_PASSWORD: e2e
+      JWT_SECRET: segredo-de-e2e
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3005/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
   api-gateway:
     image: ghcr.io/gabrielfcoelh83/microservices-gateway:latest
     # A única porta publicada: é onde o proxy do Vite vai bater.
@@ -94,13 +113,19 @@ services:
     environment:
       AUTH_SERVICE_URL: http://auth-service:3001
       ESTUDO_SERVICE_URL: http://estudo-service:3004
+      QUESTOES_SERVICE_URL: http://questoes-service:3005
       REDIS_URL: redis://redis:6379
       # user-service e task-service ficam de fora: o front não usa rota
       # nenhuma deles. Aparecem como DOWN em /health/services, e só.
+      #
+      # O questoes-service, esse não pode faltar: sem ele a tela de questões
+      # não tem o que mostrar, e todo teste de quiz falharia por acervo vazio.
     depends_on:
       auth-service:
         condition: service_healthy
       estudo-service:
+        condition: service_healthy
+      questoes-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]

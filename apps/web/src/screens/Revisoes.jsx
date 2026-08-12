@@ -69,12 +69,17 @@ export default function Revisoes({ theme, s, data, rev, setRev, favoritos, toggl
             <div key={q.id} style={{ ...s.card, display: 'flex', alignItems: 'center', gap: 16 }}>
               <div style={{ width: 36, height: 36, borderRadius: 10, background: theme.primarySoft, color: theme.primaryDark, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flex: 'none' }}>{q.idx}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#2c2530' }}>{q.disciplina}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#2c2530' }}>
+                  {q.disciplina || (q.exame ? `${q.exame}º Exame de Ordem` : 'Exame de Ordem')}
+                </div>
                 <div style={{ fontSize: 13, color: '#5c5462', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.enunciado}</div>
+                {/* Cada etiqueta só aparece se tiver conteúdo. O acervo oficial
+                    não traz dificuldade, e "Dificuldade: undefined" seria pior
+                    que a ausência da etiqueta. */}
                 <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                  <span style={s.pill('#f3f1f5', '#8b8391')}>Ano: {q.ano}</span>
-                  <span style={s.pill('#f3f1f5', '#8b8391')}>Banca: {q.banca}</span>
-                  <span style={s.pill('#f3f1f5', '#8b8391')}>Dificuldade: {q.dificuldade}</span>
+                  {q.ano && <span style={s.pill('#f3f1f5', '#8b8391')}>Ano: {q.ano}</span>}
+                  {q.banca && <span style={s.pill('#f3f1f5', '#8b8391')}>Banca: {q.banca}</span>}
+                  {q.dificuldade && <span style={s.pill('#f3f1f5', '#8b8391')}>Dificuldade: {q.dificuldade}</span>}
                 </div>
               </div>
               <span style={s.pill('#FEE2E2', '#B91C1C')}>{q.favActive ? 'Favorita' : 'Errei'}</span>

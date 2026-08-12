@@ -44,28 +44,52 @@ test.describe('MA Questões E2E', () => {
     await page.click('[data-testid="nav-questoes"]');
     await expect(page).toHaveTitle(/quest/i);
 
-    // 2. Selecionar disciplina
-    const disciplineButton = page.locator('text=Direito Constitucional').first();
-    if (await disciplineButton.isVisible()) {
-      await disciplineButton.click();
+    // 2. As fontes vêm do acervo do servidor, não de uma lista fixa no front:
+    //    enquanto as questões não têm disciplina, elas são agrupadas por
+    //    exame. Esperar a primeira aparecer é esperar o GET /api/questoes.
+    const primeiraFonte = page.locator('[data-testid^="fonte-"]').first();
+    await expect(primeiraFonte).toBeVisible();
+
+    await page.click('[data-testid="gerar-quiz"]');
+
+    // 3. Responder o quiz inteiro, passando pelo modal de feedback a cada
+    //    questão.
+    //
+    // Fechar o modal não é detalhe de teste: ele cobre a tela inteira, e sem
+    // responder "como você chegou nessa resposta" não existe próxima questão.
+    // Este laço já passou verde sem clicar em nada — o quiz nunca começava, e
+    // a contagem de alternativas era zero. As asserções abaixo são o que separa
+    // "respondeu tudo" de "não fez nada em silêncio".
+    //
+    // Quantas questões o quiz tem não é chute: é o tamanho do acervo, e ele
+    // vem do servidor. Fixar um número aqui amarraria o teste ao arquivo de
+    // seed, que muda.
+    const noAcervo = await page.evaluate(async () => {
+      const token = localStorage.getItem('ma-questoes-token-v1');
+      const res = await fetch('/api/questoes?limite=200', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return (await res.json()).length;
+    });
+    expect(noAcervo).toBeGreaterThan(0);
+
+    let respondidas = 0;
+
+    // O teto é uma trava contra laço infinito, não a quantidade esperada.
+    for (let i = 0; i < noAcervo + 2; i++) {
+      const alternativa = page.locator('[data-testid^="alt-"]').first();
+      if (!(await alternativa.isVisible())) break;
+
+      await alternativa.click();
+      respondidas++;
+
+      const opcao = page.locator('text=Foi chute');
+      await expect(opcao).toBeVisible();
+      await opcao.click();
     }
 
-    // 3. Responder 5 questões
-    for (let i = 0; i < 5; i++) {
-      // Aguardar questão carregar
-      await page.waitForTimeout(500);
-
-      // Contar alternativas
-      const alternatives = await page.locator('[data-testid^="alt-"]').count();
-      if (alternatives > 0) {
-        // Clicar em alternativa aleatória
-        const randomOption = Math.floor(Math.random() * alternatives);
-        await page.click(`[data-testid="alt-${randomOption}"]`);
-      }
-
-      // Aguardar modal ou próxima questão
-      await page.waitForTimeout(500);
-    }
+    expect(respondidas).toBe(noAcervo);
+    await expect(page.locator('text=Quiz concluído!')).toBeVisible();
 
     // 4. Ir para Desempenho
     const desempenhoNav = page.locator('[data-testid="nav-desempenho"]');
@@ -124,12 +148,11 @@ test.describe('MA Questões E2E', () => {
     await page.click('[data-testid="nav-questoes"]');
     await page.waitForTimeout(500);
 
-    // 2. Selecionar disciplina
-    const disciplineButton = page.locator('text=Direito Constitucional').first();
-    if (await disciplineButton.isVisible()) {
-      await disciplineButton.click();
-      await page.waitForTimeout(500);
-    }
+    // 2. Mexer na seleção de fontes — é o que este teste persiste
+    const primeiraFonte = page.locator('[data-testid^="fonte-"]').first();
+    await expect(primeiraFonte).toBeVisible();
+    await primeiraFonte.click();
+    await page.waitForTimeout(300);
 
     // 3. Salvar estado antes de refresh
     const storageBefore = await page.evaluate(() => localStorage.getItem('ma-questoes-state-v1'));
@@ -163,7 +186,7 @@ test.describe('MA Questões E2E', () => {
     const inicial = await contarTentativas(page);
 
     await page.click('[data-testid="nav-questoes"]');
-    await page.click('button:has-text("Gerar quiz")');
+    await page.click('[data-testid="gerar-quiz"]');
 
     const alternativa = page.locator('[data-testid="alt-0"]');
     await expect(alternativa).toBeVisible();
@@ -276,5 +299,98 @@ test.describe('Criar conta', () => {
 
     await expect(page.locator('[role="alert"]')).toContainText('não são iguais');
     expect(chamou).toBe(false);
+  });
+});
+
+// Fora do describe de "Criar conta": estes testes precisam de sessão ativa, e
+// aquele beforeEach começa deslogado de propósito.
+test.describe('Acervo vindo do servidor', () => {
+  test.beforeEach(async ({ page }) => {
+    await entrar(page);
+  });
+
+  // -------------------------------------------------------------------------
+  // O acervo vem do servidor
+  // -------------------------------------------------------------------------
+  //
+  // Estes testes existem porque a troca de mockData por API é invisível na
+  // tela: as duas versões desenham uma questão com quatro alternativas. O que
+  // muda é a origem — e a origem é justamente o que dá para verificar.
+
+  test('a questão exibida é a que a API mandou, com o gabarito da API', async ({ page }) => {
+    const doServidor = await page.evaluate(async () => {
+      const token = localStorage.getItem('ma-questoes-token-v1');
+      const res = await fetch('/api/questoes?limite=200', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.json();
+    });
+
+    expect(doServidor.length).toBeGreaterThan(0);
+
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('[data-testid="gerar-quiz"]');
+
+    const alternativas = page.locator('[data-testid^="alt-"]');
+    await expect(alternativas.first()).toBeVisible();
+
+    // Casar pelo enunciado, que é único por questão. Casar pelo conjunto de
+    // alternativas parece equivalente e não é: duas questões podem ter as
+    // mesmas quatro alternativas com gabaritos diferentes, e o `find` traria a
+    // errada — o teste então clicaria no índice de outra questão e acusaria um
+    // erro de tradução que não existe.
+    const enunciado = await page.locator('[data-testid="enunciado"]').innerText();
+    const casada = doServidor.find((q) => q.enunciado.trim() === enunciado.trim());
+    expect(casada, 'a questão da tela não corresponde a nenhuma questão da API').toBeTruthy();
+
+    // Clicar exatamente na alternativa que a API diz ser a certa. Se a tela
+    // usasse outro índice — o erro que a tradução gabarito→correta pode
+    // introduzir — o app diria "Errou" para a resposta oficialmente correta.
+    await alternativas.nth(casada.gabarito).click();
+    await expect(page.locator('text=Acertou!')).toBeVisible();
+  });
+
+  test('explicação não revisada aparece etiquetada como tal', async ({ page }) => {
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('[data-testid="gerar-quiz"]');
+
+    // O acervo de teste tem uma questão com explicação gerada por IA e não
+    // revisada. O quiz é embaralhado, então o teste avança até chegar nela.
+    for (let i = 0; i < 12; i++) {
+      const alternativa = page.locator('[data-testid="alt-0"]');
+      if (!(await alternativa.isVisible())) break;
+      await alternativa.click();
+
+      const etiqueta = page.locator('[data-testid="explicacao-nao-revisada"]');
+      if (await etiqueta.isVisible()) {
+        await expect(etiqueta).toContainText('não revisada');
+        return;
+      }
+
+      // O modal de feedback cobre a tela entre uma questão e outra.
+      const opcao = page.locator('text=Foi chute');
+      if (await opcao.isVisible()) await opcao.click();
+    }
+
+    throw new Error('nenhuma questão com explicação não revisada apareceu no quiz');
+  });
+
+  test('acervo fora do ar vira aviso com botão, não tela vazia', async ({ page }) => {
+    // Sem tratamento, uma falha aqui deixaria a tela de questões em branco com
+    // um botão "Gerar quiz (0 questões)" desabilitado — o que parece acervo
+    // vazio, e não servidor fora do ar.
+    await page.route('**/api/questoes*', (rota) => rota.fulfill({ status: 500, body: '{}' }));
+
+    await page.reload();
+    await page.click('[data-testid="nav-questoes"]');
+
+    await expect(page.locator('text=O acervo não carregou')).toBeVisible();
+
+    // O botão precisa funcionar de verdade: liberada a rota, tentar de novo
+    // tem de trazer o acervo sem recarregar a página.
+    await page.unroute('**/api/questoes*');
+    await page.click('button:has-text("Tentar de novo")');
+
+    await expect(page.locator('[data-testid="gerar-quiz"]')).toBeVisible();
   });
 });

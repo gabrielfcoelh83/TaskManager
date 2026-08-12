@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { THEMES } from './lib/theme';
 import { buildStyles } from './lib/theme';
 import { Icon } from './lib/icons';
-import { NAV, PAGE_META, DISCIPLINAS, QUESTOES, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS } from './lib/mockData';
+import { NAV, PAGE_META, DISCIPLINAS, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS } from './lib/mockData';
 import { loadState, saveState } from './lib/storage';
 import { diasAteProva } from './lib/metrics';
-import { getToken, logout, listarTentativas, registrarTentativa } from './lib/api';
+import { getToken, logout, listarTentativas, listarQuestoes, registrarTentativa } from './lib/api';
 
 import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';
@@ -38,17 +38,21 @@ const DEFAULT_STATE = {
   resultados_historico: [],
 };
 
-function calcularDesempenho(usuarioTentativas) {
+function calcularDesempenho(usuarioTentativas, questoes) {
   const porTopico = {};
 
   Object.entries(usuarioTentativas).forEach(([qId, hist]) => {
     // Comparação por texto: a chave vem do banco como string, e o id gerado
     // por IA ("q-1786...-a3f9x") não é numérico. Um parseInt aqui devolveria
     // NaN e a questão sumiria da conta sem erro nenhum.
-    const questao = QUESTOES.find(q => String(q.id) === String(qId));
+    const questao = questoes.find(q => String(q.id) === String(qId));
     if (!questao) return;
 
+    // Sem classificação por matéria, `topico` vem nulo do acervo. Agrupar
+    // tudo sob "undefined" produziria uma linha de desempenho sem nome; é
+    // melhor deixar a questão de fora da conta por tópico até ela ter um.
     const topico = questao.topico;
+    if (!topico) return;
     if (!porTopico[topico]) {
       porTopico[topico] = { acertos: 0, total: 0 };
     }
@@ -66,13 +70,18 @@ function calcularDesempenho(usuarioTentativas) {
   }));
 }
 
-const DATA = { DISCIPLINAS, QUESTOES, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS };
-
 export default function App() {
   const [state, setState] = useState(() => loadState(DEFAULT_STATE));
   const [notifOpen, setNotifOpen] = useState(false);
   const [sessao, setSessao] = useState(() => (getToken() ? 'ativa' : 'ausente'));
   const [erroSync, setErroSync] = useState(null);
+
+  // O acervo é do servidor, não do bundle. Guardar o estado do carregamento
+  // junto com as questões — e não só a lista — é o que permite a tela
+  // distinguir "ainda estou buscando" de "busquei e não veio nada", que para
+  // quem estuda são situações completamente diferentes.
+  const [acervo, setAcervo] = useState({ estado: 'carregando', questoes: [], erro: null });
+  const [recarga, setRecarga] = useState(0);
 
   useEffect(() => {
     // `usuarioTentativas` fica de fora do localStorage: a fonte de verdade
@@ -103,8 +112,36 @@ export default function App() {
     return () => { cancelado = true; };
   }, [sessao]);
 
+  useEffect(() => {
+    if (sessao !== 'ativa') return undefined;
+
+    let cancelado = false;
+    setAcervo((a) => ({ ...a, estado: 'carregando', erro: null }));
+
+    listarQuestoes()
+      .then((questoes) => {
+        if (!cancelado) setAcervo({ estado: 'pronto', questoes, erro: null });
+      })
+      .catch((err) => {
+        if (cancelado) return;
+        if (err.status === 401) { setSessao('ausente'); return; }
+        // Erro do acervo não vira o aviso de sincronização do topo: aquele
+        // fala de resposta que não foi salva. Este impede o estudo inteiro,
+        // e quem mostra é a própria tela de questões, com botão de tentar de
+        // novo — que é a única coisa útil a fazer aqui.
+        setAcervo({ estado: 'erro', questoes: [], erro: err.message });
+      });
+
+    return () => { cancelado = true; };
+  }, [sessao, recarga]);
+
   const theme = THEMES[state.theme] || THEMES.rosa;
   const s = useMemo(() => buildStyles(theme), [theme]);
+
+  const DATA = useMemo(
+    () => ({ DISCIPLINAS, QUESTOES: acervo.questoes, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS }),
+    [acervo.questoes]
+  );
 
   const goTo = (screen) => setState((st) => ({ ...st, screen }));
   const updateSlice = (key, partial) =>
@@ -192,7 +229,11 @@ export default function App() {
     };
   });
 
-  const screenProps = { theme, s, data: DATA, go: goTo, usuarioTentativas: state.usuarioTentativas, calcularDesempenho, resultados_historico: state.resultados_historico };
+  // As telas chamam `calcularDesempenho(tentativas)` sem saber de onde vêm as
+  // questões; amarrar o acervo aqui evita passar a lista por sete telas.
+  const calcular = (tentativas) => calcularDesempenho(tentativas, acervo.questoes);
+
+  const screenProps = { theme, s, data: DATA, go: goTo, usuarioTentativas: state.usuarioTentativas, calcularDesempenho: calcular, resultados_historico: state.resultados_historico };
 
   return (
     <div style={s.app}>
@@ -281,7 +322,15 @@ export default function App() {
             <Cronograma {...screenProps} cronograma={state.cronograma} setCronograma={(p) => updateSlice('cronograma', p)} />
           )}
           {state.screen === 'questoes' && (
-            <Questoes {...screenProps} quest={state.questoes} setQuest={(p) => updateSlice('questoes', p)} registrar={registrar} anotarFeedback={anotarFeedback} />
+            <Questoes
+              {...screenProps}
+              quest={state.questoes}
+              setQuest={(p) => updateSlice('questoes', p)}
+              registrar={registrar}
+              anotarFeedback={anotarFeedback}
+              acervo={acervo}
+              recarregarAcervo={() => setRecarga((n) => n + 1)}
+            />
           )}
           {state.screen === 'simulados' && (
             <Simulados {...screenProps} sim={state.simulados} setSim={(p) => updateSlice('simulados', p)} setResultadosHistorico={(p) => updateSlice('resultados_historico', p)} />
@@ -296,7 +345,7 @@ export default function App() {
             />
           )}
           {state.screen === 'desempenho' && (
-            <Desempenho {...screenProps} perf={state.desempenho} setPerf={(p) => updateSlice('desempenho', p)} usuarioTentativas={state.usuarioTentativas} calcularDesempenho={calcularDesempenho} />
+            <Desempenho {...screenProps} perf={state.desempenho} setPerf={(p) => updateSlice('desempenho', p)} usuarioTentativas={state.usuarioTentativas} calcularDesempenho={calcular} />
           )}
           {state.screen === 'estatisticas' && (
             <Estatisticas {...screenProps} filtros={state.estatisticas} setFiltros={(p) => updateSlice('estatisticas', p)} />

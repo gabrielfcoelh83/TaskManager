@@ -27,3 +27,176 @@ input, select, textarea, button {
 button {
   cursor: pointer;
 }
+
+/* ===========================================================================
+   Movimento
+   ===========================================================================
+
+   O resto do app estiliza por objeto inline. Estas regras estão em CSS de
+   propósito: animação declarada em CSS roda fora da thread principal, então
+   ela continua lisa enquanto o React reconcilia a próxima questão. A mesma
+   animação feita com requestAnimationFrame perde quadros exatamente no
+   momento em que a tela está mais ocupada.
+
+   As curvas prontas do CSS (`ease-out`, `ease-in-out`) são fracas demais para
+   interface — sobem devagar e chegam sem intenção. Estas são versões mais
+   firmes das mesmas curvas.
+
+   `ease-in` não aparece em lugar nenhum aqui, e é regra: ela começa lenta, e
+   o começo é justamente onde a pessoa está olhando. 200ms com ease-in PARECE
+   mais devagar que 200ms com ease-out. */
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* Todo elemento pressionável responde ao toque. Sem isso a interface parece
+   não ter ouvido o clique — o retorno visual só chega quando a tela troca,
+   que numa rede ruim é tarde demais. 0.97 é sutil de propósito: dá para
+   sentir sem dar para reparar. */
+button:not(:disabled) {
+  transition: transform 160ms var(--ease-out);
+}
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* --- Entrada de uma questão -------------------------------------------- */
+
+/* Sobe 6px, não 20: a questão não vem de fora da tela, ela substitui a
+   anterior no mesmo lugar. Um deslocamento grande sugeriria movimento
+   espacial que não existe. */
+@keyframes entra-de-baixo {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes so-opacidade {
+  from {
+    opacity: 0;
+  }
+}
+
+.entra {
+  animation: entra-de-baixo 220ms var(--ease-out) both;
+}
+
+/* --- Alternativas ------------------------------------------------------ */
+
+/* Nunca `transition: all`. Listar as propriedades evita que o navegador
+   anime coisas que ninguém pediu — e `all` num elemento que muda de borda,
+   fundo e conteúdo ao mesmo tempo produz exatamente isso.
+
+   A entrada é escalonada: cada alternativa aparece 40ms depois da anterior.
+   Como a `key` no React inclui o id da questão, o nó é remontado a cada
+   questão nova e a animação toca uma vez por questão — ao responder, os
+   mesmos nós só transicionam de cor, sem repetir a entrada. */
+.alternativa {
+  animation: entra-de-baixo 200ms var(--ease-out) both;
+  animation-delay: calc(var(--ordem, 0) * 40ms);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms var(--ease-out);
+}
+
+.alternativa[data-clicavel='sim']:active {
+  transform: scale(0.99);
+}
+
+/* Toque dispara :hover em celular e a alternativa fica "presa" destacada
+   depois do clique. Esta media query é o que separa mouse de dedo. */
+@media (hover: hover) and (pointer: fine) {
+  .alternativa[data-clicavel='sim']:hover {
+    border-color: var(--cor-foco);
+    background: var(--cor-foco-suave);
+  }
+}
+
+/* --- Modal de feedback -------------------------------------------------- */
+
+/* Modal mantém `transform-origin` no centro: ele não está ancorado a nenhum
+   gatilho da tela, aparece no meio do viewport. Popover seria o oposto — esse
+   precisa crescer de onde foi aberto.
+
+   E nunca de `scale(0)`: nada no mundo real aparece a partir do nada. 0.96
+   com opacidade já basta para a entrada parecer física. */
+@keyframes modal-entra {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+.modal-fundo {
+  animation: so-opacidade 160ms var(--ease-out) both;
+}
+
+.modal-caixa {
+  animation: modal-entra 200ms var(--ease-out) both;
+}
+
+.opcao-feedback {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .opcao-feedback:hover {
+    background: var(--cor-foco-suave);
+    border-color: var(--cor-foco);
+  }
+}
+
+/* --- Esqueleto de carregamento ------------------------------------------ */
+
+/* Esqueleto e não spinner: o formato do que está chegando já aparece, então
+   a tela não salta quando o conteúdo entra. O pulso é lento (1.4s) porque
+   ele acompanha uma espera, não uma ação — pulso rápido aqui viraria
+   agitação. */
+@keyframes pulso {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.esqueleto {
+  background: #eceaef;
+  border-radius: 8px;
+  animation: pulso 1.4s ease-in-out infinite;
+}
+
+/* --- Movimento reduzido -------------------------------------------------- */
+
+/* Movimento reduzido não é ausência de animação: opacidade e cor continuam,
+   porque elas ajudam a entender que algo mudou. O que sai é deslocamento —
+   é o que causa enjoo em quem pediu esta preferência. */
+@media (prefers-reduced-motion: reduce) {
+  .entra,
+  .alternativa,
+  .modal-caixa {
+    animation-name: so-opacidade;
+  }
+
+  .alternativa {
+    animation-delay: 0ms;
+  }
+
+  button:not(:disabled):active,
+  .alternativa[data-clicavel='sim']:active {
+    transform: none;
+  }
+
+  .esqueleto {
+    animation: none;
+    opacity: 0.75;
+  }
+}

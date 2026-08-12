@@ -1,3 +1,5 @@
+import { paraQuestaoDeTela } from './acervo';
+
 // Cliente da API da plataforma (gateway :3000 atrás do nginx).
 //
 // O front é servido pela Vercel e a API roda na Oracle: origens diferentes,
@@ -168,6 +170,32 @@ export async function listarTentativas() {
   // quando não cobrir, o que falta é paginação, não um limite maior.
   const linhas = await req('/api/tentativas?limite=1000');
   return agruparPorQuestao(linhas || []);
+}
+
+// ---------------------------------------------------------------------------
+// Acervo de questões
+// ---------------------------------------------------------------------------
+//
+// As questões vêm do questoes-service, que só serve o que foi extraído das
+// provas e dos gabaritos publicados pela própria FGV. Não existe rota de
+// escrita: o acervo entra por carga administrativa, conferida antes.
+//
+// A tradução entre o formato do acervo e o das telas mora em `acervo.js`, que
+// não depende de rede e por isso pode ser testada no `node`.
+
+export async function listarQuestoes({ disciplina, exame, aleatorio, limite = 200 } = {}) {
+  const params = new URLSearchParams();
+  if (disciplina) params.set('disciplina', disciplina);
+  if (exame !== undefined && exame !== null) params.set('exame', String(exame));
+  if (aleatorio) params.set('aleatorio', '1');
+  // 200 é o teto do serviço. Com um exame carregado isso traz o acervo
+  // inteiro numa ida só, e o front filtra na memória. Quando houver mais
+  // exames do que cabe aqui, o que falta é filtrar no servidor (a rota já
+  // aceita `disciplina` e `exame`) — não um limite maior.
+  params.set('limite', String(limite));
+
+  const linhas = await req(`/api/questoes?${params}`);
+  return (linhas || []).map(paraQuestaoDeTela);
 }
 
 export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg }) {

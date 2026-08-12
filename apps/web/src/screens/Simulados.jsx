@@ -22,7 +22,10 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
 
   const QUESTOES = data.QUESTOES || [];
   const DISCIPLINAS = data.DISCIPLINAS || [];
-  const disciplinasComQuestoes = Array.from(new Set(QUESTOES.map(q => q.disciplina)));
+  // O `filter(Boolean)` não é defensivo à toa: questão do acervo oficial vem
+  // sem disciplina até ser classificada, e sem isto o seletor de simulado
+  // ofereceria uma opção em branco que não filtra nada.
+  const disciplinasComQuestoes = Array.from(new Set(QUESTOES.map(q => q.disciplina))).filter(Boolean);
 
   const limparPreSelecao = () => {
     if (preDisciplina) setSim({ preDisciplina: null });

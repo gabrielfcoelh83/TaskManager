@@ -1,93 +1,178 @@
-// Validação estrutural do banco de questões.
+// O que este arquivo protege mudou de lugar.
 //
-// Nasceu de dois gabaritos errados que passaram despercebidos: a questão 12
-// marcava "15 a 40 anos" para homicídio qualificado enquanto a própria
-// explicação dizia "12 a 30", e a 13 marcava o voto como facultativo aos 18
-// com a explicação dizendo o contrário.
+// Antes existia um banco de questões escrito à mão em `mockData.js`, e este
+// teste conferia a integridade dele: alternativa vazia, índice fora da faixa,
+// "erro comum" apontando para a resposta certa. Esse banco não existe mais —
+// as questões vêm do questoes-service, que só aceita o que foi extraído dos
+// cadernos e gabaritos publicados pela FGV, e o schema de lá já recusa
+// gabarito fora da faixa e questão sem quatro alternativas.
 //
-// Seja franco sobre o alcance disto: NENHUMA das duas seria pega aqui. Elas
-// foram encontradas lendo. O que este arquivo cobre é a parte mecanizável —
-// índice fora da faixa, alternativa repetida, "erro comum" apontando para a
-// resposta certa. O resto depende de o gabarito vir de uma fonte oficial em
-// vez de ser digitado, que é para onde o questoes-service vai.
+// O que sobrou do lado do front é a TRADUÇÃO entre o formato do acervo e o
+// formato das telas. Ela é pequena e parece boba, e é exatamente por isso que
+// merece teste: `gabarito` vira `correta`, e trocar essas duas de lugar
+// transforma resposta certa em errada sem lançar erro nenhum, sem quebrar
+// nenhuma tela, e sem aparecer em revisão de código. O aluno é quem descobre.
 
-import { QUESTOES } from '../src/lib/mockData.js';
+import { paraQuestaoDeTela, montarFontes, embaralhar } from '../src/lib/acervo.js';
 
 const falhas = [];
 const exigir = (condicao, mensagem) => {
   if (!condicao) falhas.push(mensagem);
 };
 
-const vazio = (v) => typeof v !== 'string' || v.trim() === '';
+// Uma questão como o questoes-service devolve: nomes de coluna do banco.
+const daApi = (extra = {}) => ({
+  id: 101,
+  exame: 45,
+  tipo_prova: 1,
+  numero: 7,
+  banca: 'FGV',
+  ano: 2025,
+  enunciado: 'Enunciado de exemplo, longo o bastante para parecer real.',
+  alternativas: ['alfa', 'beta', 'gama', 'delta'],
+  gabarito: 2,
+  anulada: false,
+  disciplina: null,
+  tema: null,
+  explicacao: null,
+  explicacao_fonte: null,
+  revisada: false,
+  ...extra,
+});
 
-const vistos = new Set();
+// ---------------------------------------------------------------------------
+// A tradução do gabarito
+// ---------------------------------------------------------------------------
 
-for (const q of QUESTOES) {
-  const onde = `questão ${q.id}`;
+{
+  const q = paraQuestaoDeTela(daApi({ gabarito: 2 }));
 
-  exigir(!vistos.has(q.id), `${onde}: id repetido`);
-  vistos.add(q.id);
+  exigir(q.correta === 2, `correta deveria ser 2, veio ${q.correta}`);
 
-  // A prova da OAB é sempre de quatro alternativas. Uma questão com três ou
-  // cinco não é "quase certa" — ela não é uma questão da OAB.
+  // A asserção que importa não é "correta === gabarito", é esta: o texto
+  // apontado pelo índice traduzido tem de ser o mesmo texto que o acervo
+  // marcou como certo. Um deslocamento de um passa pela igualdade numérica de
+  // um jeito e falha aqui.
   exigir(
-    Array.isArray(q.alternativas) && q.alternativas.length === 4,
-    `${onde}: esperadas 4 alternativas, veio ${q.alternativas?.length}`
+    q.alternativas[q.correta] === 'gama',
+    `o índice traduzido aponta para "${q.alternativas[q.correta]}", esperado "gama"`
   );
 
-  if (Array.isArray(q.alternativas)) {
-    q.alternativas.forEach((alt, i) =>
-      exigir(!vazio(alt), `${onde}: alternativa ${i} vazia`)
-    );
-
-    // Duas alternativas iguais tornam a questão insolúvel: existiriam duas
-    // respostas certas, e o aluno erraria "acertando".
-    const unicas = new Set(q.alternativas.map((a) => String(a).trim().toLowerCase()));
+  // As quatro posições, uma a uma. O erro clássico de tradução de índice
+  // aparece nas pontas (0 e 3), não no meio.
+  for (let i = 0; i < 4; i++) {
+    const t = paraQuestaoDeTela(daApi({ gabarito: i }));
+    exigir(t.correta === i, `gabarito ${i} virou correta ${t.correta}`);
     exigir(
-      unicas.size === q.alternativas.length,
-      `${onde}: alternativas repetidas`
+      t.alternativas[t.correta] === ['alfa', 'beta', 'gama', 'delta'][i],
+      `gabarito ${i} aponta para a alternativa errada`
     );
-
-    // Fora da faixa, a tela mostraria `undefined` como resposta certa.
-    exigir(
-      Number.isInteger(q.correta) && q.correta >= 0 && q.correta < q.alternativas.length,
-      `${onde}: correta=${q.correta} fora da faixa`
-    );
-  }
-
-  exigir(!vazio(q.enunciado), `${onde}: sem enunciado`);
-  exigir(!vazio(q.disciplina), `${onde}: sem disciplina`);
-  exigir(!vazio(q.topico), `${onde}: sem tópico`);
-
-  // Sem explicação a questão só informa que você errou, que é a parte inútil.
-  exigir(!vazio(q.explicacao), `${onde}: sem explicação`);
-
-  exigir(
-    Array.isArray(q.referencias) && q.referencias.length > 0,
-    `${onde}: sem referência legal`
-  );
-
-  for (const erro of q.errosComuns || []) {
-    exigir(
-      Number.isInteger(erro.alternativa) &&
-        erro.alternativa >= 0 &&
-        erro.alternativa < (q.alternativas?.length || 0),
-      `${onde}: errosComuns aponta alternativa ${erro.alternativa}, que não existe`
-    );
-
-    // Contradição interna: se a alternativa marcada como "erro comum" é a
-    // mesma marcada como certa, uma das duas está errada. É o parente
-    // mecanizável do bug que motivou este arquivo.
-    exigir(
-      erro.alternativa !== q.correta,
-      `${onde}: errosComuns aponta a alternativa ${erro.alternativa}, que é a CORRETA`
-    );
-
-    exigir(!vazio(erro.motivo), `${onde}: erro comum sem motivo`);
   }
 }
 
-console.log(`${QUESTOES.length} questões verificadas`);
+// ---------------------------------------------------------------------------
+// Os campos que a tela precisa saber que podem faltar
+// ---------------------------------------------------------------------------
+
+{
+  const cru = paraQuestaoDeTela(daApi());
+
+  // Null e não undefined: `undefined` some do JSON e some do React sem deixar
+  // rastro, então um campo ausente vira "esqueci de mapear" indistinguível de
+  // "o acervo não tem esse dado".
+  exigir(cru.disciplina === null, 'disciplina não classificada deveria ser null');
+  exigir(cru.topico === null, 'tema ausente deveria virar topico null');
+  exigir(cru.explicacao === null, 'explicação ausente deveria ser null');
+
+  // A FGV não publica dificuldade. Se algum dia isto deixar de ser null sem
+  // que exista a coluna, é porque alguém começou a inventar o dado.
+  exigir(cru.dificuldade === null, 'dificuldade deveria ser null (o acervo não tem)');
+
+  // `revisada` decide se a tela mostra o aviso de "não revisada". Qualquer
+  // coisa que não seja `true` tem de contar como não revisada — um `null`
+  // vindo do banco não pode virar "revisada" por descuido de coerção.
+  exigir(cru.revisada === false, 'revisada ausente deveria ser false');
+  exigir(paraQuestaoDeTela(daApi({ revisada: null })).revisada === false, 'revisada null deveria ser false');
+  exigir(paraQuestaoDeTela(daApi({ revisada: true })).revisada === true, 'revisada true deveria ser true');
+
+  const completa = paraQuestaoDeTela(
+    daApi({ disciplina: 'Direito Penal', tema: 'Furto', explicacao: 'porque sim', explicacao_fonte: 'ia', revisada: false })
+  );
+  exigir(completa.disciplina === 'Direito Penal', 'disciplina não passou');
+  exigir(completa.topico === 'Furto', 'tema deveria virar topico');
+  exigir(completa.explicacaoFonte === 'ia', 'explicacao_fonte deveria virar explicacaoFonte');
+
+  // Procedência: é o que a tela mostra no lugar do rótulo inventado antigo.
+  exigir(completa.exame === 45 && completa.numero === 7, 'exame/numero deveriam passar');
+}
+
+// ---------------------------------------------------------------------------
+// De onde o quiz tira questão
+// ---------------------------------------------------------------------------
+
+{
+  // Sem classificação, o critério tem de cair para o exame — senão a tela
+  // mostra uma lista de fontes vazia e um botão que não gera quiz nenhum.
+  const semDisciplina = [
+    paraQuestaoDeTela(daApi({ id: 1, exame: 45 })),
+    paraQuestaoDeTela(daApi({ id: 2, exame: 45 })),
+    paraQuestaoDeTela(daApi({ id: 3, exame: 44 })),
+  ];
+
+  const porExame = montarFontes(semDisciplina);
+  exigir(porExame.criterio === 'exame', `critério deveria ser exame, veio ${porExame.criterio}`);
+  exigir(porExame.fontes.length === 2, `esperadas 2 fontes, vieram ${porExame.fontes.length}`);
+  exigir(porExame.fontes[0].chave === '45', 'o exame mais recente deveria vir primeiro');
+  exigir(porExame.fontes[0].total === 2, `o 45º deveria ter 2 questões, tem ${porExame.fontes[0].total}`);
+  exigir(porExame.fontes[0].rotulo === '45º Exame de Ordem', `rótulo inesperado: ${porExame.fontes[0].rotulo}`);
+
+  // A chave tem de casar com a questão, senão o filtro do quiz devolve vazio
+  // com a fonte marcada — o pior tipo de falha, porque parece escolha do aluno.
+  const chave = porExame.chaveDe(semDisciplina[0]);
+  exigir(
+    semDisciplina.filter((q) => porExame.chaveDe(q) === chave).length === 2,
+    'chaveDe não casa com as fontes que ela mesma montou'
+  );
+
+  // Com classificação, o critério vira disciplina e o exame some da barra.
+  const comDisciplina = [
+    paraQuestaoDeTela(daApi({ id: 1, disciplina: 'Direito Penal' })),
+    paraQuestaoDeTela(daApi({ id: 2, disciplina: 'Direito Penal' })),
+    paraQuestaoDeTela(daApi({ id: 3, disciplina: 'Direito Civil' })),
+  ];
+
+  const porDisc = montarFontes(comDisciplina);
+  exigir(porDisc.criterio === 'disciplina', `critério deveria ser disciplina, veio ${porDisc.criterio}`);
+  exigir(porDisc.fontes[0].chave === 'Direito Penal', 'a disciplina com mais questões deveria vir primeiro');
+  exigir(porDisc.fontes[0].total === 2, 'contagem por disciplina errada');
+
+  // Acervo vazio não pode explodir: é o estado do primeiro dia.
+  const vazio = montarFontes([]);
+  exigir(Array.isArray(vazio.fontes) && vazio.fontes.length === 0, 'acervo vazio deveria dar lista de fontes vazia');
+}
+
+// ---------------------------------------------------------------------------
+// Embaralhar não pode perder nem duplicar questão
+// ---------------------------------------------------------------------------
+
+{
+  const original = Array.from({ length: 50 }, (_, i) => ({ id: i }));
+  const misturado = embaralhar(original);
+
+  exigir(misturado.length === original.length, 'embaralhar mudou o tamanho do quiz');
+  exigir(
+    new Set(misturado.map((q) => q.id)).size === original.length,
+    'embaralhar duplicou ou perdeu questão'
+  );
+  exigir(original[0].id === 0, 'embaralhar não pode mexer na lista original');
+
+  // Um Fisher-Yates escrito errado costuma travar elementos no lugar. Em 50
+  // itens, sair idêntico é praticamente impossível por acaso.
+  exigir(
+    misturado.some((q, i) => q.id !== i),
+    'embaralhar devolveu a lista na mesma ordem'
+  );
+}
 
 if (falhas.length > 0) {
   console.error(`\n❌ ${falhas.length} problema(s):`);
@@ -95,4 +180,4 @@ if (falhas.length > 0) {
   process.exit(1);
 }
 
-console.log('✅ banco de questões íntegro');
+console.log('✅ tradução do acervo, seleção de fontes e embaralhamento íntegros');
