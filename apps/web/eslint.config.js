@@ -24,6 +24,8 @@ export default [
         Buffer: 'readonly',
         URL: 'readonly',
         URLSearchParams: 'readonly',
+        // Decodifica o payload do JWT para descobrir de quem é a sessão.
+        atob: 'readonly',
       },
     },
     plugins: {

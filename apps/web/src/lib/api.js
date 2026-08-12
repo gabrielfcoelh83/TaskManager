@@ -1,4 +1,4 @@
-import { paraQuestaoDeTela } from './acervo';
+import { paraQuestaoDeTela } from './acervo.js';
 
 // Cliente da API da plataforma (gateway :3000 atrás do nginx).
 //
@@ -123,6 +123,48 @@ export async function criarConta({ nome, email, password }) {
 
   setToken(dados.token);
   return dados.user;
+}
+
+// ---------------------------------------------------------------------------
+// Perfil e preferências
+// ---------------------------------------------------------------------------
+//
+// O nome e o e-mail moram no user-service, criado no cadastro pelo evento
+// `user.registered`. O front não guardava nem consultava nada disso: mostrava
+// um nome fixo no código para todo mundo.
+//
+// `profile_data` é uma coluna JSONB que o PUT já aceita, e é onde ficam as
+// preferências que precisam seguir a pessoa entre navegadores — meta diária e
+// data da prova. O tema de cores fica no localStorage: é preferência do
+// aparelho, não da conta.
+
+export async function buscarPerfil(id) {
+  const perfil = await req(`/api/users/${id}`);
+  return {
+    id: perfil?.user_id ?? id,
+    name: perfil?.name ?? null,
+    email: perfil?.email ?? null,
+    preferencias: perfil?.profile_data || {},
+  };
+}
+
+export async function salvarPerfil(id, { nome, preferencias }) {
+  // O user-service usa COALESCE: mandar `undefined` (que some no JSON) preserva
+  // o valor de lá. Mandar string vazia apagaria o nome — daí o `|| undefined`.
+  const perfil = await req(`/api/users/${id}`, {
+    method: 'PUT',
+    body: {
+      name: nome?.trim() || undefined,
+      profile_data: preferencias === undefined ? undefined : preferencias,
+    },
+  });
+
+  return {
+    id: perfil?.user_id ?? id,
+    name: perfil?.name ?? null,
+    email: perfil?.email ?? null,
+    preferencias: perfil?.profile_data || {},
+  };
 }
 
 // ---------------------------------------------------------------------------

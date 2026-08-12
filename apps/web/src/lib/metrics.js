@@ -1,15 +1,21 @@
 // src/lib/metrics.js
 //
-// Camada de MÉTRICAS (local-first). Funções PURAS que derivam os indicadores
-// do Dashboard a partir dos dados reais já coletados pelo app:
-//   - usuarioTentativas: { [questaoId]: { tentativas: [ {data, correta, tempo_gasto_segundos, ...} ], desempenho } }
-//   - resultadosHistorico: [ { disciplina, quantidade, acertos, errados, nota_final, tempo_total_minutos, data_conclusao, ... } ]
-//   - questoes: banco de questões (para mapear questaoId -> disciplina)
-//   - config: { meta, dataProva, ... }
+// Camada de MÉTRICAS. Funções PURAS que derivam os indicadores das telas a
+// partir dos dados reais:
+//   - usuarioTentativas: { [questaoId]: { tentativas: [ {data, correta, tempo_gasto_segundos, ...} ] } }
+//     → vem do estudo-service (`GET /api/tentativas`), não do localStorage
+//   - resultadosHistorico: [ { disciplina, quantidade, acertos, errados, nota_final, ... } ]
+//     → simulados; ainda sem rota própria, vive neste navegador
+//   - questoes: o acervo carregado (para mapear questaoId -> disciplina)
+//   - config: { meta, dataProva }
 //
-// IMPORTANTE (arquitetura): estas funções são a "fonte da verdade" das métricas.
-// Hoje leem do localStorage; no Tier 1 (cloud) a MESMA interface passa a ser
-// alimentada por queries SQL/Supabase — a UI do Dashboard não muda.
+// A regra desta camada: quando não há dado, o retorno é `null` — nunca zero,
+// nunca um número plausível. Zero é uma medição ("respondi e errei tudo");
+// ausência de dado é outra coisa, e quem desenha a tela precisa distinguir as
+// duas para não mostrar 0% a quem nunca respondeu nada.
+//
+// O que É por disciplina mora em `disciplinas.js`, que enxerga também o
+// tamanho do acervo — aqui só se sabe o que foi respondido.
 
 // ---------------------------------------------------------------------------
 // Helpers de data
@@ -42,7 +48,10 @@ function diffDays(aKey, bKey) {
  */
 function indexDisciplinas(questoes = []) {
   const idx = {};
-  for (const q of questoes) idx[q.id] = q.disciplina || 'Outras';
+  // O rótulo tem de ser o MESMO de `disciplinas.js`: com 'Outras' aqui e
+  // 'Sem classificação' lá, a mesma questão aparecia com dois nomes em telas
+  // diferentes e o filtro por disciplina não casava com nada.
+  for (const q of questoes) idx[String(q.id)] = q.disciplina || 'Sem classificação';
   return idx;
 }
 
@@ -54,7 +63,9 @@ export function flattenTentativas(usuarioTentativas = {}, questoes = []) {
   const discPorId = indexDisciplinas(questoes);
   const out = [];
   for (const [qId, registro] of Object.entries(usuarioTentativas)) {
-    const disciplina = discPorId[qId] || discPorId[Number(qId)] || 'Outras';
+    // Questão que não está no acervo carregado (respondida antes, hoje fora do
+    // filtro): entra como não classificada em vez de sumir da conta.
+    const disciplina = discPorId[String(qId)] || 'Sem classificação';
     for (const t of registro.tentativas || []) {
       out.push({
         questaoId: qId,
@@ -216,52 +227,123 @@ export function resumoSimulados(resultadosHistorico = []) {
 }
 
 // ---------------------------------------------------------------------------
-// Base compartilhada: estatísticas por disciplina (prática)
+// 5) Estatísticas de um período, com comparação ao período anterior
 // ---------------------------------------------------------------------------
 
-export function porDisciplina(usuarioTentativas = {}, questoes = []) {
-  const mapa = {};
-  for (const t of flattenTentativas(usuarioTentativas, questoes)) {
-    if (!mapa[t.disciplina]) mapa[t.disciplina] = { disciplina: t.disciplina, respondidas: 0, acertos: 0, somaTempo: 0 };
-    const m = mapa[t.disciplina];
-    m.respondidas += 1;
-    if (t.correta) m.acertos += 1;
-    if (t.tempo != null) m.somaTempo += t.tempo;
+/**
+ * A tela de Estatísticas tinha um seletor de período que multiplicava um
+ * número fixo por 0.25, 1 ou 3.4 — mexer no filtro mudava o número na tela sem
+ * consultar dado nenhum. Aqui o período filtra as tentativas de verdade, e o
+ * "vs. período anterior" compara com a janela imediatamente anterior, de mesmo
+ * tamanho. Sem janela anterior com dados, o delta é `null` e a tela cala a
+ * boca em vez de dizer "+12%".
+ *
+ * `dias = null` significa "desde o início": aí não existe período anterior.
+ */
+export function estatisticasDoPeriodo(usuarioTentativas = {}, { questoes = [], dias = null, disciplina = null, hoje = new Date() } = {}) {
+  const todas = flattenTentativas(usuarioTentativas, questoes)
+    .filter((t) => (disciplina ? t.disciplina === disciplina : true));
+
+  const hojeKey = dateKey(hoje);
+  const naJanela = (t, deDiasAtras, ateDiasAtras) => {
+    if (!t.dia) return false;
+    const distancia = diffDays(hojeKey, t.dia);
+    return distancia >= ateDiasAtras && distancia < deDiasAtras;
+  };
+
+  const atual = dias == null ? todas : todas.filter((t) => naJanela(t, dias, 0));
+  const anterior = dias == null ? [] : todas.filter((t) => naJanela(t, dias * 2, dias));
+
+  const resumir = (lista) => {
+    const acertos = lista.filter((t) => t.correta).length;
+    const comTempo = lista.filter((t) => t.tempo != null);
+    const tempoTotal = comTempo.reduce((soma, t) => soma + t.tempo, 0);
+
+    return {
+      tentativas: lista.length,
+      questoes: new Set(lista.map((t) => String(t.questaoId))).size,
+      acertos,
+      erros: lista.length - acertos,
+      pct: lista.length > 0 ? Math.round((acertos / lista.length) * 100) : null,
+      tempoTotalSeg: comTempo.length > 0 ? tempoTotal : null,
+      tempoMedioSeg: comTempo.length > 0 ? Math.round(tempoTotal / comTempo.length) : null,
+      diasAtivos: new Set(lista.map((t) => t.dia).filter(Boolean)).size,
+    };
+  };
+
+  const a = resumir(atual);
+  const b = resumir(anterior);
+
+  // Delta só existe quando os DOIS lados têm dado. Comparar com um período
+  // vazio daria "+100%" para quem simplesmente começou a usar o app agora.
+  const delta = (x, y) => (x == null || y == null || y === 0 ? null : Math.round(((x - y) / y) * 100));
+
+  return {
+    ...a,
+    anterior: b,
+    delta: {
+      tentativas: delta(a.tentativas, b.tentativas),
+      pct: a.pct != null && b.pct != null ? a.pct - b.pct : null,   // pontos percentuais
+      tempoTotalSeg: delta(a.tempoTotalSeg, b.tempoTotalSeg),
+      diasAtivos: delta(a.diasAtivos, b.diasAtivos),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 6) Evolução geral da taxa de acertos, semana a semana
+// ---------------------------------------------------------------------------
+
+/**
+ * Substitui a série `[60, 66, 63, 70, 68, 74, 73]` que estava escrita no
+ * código da tela de Desempenho e não mudava para ninguém.
+ *
+ * Semanas sem atividade entram como `null` — o gráfico pula o ponto em vez de
+ * desenhar uma queda a zero que nunca aconteceu.
+ */
+export function evolucaoGeral(usuarioTentativas = {}, semanas = 6, hoje = new Date()) {
+  const tentativas = flattenTentativas(usuarioTentativas).filter((t) => t.dia);
+  const hojeKey = dateKey(hoje);
+
+  const baldes = Array.from({ length: semanas }, () => ({ acertos: 0, total: 0 }));
+
+  for (const t of tentativas) {
+    const semanaAtras = Math.floor(diffDays(hojeKey, t.dia) / 7);
+    const i = semanas - 1 - semanaAtras;
+    if (i < 0 || i > semanas - 1) continue;
+    baldes[i].total += 1;
+    if (t.correta) baldes[i].acertos += 1;
   }
-  return Object.values(mapa).map((m) => ({
-    ...m,
-    pct: m.respondidas > 0 ? Math.round((m.acertos / m.respondidas) * 100) : 0,
-    status: statusDesempenho(m.respondidas, m.acertos),
+
+  return baldes.map((b, i) => ({
+    rotulo: i === semanas - 1 ? 'esta semana' : `${semanas - 1 - i} sem. atrás`,
+    total: b.total,
+    pct: b.total > 0 ? Math.round((b.acertos / b.total) * 100) : null,
   }));
 }
 
-function statusDesempenho(respondidas, acertos) {
-  if (respondidas === 0) return 'novo';
-  const r = acertos / respondidas;
-  if (r >= 0.8) return 'domina';
-  if (r >= 0.5) return 'em-desenvolvimento';
-  return 'necessita';
-}
-
 // ---------------------------------------------------------------------------
-// 5) Matérias mais estudadas (top N por volume)
+// 7) Tempo por questão, por disciplina
 // ---------------------------------------------------------------------------
 
-export function materiasMaisEstudadas(usuarioTentativas = {}, questoes = [], limite = 3) {
-  return porDisciplina(usuarioTentativas, questoes)
-    .sort((a, b) => b.respondidas - a.respondidas)
-    .slice(0, limite);
-}
+/**
+ * O tempo vem de `tempo_gasto_segundos`, cronometrado entre a questão aparecer
+ * e a alternativa ser clicada. Disciplina sem nenhuma medição não entra na
+ * lista — o gráfico antigo desenhava sete barras fixas para todo mundo.
+ */
+export function tempoPorDisciplina(usuarioTentativas = {}, questoes = []) {
+  const mapa = {};
 
-// ---------------------------------------------------------------------------
-// 6) Menor desempenho (piores taxas, exigindo volume mínimo)
-// ---------------------------------------------------------------------------
+  for (const t of flattenTentativas(usuarioTentativas, questoes)) {
+    if (t.tempo == null) continue;
+    if (!mapa[t.disciplina]) mapa[t.disciplina] = { disciplina: t.disciplina, soma: 0, amostras: 0 };
+    mapa[t.disciplina].soma += t.tempo;
+    mapa[t.disciplina].amostras += 1;
+  }
 
-export function menorDesempenho(usuarioTentativas = {}, questoes = [], limite = 3, minRespondidas = 1) {
-  return porDisciplina(usuarioTentativas, questoes)
-    .filter((d) => d.respondidas >= minRespondidas)
-    .sort((a, b) => a.pct - b.pct)
-    .slice(0, limite);
+  return Object.values(mapa)
+    .map((m) => ({ ...m, mediaSeg: Math.round(m.soma / m.amostras) }))
+    .sort((a, b) => b.mediaSeg - a.mediaSeg);
 }
 
 // ---------------------------------------------------------------------------
@@ -321,31 +403,14 @@ export function evolucaoPorDisciplina(usuarioTentativas = {}, questoes = [], sem
 }
 
 // ---------------------------------------------------------------------------
-// 8) Desempenho completo — Opção A: tabela de TODAS as disciplinas
+// 8) Dias até a prova (topbar)
 // ---------------------------------------------------------------------------
 
 /**
- * Tabela completa. Inclui disciplinas sem atividade (status 'novo') quando
- * `disciplinasBase` é fornecido (ex.: nomes vindos do mock/catálogo).
+ * `dataProva` é escolhida por quem estuda, na tela de Configurações. Antes ela
+ * era uma constante ('2027-02-28') sem nenhum campo que a editasse: a topbar
+ * contava os dias para uma prova que o app inventou.
  */
-export function desempenhoCompleto(usuarioTentativas = {}, questoes = [], disciplinasBase = []) {
-  const stats = {};
-  for (const d of porDisciplina(usuarioTentativas, questoes)) stats[d.disciplina] = d;
-
-  // Garante que disciplinas do catálogo apareçam mesmo sem atividade
-  for (const nome of disciplinasBase) {
-    if (!stats[nome]) {
-      stats[nome] = { disciplina: nome, respondidas: 0, acertos: 0, somaTempo: 0, pct: 0, status: 'novo' };
-    }
-  }
-
-  return Object.values(stats).sort((a, b) => b.pct - a.pct || b.respondidas - a.respondidas);
-}
-
-// ---------------------------------------------------------------------------
-// 9) Dias até a prova (topbar) + progresso do cronograma
-// ---------------------------------------------------------------------------
-
 export function diasAteProva(config = {}, hoje = new Date()) {
   if (!config.dataProva) return null;
   const gap = diffDays(dateKey(config.dataProva), dateKey(hoje));
@@ -353,22 +418,17 @@ export function diasAteProva(config = {}, hoje = new Date()) {
 }
 
 // ---------------------------------------------------------------------------
-// Agregador: monta TODAS as métricas do Dashboard de uma vez
+// Formatação de tempo (usada por Estatísticas e Desempenho)
 // ---------------------------------------------------------------------------
 
-export function computeDashboard({ usuarioTentativas = {}, resultadosHistorico = [], questoes = [], disciplinasBase = [], config = {}, hoje = new Date() } = {}) {
-  return {
-    taxaAcertos: taxaDeAcertos(usuarioTentativas, resultadosHistorico, questoes),
-    sequencia: sequenciaAtual(usuarioTentativas, resultadosHistorico, hoje),
-    meta: metaDiaria(config, usuarioTentativas, resultadosHistorico, hoje),
-    simulados: {
-      resumo: resumoSimulados(resultadosHistorico),
-      porSimulado: desempenhoPorSimulado(resultadosHistorico),
-    },
-    materiasMaisEstudadas: materiasMaisEstudadas(usuarioTentativas, questoes),
-    menorDesempenho: menorDesempenho(usuarioTentativas, questoes),
-    evolucao: evolucaoPorDisciplina(usuarioTentativas, questoes, 6, hoje),
-    desempenhoCompleto: desempenhoCompleto(usuarioTentativas, questoes, disciplinasBase),
-    diasAteProva: diasAteProva(config, hoje),
-  };
+export function formatarDuracao(segundos) {
+  if (segundos == null) return null;
+  if (segundos < 60) return `${segundos}s`;
+
+  const minutos = Math.round(segundos / 60);
+  if (minutos < 60) return `${minutos}min`;
+
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto === 0 ? `${horas}h` : `${horas}h ${String(resto).padStart(2, '0')}min`;
 }

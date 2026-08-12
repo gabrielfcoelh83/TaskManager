@@ -1,5 +1,7 @@
 export function Sparkline({ points, color, height = 90 }) {
   const w = 380, h = height;
+  // Um ponto só não é linha: `stepX` viraria Infinity.
+  if (!points || points.length < 2) return null;
   const max = Math.max(...points), min = Math.min(...points);
   const stepX = w / (points.length - 1);
   const norm = (v) => h - 10 - ((v - min) / (max - min || 1)) * (h - 20);
@@ -14,7 +16,13 @@ export function Sparkline({ points, color, height = 90 }) {
 }
 
 export function MiniBars({ points, color, width = 120, height = 60 }) {
-  const w = width, h = height, max = Math.max(...points);
+  const w = width, h = height;
+  // `Math.max` de lista vazia é -Infinity, e dividir por um máximo zero dá
+  // NaN: os dois viram `<rect y="NaN">`, que o React aceita e o navegador
+  // desenha como nada. Aconteceu de verdade — o tempo por questão é medido em
+  // segundos inteiros, e quem responde em menos de um segundo grava zero.
+  const max = points.length > 0 ? Math.max(...points) : 0;
+  if (points.length === 0 || max <= 0) return null;
   const bw = w / points.length - 4;
   return (
     <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
@@ -27,6 +35,7 @@ export function MiniBars({ points, color, width = 120, height = 60 }) {
 
 export function AreaLine({ points, color, width = 760, height = 160 }) {
   const w = width, h = height;
+  if (!points || points.length < 2) return null;
   const max = Math.max(...points), min = Math.min(...points);
   const stepX = w / (points.length - 1);
   const norm = (v) => h - 14 - ((v - min) / (max - min || 1)) * (h - 28);
@@ -43,7 +52,11 @@ export function AreaLine({ points, color, width = 760, height = 160 }) {
 }
 
 export function LabeledBars({ points, labels, color, width = 340, height = 140 }) {
-  const w = width, h = height, max = Math.max(...points);
+  const w = width, h = height;
+  const max = points.length > 0 ? Math.max(...points) : 0;
+  // Mesmo motivo do MiniBars. Devolver null deixa a tela mostrar o texto
+  // alternativo em vez de um gráfico invisível.
+  if (points.length === 0 || max <= 0) return null;
   const bw = w / points.length - 8;
   return (
     <svg width="100%" height={h + 18} viewBox={`0 0 ${w} ${h + 18}`}>

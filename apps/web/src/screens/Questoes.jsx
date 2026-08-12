@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { embaralhar, montarFontes } from '../lib/acervo';
 
@@ -46,6 +46,14 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
 
   const all = data.QUESTOES || [];
   const estado = acervo?.estado || 'pronto';
+
+  // O cronômetro de cada questão. Antes ele só começava a contar em
+  // `startQuiz`, o que deixava sem tempo todo quiz que NÃO nasce aqui — o
+  // "Revisar agora" das Revisões e o "Estudar" das Disciplinas montam o quiz
+  // de fora, e as respostas iam para o servidor com `tempo_seg` nulo.
+  useEffect(() => {
+    if (quest.quiz && !quest.done && quest.selectedAlt === null) setTempoInicio(Date.now());
+  }, [quest.quiz, quest.idx, quest.selectedAlt, quest.done]);
 
   const { criterio, chaveDe, fontes } = montarFontes(all);
   const chaves = fontes.map((f) => f.chave);

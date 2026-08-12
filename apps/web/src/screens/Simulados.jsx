@@ -1,20 +1,10 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
+import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
 import ConfigSimulado from '../components/ConfigSimulado';
 import Cronometro from '../components/Cronometro';
 
-const DISC_ICONS = {
-  'Direito Constitucional': 'landmark',
-  'Direito Administrativo': 'scale',
-  'Direito Civil': 'users',
-  'Direito Penal': 'gavel',
-  'Direito do Trabalho': 'briefcase',
-  'Direito Tributário': 'file-text',
-  'Direito Empresarial': 'building-2',
-  'Direito Internacional': 'book-open',
-};
-
-export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico, go }) {
+export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico, go, registrar, praticarDisciplina }) {
   const preDisciplina = sim?.preDisciplina || null;
   const [etapa, setEtapa] = useState(preDisciplina ? 'config' : 'lista');
   const [simulado, setSimulado] = useState(null);
@@ -68,6 +58,24 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
   };
 
   const finalizarSimulado = () => {
+    // O simulado gravava a nota num histórico local e jogava fora as respostas
+    // — então responder 80 questões em prova não mexia em nada no desempenho
+    // por disciplina, na taxa de acertos nem na revisão. Cada resposta agora
+    // vira uma tentativa no servidor, igual às do quiz.
+    //
+    // `tempoSeg` vai nulo de propósito: o simulado tem um cronômetro só para a
+    // prova inteira, e dividir o total pelo número de questões seria inventar
+    // um tempo por questão que ninguém mediu.
+    if (registrar) {
+      for (const q of simulado.questoes_pool) {
+        const resposta = simulado.respostas[q.id];
+        if (resposta === undefined) continue;   // em branco não é resposta
+        Promise.resolve(
+          registrar({ questaoId: q.id, correta: resposta === q.correta, alternativa: resposta, tempoSeg: null })
+        ).catch(() => { /* o App já avisa na faixa de erro do topo */ });
+      }
+    }
+
     const acertos = simulado.questoes_pool.filter(q => simulado.respostas[q.id] === q.correta).length;
     const tempoTotalMinutos = Math.max(1, Math.round((Date.now() - simulado.tempo_inicio) / 60000));
     const notaFinal = Math.round((acertos / simulado.quantidade) * 100);
@@ -138,46 +146,56 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
             <div style={{ width: 120, height: 3, borderRadius: 2, margin: '8px auto 0', background: `linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})` }} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginTop: 18 }}>
-            {DISCIPLINAS.map((d) => {
-              const qtd = QUESTOES.filter(q => q.disciplina === d.nome).length;
-              const temQuestoes = qtd > 0;
-              return (
-                <div key={d.nome} style={{ ...s.card, display: 'flex', flexDirection: 'column', gap: 12, padding: 22, opacity: temQuestoes ? 1 : 0.6 }}>
+          {/* As matérias aqui eram uma lista fixa de oito nomes; o acervo tem
+              dezoito, e as dez que faltavam não podiam ser treinadas. */}
+          {DISCIPLINAS.length === 0 ? (
+            <div style={{ ...s.card, textAlign: 'center', padding: '32px 20px', color: '#8b8391', fontSize: 13.5, marginTop: 18 }}>
+              Nenhuma disciplina no acervo ainda.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginTop: 18 }}>
+              {DISCIPLINAS.filter((d) => d.classificada !== false).map((d) => (
+                <div key={d.nome} style={{ ...s.card, display: 'flex', flexDirection: 'column', gap: 12, padding: 22 }}>
                   <div style={{ width: 52, height: 52, borderRadius: 14, background: `${d.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name={DISC_ICONS[d.nome] || 'library'} color={d.cor} size={26} />
+                    <Icon name={ICONE_POR_DISCIPLINA[d.nome] || 'library'} color={d.cor} size={26} />
                   </div>
                   <div>
                     <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{d.nome}</div>
                     <div style={{ fontSize: 12.5, color: '#8b8391', marginTop: 3 }}>
-                      {temQuestoes ? `${qtd} questões focadas e comentadas.` : 'Em breve.'}
+                      {d.total} {d.total === 1 ? 'questão' : 'questões'} no acervo
+                      {d.pct != null ? ` · ${d.pct}% de acerto seu` : ''}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
                     <button
-                      onClick={() => temQuestoes && abrirConfig(d.nome)}
-                      disabled={!temQuestoes}
-                      style={{ flex: 1, padding: '10px 12px', background: temQuestoes ? '#343a46' : '#c3c8d2', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: temQuestoes ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+                      onClick={() => abrirConfig(d.nome)}
+                      style={{ flex: 1, padding: '10px 12px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
                     >
-                      <Icon name="play" color="#fff" size={12} /> Iniciar Simulado
+                      <Icon name="play" color="#fff" size={12} /> Simulado
                     </button>
                     <button
-                      onClick={() => go && go('disciplinas')}
+                      onClick={() => (praticarDisciplina ? praticarDisciplina(d.nome) : go && go('disciplinas'))}
                       style={{ padding: '10px 14px', background: '#fff', color: '#5c5462', border: '1px solid #e3e7ee', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
                     >
                       Estudar
                     </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Histórico */}
         {hist.length > 0 && (
           <div style={s.card}>
             <div style={s.sectionTitle}><Icon name="chart-column" color={theme.primary} size={18} />Histórico de Simulados</div>
+            <div style={{ fontSize: 11.5, color: '#8b8391', marginTop: 6, lineHeight: 1.5 }}>
+              As respostas de cada simulado entram no seu histórico no servidor
+              e contam no desempenho por disciplina. Já a nota final da prova
+              fica guardada neste navegador — ainda não existe rota de simulado
+              na API.
+            </div>
             {hist.map(r => (
               <div key={r.id} style={{ padding: 12, borderBottom: '1px solid rgba(0,0,0,.05)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

@@ -494,3 +494,231 @@ test.describe('Acervo vindo do servidor', () => {
     await expect(page.locator('[data-testid="gerar-quiz"]')).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Quem está usando o app, e o que é preferência da conta
+// ---------------------------------------------------------------------------
+//
+// Até esta fatia o front respondia "quem é você?" com uma linha de código:
+//
+//   configuracoes: { name: 'Maria Laís', email: 'maria.lais@email.com', ... }
+//
+// Todo mundo que entrava virava Maria Laís, e a data da prova era uma
+// constante ('2027-02-28') sem nenhum campo que a editasse. Estes testes
+// existem porque nada disso quebrava a tela: o app ficava verde mostrando o
+// nome de outra pessoa.
+test.describe('Perfil e preferências', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+  });
+
+  // Conta nova a cada execução: o nome tem de vir do servidor, e reusar uma
+  // conta fixa esconderia um front que só lê o que ele mesmo salvou antes.
+  async function criarConta(page, nome) {
+    const email = `perfil-${Date.now()}@exemplo.test`;
+    await page.click('[data-testid="trocar-modo"]');
+    await page.fill('[data-testid="campo-nome"]', nome);
+    await page.fill('input[type="email"]', email);
+    await page.fill('#campo-senha', 'senha-de-teste-123');
+    await page.fill('[data-testid="campo-confirmacao"]', 'senha-de-teste-123');
+    await page.click('button[type="submit"]');
+    await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+    return email;
+  }
+
+  test('a tela mostra o nome de quem entrou, não um nome fixo', async ({ page }) => {
+    await criarConta(page, 'Joana Ribeiro');
+
+    // O perfil vem do user-service, criado pelo evento `user.registered`, e
+    // pode demorar um instante depois do cadastro.
+    await expect(page.locator('[data-testid="perfil-nome"]')).toHaveText('Joana Ribeiro', { timeout: 10000 });
+
+    // A saudação usa só o primeiro nome, e o avatar as iniciais do primeiro e
+    // do último — "JR", não "JO".
+    await expect(page.locator('text=Olá, Joana!')).toBeVisible();
+    await expect(page.locator('[data-testid="avatar"]')).toHaveText('JR');
+
+    // A afirmação que pega a regressão inteira: o nome que estava escrito no
+    // código não pode aparecer em lugar nenhum desta sessão.
+    await expect(page.locator('body')).not.toContainText('Maria Laís');
+  });
+
+  test('meta e data da prova ficam na conta, não no navegador', async ({ page }) => {
+    const email = await criarConta(page, 'Preferências');
+
+    await page.click('[data-testid="nav-configuracoes"]');
+
+    // O e-mail é o do cadastro e não é editável: trocá-lo aqui mudaria só o
+    // user-service, e o login continuaria com o antigo.
+    await expect(page.locator('input[readonly]')).toHaveValue(email);
+
+    await page.fill('[data-testid="campo-meta"]', '7');
+    await page.fill('[data-testid="campo-data-prova"]', '2030-03-10');
+
+    // Espera a preferência chegar ao servidor antes de apagar o navegador —
+    // é justamente o que o teste quer provar que aconteceu.
+    await expect.poll(async () => page.evaluate(async () => {
+      const token = localStorage.getItem('ma-questoes-token-v1');
+      const id = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).id;
+      const res = await fetch(`/api/users/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      return (await res.json())?.profile_data?.meta ?? null;
+    }), { timeout: 10000 }).toBe(7);
+
+    // Navegador zerado: só sobrevive o que está na conta.
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.fill('input[type="email"]', email);
+    await page.fill('#campo-senha', 'senha-de-teste-123');
+    await page.click('button[type="submit"]');
+    await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+
+    // A meta voltou: o dashboard mostra 0/7, e não o padrão 0/20.
+    await expect(page.locator('text=0/7 questões')).toBeVisible({ timeout: 10000 });
+
+    // E a data também: o topo conta os dias em vez de pedir a data.
+    await expect(page.locator('text=para a prova da OAB')).toBeVisible();
+    await expect(page.locator('text=Definir data')).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Revisões: as abas que não filtravam
+// ---------------------------------------------------------------------------
+//
+// O código era `let filtered = all` com dois `if` que quase nunca casavam:
+// clicar em "Errei" listava o acervo inteiro, com a etiqueta vermelha "Errei"
+// colada até em questão acertada. Um teste que só contasse linhas continuaria
+// verde; por isso estes cobram a MESMA questão em duas abas diferentes.
+test.describe('Revisões', () => {
+  test.beforeEach(async ({ page }) => {
+    await entrar(page);
+  });
+
+  test('a questão respondida sai de "nunca respondi" e cai na aba certa', async ({ page }) => {
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('[data-testid="gerar-quiz"]');
+
+    const enunciado = await page.locator('[data-testid="enunciado"]').innerText();
+    await page.click('[data-testid="alt-0"]');
+
+    // A própria tela diz se foi acerto ou erro; o teste não precisa conhecer o
+    // gabarito do acervo de teste para saber onde a questão deve aparecer.
+    const acertou = await page.locator('text=Acertou!').isVisible();
+    await page.click('text=Foi chute');
+
+    await page.click('[data-testid="nav-revisoes"]');
+
+    // Respondida é respondida: não pode continuar em "Nunca respondi".
+    await page.click('[data-testid="aba-aberto"]');
+    await expect(page.locator('body')).not.toContainText(enunciado);
+
+    await page.click('[data-testid="aba-errei"]');
+    if (acertou) {
+      // O bug antigo aparecia exatamente aqui: acertada listada em "Errei".
+      await expect(page.locator('body')).not.toContainText(enunciado);
+    } else {
+      await expect(page.locator('body')).toContainText(enunciado);
+    }
+  });
+
+  test('"Revisar agora" abre um quiz com a questão escolhida', async ({ page }) => {
+    // Responde uma questão aqui mesmo em vez de contar com o que outro teste
+    // deixou: a aba "Nunca respondi" fica vazia depois que a suíte percorre o
+    // acervo de teste, e um teste que depende da ordem de execução é um teste
+    // que quebra sozinho.
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('[data-testid="gerar-quiz"]');
+    await expect(page.locator('[data-testid="alt-0"]')).toBeVisible();
+    await page.click('[data-testid="alt-0"]');
+    await page.click('text=Foi chute');
+
+    await page.click('[data-testid="nav-revisoes"]');
+    await page.click('[data-testid="aba-menor"]');
+
+    const primeiroItem = page.locator('[data-testid^="revisao-item-"]').first();
+    await expect(primeiroItem).toBeVisible();
+
+    const id = (await primeiroItem.getAttribute('data-testid')).replace('revisao-item-', '');
+    const naLista = await page.locator(`[data-testid="revisao-enunciado-${id}"]`).innerText();
+
+    // O botão existia e não fazia nada: era um `<button>` sem onClick.
+    await page.click(`[data-testid="revisar-${id}"]`);
+
+    const enunciado = page.locator('[data-testid="enunciado"]');
+    await expect(enunciado).toBeVisible();
+
+    // A questão aberta tem de ser AQUELA, e não uma qualquer do acervo.
+    expect(await enunciado.innerText()).toBe(naLista);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Todas as telas abrem
+// ---------------------------------------------------------------------------
+//
+// Metade das telas do menu não aparecia em teste nenhum — e são justamente as
+// que passaram a calcular tudo a partir do histórico. Um `undefined.map()` em
+// qualquer uma delas apaga a página inteira (o React desmonta a árvore) e o
+// resto da suíte continua verde, porque ninguém clica ali.
+//
+// Este teste não verifica conteúdo: verifica que a tela monta, que o título
+// dela aparece e que nada explodiu no console.
+test.describe('Todas as telas', () => {
+  const TELAS = [
+    ['dashboard', 'Vamos continuar rumo'],
+    ['cronograma', 'Uma sugestão de semana'],
+    ['questoes', 'gabarito oficial da FGV'],
+    ['simulados', 'condições reais de prova'],
+    ['revisoes', 'O que você errou'],
+    ['desempenho', 'Acompanhe sua evolução'],
+    ['estatisticas', 'Números detalhados'],
+    ['favoritos', 'marcou como favoritas'],
+    ['disciplinas', 'aproveitamento em cada matéria'],
+    ['anotacoes', 'guardados neste navegador'],
+    ['configuracoes', 'Preferências da sua conta'],
+  ];
+
+  test('cada item do menu abre a tela correspondente, sem erro no console', async ({ page }) => {
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e)));
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') erros.push(msg.text());
+    });
+
+    await entrar(page);
+
+    for (const [tela, marca] of TELAS) {
+      await page.click(`[data-testid="nav-${tela}"]`);
+      await expect(page.locator(`text=${marca}`).first()).toBeVisible({ timeout: 5000 });
+      // A barra lateral tem de continuar de pé: se a tela quebrou, o React
+      // desmonta a árvore inteira e nem o menu sobra.
+      await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+    }
+
+    // Um erro no console aqui costuma ser exatamente o `undefined.map()` que
+    // este teste existe para pegar.
+    expect(erros).toEqual([]);
+  });
+
+  test('as telas de detalhe também abrem: disciplina e anotação', async ({ page }) => {
+    await entrar(page);
+
+    await page.click('[data-testid="nav-disciplinas"]');
+    const verTemas = page.locator('button:has-text("Ver temas")').first();
+    if (await verTemas.isVisible()) {
+      await verTemas.click();
+      await expect(page.locator('text=Temas')).toBeVisible();
+      await page.click('text=Voltar às disciplinas');
+    }
+
+    // O caderno começa vazio: criar e apagar é o ciclo inteiro da tela.
+    await page.click('[data-testid="nav-anotacoes"]');
+    await page.click('[data-testid="nova-anotacao"]');
+    await expect(page.locator('textarea')).toBeVisible();
+    await page.locator('textarea').fill('Anotação de teste');
+    await page.click('[data-testid="apagar-anotacao"]');
+    await expect(page.locator('text=Crie uma com o botão')).toBeVisible();
+  });
+});

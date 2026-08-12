@@ -6,11 +6,9 @@ import {
   metaDiaria,
   resumoSimulados,
   desempenhoPorSimulado,
-  materiasMaisEstudadas,
-  menorDesempenho,
   evolucaoPorDisciplina,
-  desempenhoCompleto,
 } from '../lib/metrics';
+import { prioridadeDeEstudo } from '../lib/disciplinas';
 
 function iw(from, to) {
   return { width: 38, height: 38, borderRadius: 11, background: `linear-gradient(135deg, ${from}, ${to})`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
@@ -31,15 +29,14 @@ const STATUS_META = {
 };
 
 function EmptyHint({ children }) {
-  return <div style={{ fontSize: 12.5, color: '#8b8391', padding: '10px 0' }}>{children}</div>;
+  return <div style={{ fontSize: 12.5, color: '#8b8391', padding: '10px 0', lineHeight: 1.5 }}>{children}</div>;
 }
 
-export default function Dashboard({ theme, s, data, go, dash, setDash, config, usuarioTentativas, resultados_historico }) {
+export default function Dashboard({ theme, s, data, go, dash, setDash, config, usuarioTentativas, resultados_historico, disciplinas, praticarDisciplina, acervo }) {
   const tentativas = usuarioTentativas || {};
   const resultados = resultados_historico || [];
   const questoes = data.QUESTOES || [];
-  const disciplinasBase = (data.DISCIPLINAS || []).map((d) => d.nome);
-  const corPorDisciplina = Object.fromEntries((data.DISCIPLINAS || []).map((d) => [d.nome, d.cor]));
+  const corPorDisciplina = Object.fromEntries((disciplinas || []).map((d) => [d.nome, d.cor]));
 
   // ---- Métricas (derivadas dos dados reais) ----
   const taxa = taxaDeAcertos(tentativas, resultados, questoes);
@@ -51,12 +48,21 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
   const simResumo = resumoSimulados(resultadosPeriodo);
   const simPorTipo = desempenhoPorSimulado(resultadosPeriodo);
 
-  const maisEstudadas = materiasMaisEstudadas(tentativas, questoes);
-  const piores = menorDesempenho(tentativas, questoes);
-  const evolucao = evolucaoPorDisciplina(tentativas, questoes).slice(0, 3);
-  const tabela = desempenhoCompleto(tentativas, questoes, disciplinasBase);
+  const prioridade = prioridadeDeEstudo(disciplinas || []);
+  const proxima = prioridade[0] || null;
 
-  const maxRespondidas = Math.max(1, ...maisEstudadas.map((d) => d.respondidas));
+  const maisEstudadas = [...(disciplinas || [])]
+    .filter((d) => d.tentativas > 0)
+    .sort((a, b) => b.tentativas - a.tentativas)
+    .slice(0, 3);
+
+  const piores = (disciplinas || [])
+    .filter((d) => d.pct != null)
+    .sort((a, b) => a.pct - b.pct)
+    .slice(0, 3);
+
+  const evolucao = evolucaoPorDisciplina(tentativas, questoes).slice(0, 3);
+  const maxTentativas = Math.max(1, ...maisEstudadas.map((d) => d.tentativas));
 
   const stats = [
     {
@@ -90,44 +96,57 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
         ))}
       </div>
 
-      {/* Cronograma + Desempenho geral (simulados) */}
+      {/* Meta de hoje + Desempenho em simulados */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start' }}>
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}><Icon name="calendar" color={theme.primary} size={20} />Cronograma</div>
-            <a href="#" onClick={(e) => { e.preventDefault(); go('cronograma'); }} style={s.link}>Ver calendário</a>
+            <div style={s.sectionTitle}><Icon name="calendar" color={theme.primary} size={20} />Hoje</div>
+            <a href="#" onClick={(e) => { e.preventDefault(); go('cronograma'); }} style={s.link}>Ver a semana</a>
           </div>
           <div style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#5c5462', marginBottom: 8 }}>
               <span>Meta de hoje</span><span style={{ fontWeight: 700, color: '#2c2530' }}>{meta.respondidas}/{meta.meta} questões</span>
             </div>
-            <div style={s.progressTrack}><div style={{ width: `${meta.pct}%`, height: '100%', background: `linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})`, borderRadius: 5 }} /></div>
+            <div style={s.progressTrack}><div style={{ width: `${meta.pct}%`, height: '100%', background: `linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})`, borderRadius: 5, transition: 'width 320ms var(--ease-out)' }} /></div>
             <div style={{ fontSize: 12, color: '#8b8391', marginTop: 8 }}>
               {meta.batida ? '🎉 Você bateu a meta de hoje!' : `Faltam ${meta.faltam} questões para bater a meta de hoje.`}
             </div>
           </div>
+
+          {/* O "próximo passo" agora aponta para uma disciplina de verdade e diz
+              por que ela: antes era sempre o mesmo cartão, e o botão levava
+              para a tela de questões sem filtrar nada. */}
           <div style={{ marginTop: 18, background: theme.primarySoft, borderRadius: 14, padding: 16 }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: theme.primary, textTransform: 'uppercase', letterSpacing: '.3px' }}>Próximo passo</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: `linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: proxima ? proxima.cor : `linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
                 <Icon name="book-open" color="#fff" size={20} />
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: '#2c2530' }}>
-                  {piores.length ? `Reforçar ${piores[0].disciplina}` : 'Praticar questões'}
+                  {proxima ? proxima.nome : 'Praticar questões'}
                 </div>
                 <div style={{ fontSize: 12.5, color: '#8b8391' }}>
-                  {piores.length ? `Sua menor taxa: ${piores[0].pct}% de acerto` : 'Responda questões para gerar seus indicadores'}
+                  {proxima
+                    ? proxima.pct != null
+                      ? `${proxima.pct}% de acerto em ${proxima.tentativas} ${proxima.tentativas === 1 ? 'resposta' : 'respostas'}`
+                      : `${proxima.total} ${proxima.total === 1 ? 'questão' : 'questões'} que você ainda não respondeu`
+                    : acervo?.estado === 'carregando' ? 'carregando o acervo…' : 'o acervo ainda não tem questões classificadas'}
                 </div>
               </div>
-              <button style={s.btnPrimary} onClick={() => go('questoes')}>▶ Praticar</button>
+              <button
+                style={s.btnPrimary}
+                onClick={() => (proxima ? praticarDisciplina(proxima.nome) : go('questoes'))}
+              >
+                <Icon name="play" color="#fff" size={13} /> Praticar
+              </button>
             </div>
           </div>
         </div>
 
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}>Desempenho geral</div>
+            <div style={s.sectionTitle}>Simulados</div>
             <select
               style={{ fontSize: 12, border: '1px solid rgba(0,0,0,.08)', borderRadius: 8, padding: '5px 8px', color: '#5c5462', background: '#fff' }}
               value={period}
@@ -156,7 +175,6 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
               {simResumo.serie.length >= 2 && (
                 <div style={{ marginTop: 14 }}><Sparkline points={simResumo.serie} color={theme.primary} /></div>
               )}
-              {/* Detalhe por simulado (hover mostra qual simulado) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
                 {simPorTipo.map((sim, i) => (
                   <div
@@ -176,7 +194,7 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
         </div>
       </div>
 
-      {/* Evolução dos estudos — por disciplina (Opção C) */}
+      {/* Evolução dos estudos — por disciplina */}
       <div style={s.card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={s.sectionTitle}>Evolução dos estudos <span style={{ fontSize: 12, fontWeight: 400, color: '#8b8391' }}>· por disciplina</span></div>
@@ -214,12 +232,12 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
           {maisEstudadas.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
               {maisEstudadas.map((d) => (
-                <div key={d.disciplina}>
+                <div key={d.nome}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                    <span style={{ color: '#2c2530', fontWeight: 500 }}>{d.disciplina}</span>
-                    <span style={{ color: '#8b8391' }}>{d.respondidas} {d.respondidas === 1 ? 'questão' : 'questões'}</span>
+                    <span style={{ color: '#2c2530', fontWeight: 500 }}>{d.nome}</span>
+                    <span style={{ color: '#8b8391' }}>{d.tentativas} {d.tentativas === 1 ? 'resposta' : 'respostas'}</span>
                   </div>
-                  <div style={{ ...s.progressTrack, marginTop: 6 }}><div style={{ width: `${Math.round((d.respondidas / maxRespondidas) * 100)}%`, height: '100%', background: corPorDisciplina[d.disciplina] || theme.primary, borderRadius: 5 }} /></div>
+                  <div style={{ ...s.progressTrack, marginTop: 6 }}><div style={{ width: `${Math.round((d.tentativas / maxTentativas) * 100)}%`, height: '100%', background: d.cor, borderRadius: 5 }} /></div>
                 </div>
               ))}
             </div>
@@ -234,9 +252,9 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
           {piores.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
               {piores.map((d) => (
-                <div key={d.disciplina}>
+                <div key={d.nome}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                    <span style={{ color: '#2c2530', fontWeight: 500 }}>{d.disciplina}</span>
+                    <span style={{ color: '#2c2530', fontWeight: 500 }}>{d.nome}</span>
                     <span style={{ color: '#EF4444', fontWeight: 600 }}>{d.pct}%</span>
                   </div>
                   <div style={{ ...s.progressTrack, marginTop: 6 }}><div style={{ width: d.pct + '%', height: '100%', background: '#EF4444', borderRadius: 5 }} /></div>
@@ -249,43 +267,56 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
         </div>
       </div>
 
-      {/* Desempenho completo — tabela de todas as disciplinas (Opção A) */}
+      {/* Desempenho completo — todas as disciplinas DO ACERVO */}
       <div style={s.card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={s.sectionTitle}>Desempenho completo</div>
           <a href="#" onClick={(e) => { e.preventDefault(); go('desempenho'); }} style={s.link}>Abrir análise</a>
         </div>
-        <div style={{ overflowX: 'auto', marginTop: 12 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: 'left', color: '#8b8391', fontSize: 11.5 }}>
-                <th style={{ padding: '8px 10px', fontWeight: 600 }}>Disciplina</th>
-                <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Respondidas</th>
-                <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Acertos</th>
-                <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>% Acerto</th>
-                <th style={{ padding: '8px 10px', fontWeight: 600 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tabela.map((d) => {
-                const st = STATUS_META[d.status] || STATUS_META.novo;
-                return (
-                  <tr key={d.disciplina} style={{ borderTop: '1px solid rgba(0,0,0,.05)' }}>
-                    <td style={{ padding: '9px 10px', color: '#2c2530' }}>{d.disciplina}</td>
-                    <td style={{ padding: '9px 10px', textAlign: 'right', color: '#5c5462' }}>{d.respondidas}</td>
-                    <td style={{ padding: '9px 10px', textAlign: 'right', color: '#5c5462' }}>{d.acertos}</td>
-                    <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: d.respondidas === 0 ? '#8b8391' : d.pct >= 70 ? '#10B981' : d.pct >= 50 ? '#B45309' : '#EF4444' }}>
-                      {d.respondidas === 0 ? '—' : `${d.pct}%`}
-                    </td>
-                    <td style={{ padding: '9px 10px' }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: st.color, background: st.bg, padding: '3px 8px', borderRadius: 20 }}>{st.label}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        {(disciplinas || []).length === 0 ? (
+          <EmptyHint>
+            {acervo?.estado === 'carregando'
+              ? 'Carregando o acervo…'
+              : 'Nenhuma disciplina no acervo ainda. As matérias aparecem aqui conforme as provas são carregadas e classificadas.'}
+          </EmptyHint>
+        ) : (
+          <div style={{ overflowX: 'auto', marginTop: 12 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: '#8b8391', fontSize: 11.5 }}>
+                  <th style={{ padding: '8px 10px', fontWeight: 600 }}>Disciplina</th>
+                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>No acervo</th>
+                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Respondidas</th>
+                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Acertos</th>
+                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>% Acerto</th>
+                  <th style={{ padding: '8px 10px', fontWeight: 600 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {disciplinas.map((d) => {
+                  const st = STATUS_META[d.status] || STATUS_META.novo;
+                  return (
+                    <tr key={d.nome} style={{ borderTop: '1px solid rgba(0,0,0,.05)' }}>
+                      <td style={{ padding: '9px 10px', color: '#2c2530' }}>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: d.cor, marginRight: 8 }} />
+                        {d.nome}
+                      </td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#5c5462' }}>{d.total}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#5c5462' }}>{d.respondidas}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#5c5462' }}>{d.acertos}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: d.pct == null ? '#8b8391' : d.pct >= 70 ? '#10B981' : d.pct >= 50 ? '#B45309' : '#EF4444' }}>
+                        {d.pct == null ? '—' : `${d.pct}%`}
+                      </td>
+                      <td style={{ padding: '9px 10px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: st.color, background: st.bg, padding: '3px 8px', borderRadius: 20 }}>{st.label}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

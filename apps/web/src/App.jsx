@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { THEMES } from './lib/theme';
-import { buildStyles } from './lib/theme';
+import { THEMES, buildStyles } from './lib/theme';
 import { Icon } from './lib/icons';
-import { NAV, PAGE_META, DISCIPLINAS, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS } from './lib/mockData';
-import { loadState, saveState } from './lib/storage';
-import { diasAteProva } from './lib/metrics';
-import { getToken, logout, listarTentativas, listarQuestoes, registrarTentativa, anotarFeedbackTentativa } from './lib/api';
+import { NAV, PAGE_META } from './lib/navegacao';
+import { loadState, saveState, limparEstado } from './lib/storage';
+import { diasAteProva, metaDiaria, sequenciaAtual } from './lib/metrics';
+import { montarDisciplinas, prioridadeDeEstudo } from './lib/disciplinas';
+import { classificarRevisao } from './lib/revisao';
+import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
+import {
+  getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
+  anotarFeedbackTentativa, buscarPerfil, salvarPerfil,
+} from './lib/api';
 
 import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';
@@ -20,61 +25,39 @@ import Anotacoes from './screens/Anotacoes';
 import Favoritos from './screens/Favoritos';
 import Configuracoes from './screens/Configuracoes';
 
+// O que é da INTERFACE começa aqui. O que é da PESSOA — nome, e-mail, meta,
+// data da prova — vem do servidor: até esta versão, `configuracoes` trazia
+// "Maria Laís / maria.lais@email.com" escrito no código, e todo mundo que
+// entrava no app virava Maria Laís.
+//
+// `__usuario` guarda de quem é o estado salvo neste navegador. Sem ele, sair
+// de uma conta e entrar em outra no mesmo computador herdava favoritos,
+// anotações e histórico de simulado da pessoa anterior.
 const DEFAULT_STATE = {
+  __usuario: null,
   theme: 'rosa',
   screen: 'dashboard',
   dashboard: { period: '7' },
-  cronograma: { tab: 'semanal', progress: null },
+  cronograma: {},
   questoes: { selected: null, quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
   simulados: { running: {}, resultados_historico: [] },
   revisoes: { tab: 'todas' },
-  desempenho: { period: '7' },
+  desempenho: { period: '6' },
   estatisticas: { range: '30d', disc: 'Todas' },
   disciplinas: { openNome: null },
-  anotacoes: { folder: 'Todas', activeId: null, edits: {}, extra: [] },
+  anotacoes: { folder: 'Todas', activeId: null, itens: [] },
   favoritos: [],
-  configuracoes: { name: 'Maria Laís', email: 'maria.lais@email.com', meta: 20, dataProva: '2027-02-28', notif: [true, true, false] },
-  usuarioTentativas: {},
+  configuracoes: { meta: 20, dataProva: null },
   resultados_historico: [],
 };
-
-function calcularDesempenho(usuarioTentativas, questoes) {
-  const porTopico = {};
-
-  Object.entries(usuarioTentativas).forEach(([qId, hist]) => {
-    // Comparação por texto: a chave vem do banco como string, e o id gerado
-    // por IA ("q-1786...-a3f9x") não é numérico. Um parseInt aqui devolveria
-    // NaN e a questão sumiria da conta sem erro nenhum.
-    const questao = questoes.find(q => String(q.id) === String(qId));
-    if (!questao) return;
-
-    // Sem classificação por matéria, `topico` vem nulo do acervo. Agrupar
-    // tudo sob "undefined" produziria uma linha de desempenho sem nome; é
-    // melhor deixar a questão de fora da conta por tópico até ela ter um.
-    const topico = questao.topico;
-    if (!topico) return;
-    if (!porTopico[topico]) {
-      porTopico[topico] = { acertos: 0, total: 0 };
-    }
-
-    const tentativas = hist.tentativas || [];
-    porTopico[topico].total += tentativas.length;
-    porTopico[topico].acertos += tentativas.filter(t => t.correta === true).length;
-  });
-
-  return Object.entries(porTopico).map(([topico, stats]) => ({
-    topico,
-    pct: stats.total > 0 ? Math.round((stats.acertos / stats.total) * 100) : 0,
-    status: stats.total === 0 ? 'novo' : (stats.acertos / stats.total) > 0.8 ? 'domina' :
-            (stats.acertos / stats.total) > 0.4 ? 'em-desenvolvimento' : 'necessita'
-  }));
-}
 
 export default function App() {
   const [state, setState] = useState(() => loadState(DEFAULT_STATE));
   const [notifOpen, setNotifOpen] = useState(false);
   const [sessao, setSessao] = useState(() => (getToken() ? 'ativa' : 'ausente'));
   const [erroSync, setErroSync] = useState(null);
+  const [usuarioTentativas, setUsuarioTentativas] = useState({});
+  const [perfil, setPerfil] = useState({ estado: 'carregando', id: null, name: null, email: null });
 
   // O acervo é do servidor, não do bundle. Guardar o estado do carregamento
   // junto com as questões — e não só a lista — é o que permite a tela
@@ -84,14 +67,54 @@ export default function App() {
   const [recarga, setRecarga] = useState(0);
 
   useEffect(() => {
-    // `usuarioTentativas` fica de fora do localStorage: a fonte de verdade
-    // passou a ser o servidor. Uma cópia local viraria uma segunda fonte,
-    // que diverge em silêncio no primeiro POST que falhar.
-    const local = { ...state };
-    delete local.usuarioTentativas;
-    saveState(local);
+    saveState(state);
   }, [state]);
 
+  // ---- Perfil: quem está usando o app ----
+  useEffect(() => {
+    if (sessao !== 'ativa') return undefined;
+
+    const payload = payloadDoToken(getToken());
+    if (!payload) { setSessao('ausente'); return undefined; }
+
+    let cancelado = false;
+
+    buscarPerfil(payload.id)
+      .then((p) => {
+        if (cancelado) return;
+        setPerfil({ estado: 'pronto', id: p.id, name: p.name, email: p.email || payload.email });
+
+        setState((st) => {
+          // Estado de outra conta neste navegador: recomeça do zero em vez de
+          // mostrar os favoritos e as anotações de outra pessoa.
+          const base = String(st.__usuario) === String(p.id) ? st : { ...DEFAULT_STATE, theme: st.theme };
+          const prefs = p.preferencias || {};
+
+          return {
+            ...base,
+            __usuario: p.id,
+            configuracoes: {
+              ...base.configuracoes,
+              // O servidor manda em meta e data da prova: são as preferências
+              // que precisam seguir a pessoa de um aparelho para o outro.
+              ...(prefs.meta != null ? { meta: prefs.meta } : {}),
+              ...(prefs.dataProva !== undefined ? { dataProva: prefs.dataProva } : {}),
+            },
+          };
+        });
+      })
+      .catch((err) => {
+        if (cancelado) return;
+        if (err.status === 401) { setSessao('ausente'); return; }
+        // Perfil é o nome no canto da tela: sem ele o app funciona inteiro.
+        // Cair aqui não pode virar tela de erro — vira nome vazio.
+        setPerfil({ estado: 'erro', id: payload.id, name: null, email: payload.email });
+      });
+
+    return () => { cancelado = true; };
+  }, [sessao]);
+
+  // ---- Histórico de tentativas ----
   useEffect(() => {
     if (sessao !== 'ativa') return undefined;
 
@@ -100,9 +123,7 @@ export default function App() {
     let cancelado = false;
 
     listarTentativas()
-      .then((tentativas) => {
-        if (!cancelado) setState((st) => ({ ...st, usuarioTentativas: tentativas }));
-      })
+      .then((tentativas) => { if (!cancelado) setUsuarioTentativas(tentativas); })
       .catch((err) => {
         if (cancelado) return;
         if (err.status === 401) { setSessao('ausente'); return; }
@@ -112,6 +133,7 @@ export default function App() {
     return () => { cancelado = true; };
   }, [sessao]);
 
+  // ---- Acervo ----
   useEffect(() => {
     if (sessao !== 'ativa') return undefined;
 
@@ -119,9 +141,7 @@ export default function App() {
     setAcervo((a) => ({ ...a, estado: 'carregando', erro: null }));
 
     listarQuestoes()
-      .then((questoes) => {
-        if (!cancelado) setAcervo({ estado: 'pronto', questoes, erro: null });
-      })
+      .then((questoes) => { if (!cancelado) setAcervo({ estado: 'pronto', questoes, erro: null }); })
       .catch((err) => {
         if (cancelado) return;
         if (err.status === 401) { setSessao('ausente'); return; }
@@ -138,9 +158,21 @@ export default function App() {
   const theme = THEMES[state.theme] || THEMES.rosa;
   const s = useMemo(() => buildStyles(theme), [theme]);
 
+  // A lista de disciplinas é derivada do acervo carregado e do histórico. Era
+  // uma constante de oito nomes com percentuais fixos; o acervo tem 18.
+  const disciplinas = useMemo(
+    () => montarDisciplinas(acervo.questoes, usuarioTentativas),
+    [acervo.questoes, usuarioTentativas]
+  );
+
+  const revisao = useMemo(
+    () => classificarRevisao(acervo.questoes, usuarioTentativas, state.favoritos),
+    [acervo.questoes, usuarioTentativas, state.favoritos]
+  );
+
   const DATA = useMemo(
-    () => ({ DISCIPLINAS, QUESTOES: acervo.questoes, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS }),
-    [acervo.questoes]
+    () => ({ QUESTOES: acervo.questoes, DISCIPLINAS: disciplinas }),
+    [acervo.questoes, disciplinas]
   );
 
   const goTo = (screen) => setState((st) => ({ ...st, screen }));
@@ -150,7 +182,9 @@ export default function App() {
   const toggleFavorito = (id) =>
     setState((st) => ({
       ...st,
-      favoritos: st.favoritos.includes(id) ? st.favoritos.filter((x) => x !== id) : [...st.favoritos, id],
+      favoritos: st.favoritos.map(String).includes(String(id))
+        ? st.favoritos.filter((x) => String(x) !== String(id))
+        : [...st.favoritos, id],
     }));
 
   const setTheme = (themeKey) => setState((st) => ({ ...st, theme: themeKey }));
@@ -171,6 +205,42 @@ export default function App() {
   // fica esperando a próxima pessoa que entrar neste navegador.
   const sessaoEpoch = useRef(0);
 
+  // As gravações de preferência entram numa fila de um só: quem edita a meta e
+  // logo em seguida a data da prova dispara dois PUT, e sem a fila eles correm
+  // soltos — se o primeiro chegar ao servidor depois do segundo, o valor mais
+  // novo é sobrescrito pelo mais velho e a tela mostra uma coisa que o banco
+  // não tem. Foi assim que o teste de e2e ficou intermitente.
+  const gravacaoDePreferencias = useRef(Promise.resolve());
+
+  // Meta e data da prova vão para o servidor (coluna profile_data); o estado
+  // local muda na hora para a tela não ficar esperando a rede.
+  const atualizarConfig = (partial) => {
+    const configuracoes = { ...state.configuracoes, ...partial };
+
+    // O `setState` fica com a função pura. Disparar a rede de dentro dele
+    // seria efeito colateral num updater — o React pode reexecutá-lo (e em
+    // StrictMode reexecuta sempre), o que dobrava cada gravação.
+    setState((st) => ({ ...st, configuracoes: { ...st.configuracoes, ...partial } }));
+
+    if (perfil.id == null) return;
+
+    gravacaoDePreferencias.current = gravacaoDePreferencias.current
+      .then(() => salvarPerfil(perfil.id, { preferencias: { meta: configuracoes.meta, dataProva: configuracoes.dataProva } }))
+      .catch((err) => setErroSync(`Preferência não salva no servidor: ${err.message}`));
+  };
+
+  const atualizarNome = async (nome) => {
+    if (perfil.id == null) return false;
+    try {
+      const p = await salvarPerfil(perfil.id, { nome });
+      setPerfil((atual) => ({ ...atual, name: p.name }));
+      return true;
+    } catch (err) {
+      setErroSync(`Nome não salvo: ${err.message}`);
+      return false;
+    }
+  };
+
   // Grava no servidor primeiro e só depois no estado: o que aparece na tela
   // como respondido é o que a API confirmou ter gravado.
   const registrar = ({ questaoId, correta, alternativa, tempoSeg }) => {
@@ -187,15 +257,12 @@ export default function App() {
         // promessa; só o estado da interface fica de fora.
         if (sessaoEpoch.current !== epoch) return tentativa;
 
-        setState((st) => {
-          const registro = st.usuarioTentativas[questaoId] || { tentativas: [], desempenho: 'necessita' };
-          return {
-            ...st,
-            usuarioTentativas: {
-              ...st.usuarioTentativas,
-              [questaoId]: { ...registro, tentativas: [...registro.tentativas, tentativa] },
-            },
-          };
+        // O histórico saiu de `state` e virou estado próprio: ele é do
+        // servidor e não do localStorage, e misturá-lo com a interface fazia
+        // toda resposta gravada reescrever a fatia inteira de preferências.
+        setUsuarioTentativas((atual) => {
+          const registro = atual[questaoId] || { tentativas: [], desempenho: 'necessita' };
+          return { ...atual, [questaoId]: { ...registro, tentativas: [...registro.tentativas, tentativa] } };
         });
         return tentativa;
       } catch (err) {
@@ -229,9 +296,9 @@ export default function App() {
     // esta linha roda — devolver a tela ao estado anterior por causa de um
     // PATCH que falhou seria mais confuso que o erro.
     const aplicarLocal = (patch) =>
-      setState((st) => {
-        const registro = st.usuarioTentativas[questaoId];
-        if (!registro || registro.tentativas.length === 0) return st;
+      setUsuarioTentativas((atual) => {
+        const registro = atual[questaoId];
+        if (!registro || registro.tentativas.length === 0) return atual;
 
         const tentativas = registro.tentativas.slice();
         // Por id quando ele existe: numa questão respondida mais de uma vez,
@@ -240,13 +307,10 @@ export default function App() {
         const alvo = tentativa?.id
           ? tentativas.findIndex((t) => t.id === tentativa.id)
           : tentativas.length - 1;
-        if (alvo < 0) return st;
+        if (alvo < 0) return atual;
 
         tentativas[alvo] = { ...tentativas[alvo], ...patch };
-        return {
-          ...st,
-          usuarioTentativas: { ...st.usuarioTentativas, [questaoId]: { ...registro, tentativas } },
-        };
+        return { ...atual, [questaoId]: { ...registro, tentativas } };
       });
 
     aplicarLocal({ tipo, certeza });
@@ -263,6 +327,25 @@ export default function App() {
     }
   };
 
+  // "Revisar agora" e "Iniciar estudo" existiam como botões que não faziam
+  // nada. Agora montam um quiz de verdade com as questões pedidas.
+  const revisarQuestoes = (questoes) => {
+    const lista = (questoes || []).filter(Boolean);
+    if (lista.length === 0) return;
+
+    setState((st) => ({
+      ...st,
+      screen: 'questoes',
+      questoes: { ...st.questoes, quiz: lista, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
+    }));
+  };
+
+  const praticarDisciplina = (nome) => {
+    const daMateria = acervo.questoes.filter((q) => (q.disciplina || 'Sem classificação') === nome);
+    if (daMateria.length === 0) { goTo('questoes'); return; }
+    setState((st) => ({ ...st, screen: 'questoes', questoes: { ...st.questoes, selected: [nome], quiz: null, done: false } }));
+  };
+
   const sair = () => {
     logout();
     // O histórico sai da memória junto com a sessão: ele pertence a quem
@@ -271,7 +354,13 @@ export default function App() {
     registroPendente.current.clear();
     // E o que já estava no ar não pode voltar para a tela depois daqui.
     sessaoEpoch.current += 1;
-    setState((st) => ({ ...st, usuarioTentativas: {} }));
+    setUsuarioTentativas({});
+    // O que era desta conta sai junto — inclusive o que estava guardado neste
+    // navegador: favoritos e anotações são de quem estava logado, e quem
+    // entrar depois não pode encontrá-los na tela.
+    limparEstado();
+    setState({ ...DEFAULT_STATE, theme: state.theme });
+    setPerfil({ estado: 'carregando', id: null, name: null, email: null });
     setErroSync(null);
     setSessao('ausente');
   };
@@ -280,9 +369,63 @@ export default function App() {
     return <Login theme={theme} s={s} onEntrar={() => setSessao('ativa')} />;
   }
 
-  const meta = PAGE_META[state.screen];
-  const notifCount = notifOpen ? 0 : 3;
+  const nome = nomeDeExibicao(perfil, perfil.email);
+  const meta = metaDiaria(state.configuracoes, usuarioTentativas, state.resultados_historico);
+  const sequencia = sequenciaAtual(usuarioTentativas, state.resultados_historico);
   const diasProva = diasAteProva(state.configuracoes);
+  const prioridade = prioridadeDeEstudo(disciplinas);
+
+  const cabecalho = state.screen === 'dashboard'
+    ? { title: saudacao(nome), sub: PAGE_META.dashboard.sub }
+    : PAGE_META[state.screen];
+
+  // O sino mostrava um "3" fixo e abria coisa nenhuma. Estes avisos saem do
+  // estado real e cada um leva para a tela onde dá para resolver o assunto.
+  const notificacoes = [];
+  if (!meta.batida) {
+    notificacoes.push({
+      icone: 'flag', cor: '#F59E0B',
+      titulo: `Faltam ${meta.faltam} ${meta.faltam === 1 ? 'questão' : 'questões'} para a meta de hoje`,
+      texto: `Você respondeu ${meta.respondidas} de ${meta.meta}.`,
+      acao: { rotulo: 'Praticar', ir: 'questoes' },
+    });
+  }
+  if (revisao.resumo.erros > 0) {
+    notificacoes.push({
+      icone: 'repeat', cor: '#EF4444',
+      titulo: `${revisao.resumo.erros} ${revisao.resumo.erros === 1 ? 'questão errada' : 'questões erradas'} esperando revisão`,
+      texto: 'São as que você errou na última tentativa.',
+      acao: { rotulo: 'Revisar', ir: 'revisoes' },
+    });
+  }
+  if (!state.configuracoes.dataProva) {
+    notificacoes.push({
+      icone: 'calendar', cor: '#8B5CF6',
+      titulo: 'Defina a data da sua prova',
+      texto: 'A contagem regressiva do topo depende dela.',
+      acao: { rotulo: 'Definir', ir: 'configuracoes' },
+    });
+  } else if (diasProva != null && diasProva <= 30) {
+    notificacoes.push({
+      icone: 'graduation-cap', cor: '#EC4899',
+      titulo: diasProva === 0 ? 'Sua prova é hoje' : `Faltam ${diasProva} dias para a prova`,
+      texto: 'Reta final: priorize revisão do que você erra mais.',
+      acao: { rotulo: 'Ver revisões', ir: 'revisoes' },
+    });
+  }
+  if (sequencia.dias >= 2) {
+    notificacoes.push({
+      icone: 'trending-up', cor: '#10B981',
+      titulo: `${sequencia.dias} dias seguidos de estudo`,
+      texto: 'Responda hoje para não perder a sequência.',
+    });
+  }
+
+  const foco = !meta.batida && meta.respondidas === 0 && prioridade.length > 0
+    ? `Comece por ${prioridade[0].nome} — ${prioridade[0].motivo || 'é onde você mais perde ponto'}.`
+    : meta.batida
+      ? `Meta batida: ${meta.respondidas} questões hoje. O que vier agora é lucro.`
+      : `Faltam ${meta.faltam} ${meta.faltam === 1 ? 'questão' : 'questões'} para bater a meta de hoje.`;
 
   const navItems = NAV.map((n) => {
     const active = n.key === state.screen;
@@ -293,18 +436,20 @@ export default function App() {
       active,
       style: {
         display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10,
-        fontSize: 13.5, fontWeight: active ? 600 : 500,
+        fontSize: 13.5, fontWeight: active ? 600 : 500, cursor: 'pointer',
         color: active ? theme.primaryDark : '#5c5462',
         background: active ? theme.primarySoft : 'transparent',
       },
     };
   });
 
-  // As telas chamam `calcularDesempenho(tentativas)` sem saber de onde vêm as
-  // questões; amarrar o acervo aqui evita passar a lista por sete telas.
-  const calcular = (tentativas) => calcularDesempenho(tentativas, acervo.questoes);
-
-  const screenProps = { theme, s, data: DATA, go: goTo, usuarioTentativas: state.usuarioTentativas, calcularDesempenho: calcular, resultados_historico: state.resultados_historico };
+  const screenProps = {
+    theme, s, data: DATA, go: goTo,
+    usuarioTentativas, disciplinas, revisao,
+    resultados_historico: state.resultados_historico,
+    config: state.configuracoes,
+    revisarQuestoes, praticarDisciplina,
+  };
 
   return (
     <div style={s.app}>
@@ -332,18 +477,18 @@ export default function App() {
           <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
           </div>
-          <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>
-            Manter a consistência é o segredo do sucesso!
-          </div>
+          <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
         </div>
 
         <div style={s.profileRow}>
-          <div style={s.avatar}>ML</div>
+          <div style={s.avatar} data-testid="avatar">{iniciais(nome, '·')}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#2c2530' }}>Maria Laís</div>
-            <div style={{ fontSize: 11.5, color: '#8b8391' }}>Ver perfil ›</div>
+            <div data-testid="perfil-nome" style={{ fontSize: 13.5, fontWeight: 600, color: '#2c2530', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {nome || (perfil.estado === 'carregando' ? '—' : 'Sem nome')}
+            </div>
+            <div onClick={() => goTo('configuracoes')} style={{ fontSize: 11.5, color: '#8b8391', cursor: 'pointer' }}>Ver perfil ›</div>
           </div>
-          <div data-testid="sair" onClick={sair} style={{ fontSize: 11.5, color: theme.primary, fontWeight: 600 }}>
+          <div data-testid="sair" onClick={sair} style={{ fontSize: 11.5, color: theme.primary, fontWeight: 600, cursor: 'pointer' }}>
             Sair
           </div>
         </div>
@@ -352,21 +497,79 @@ export default function App() {
       <div style={s.main}>
         <div style={s.topbar}>
           <div>
-            <div style={s.pageTitle}>{meta.title}</div>
-            <div style={s.pageSub}>{meta.sub}</div>
+            <div style={s.pageTitle}>{cabecalho.title}</div>
+            <div style={s.pageSub}>{cabecalho.sub}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={s.examCard}>
+            <div
+              style={{ ...s.examCard, cursor: diasProva == null ? 'pointer' : 'default' }}
+              onClick={() => { if (diasProva == null) goTo('configuracoes'); }}
+            >
               <Icon name="graduation-cap" color={theme.primary} size={20} />
-              <div>
-                <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Faltam</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{diasProva != null ? `${diasProva} dias` : '—'}</div>
-                <div style={{ fontSize: 10.5, color: '#8b8391' }}>para a prova da OAB</div>
-              </div>
+              {diasProva != null ? (
+                <div>
+                  <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Faltam</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{diasProva} dias</div>
+                  <div style={{ fontSize: 10.5, color: '#8b8391' }}>para a prova da OAB</div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Sua prova</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#2c2530' }}>Definir data</div>
+                  <div style={{ fontSize: 10.5, color: '#8b8391' }}>para contar os dias</div>
+                </div>
+              )}
             </div>
-            <div style={s.bellWrap} onClick={() => setNotifOpen(true)}>
-              <Icon name="bell" color="#5c5462" size={19} />
-              {notifCount > 0 && <div style={s.bellBadge}>{notifCount}</div>}
+            <div style={{ position: 'relative' }}>
+              <div data-testid="sino" style={{ ...s.bellWrap, cursor: 'pointer' }} onClick={() => setNotifOpen((v) => !v)}>
+                <Icon name="bell" color="#5c5462" size={19} />
+                {notificacoes.length > 0 && <div style={s.bellBadge}>{notificacoes.length}</div>}
+              </div>
+
+              {notifOpen && (
+                <div
+                  className="entra"
+                  data-testid="painel-notificacoes"
+                  style={{
+                    position: 'absolute', right: 0, top: 48, width: 320, zIndex: 500,
+                    background: '#fff', borderRadius: 14, border: '1px solid rgba(0,0,0,.06)',
+                    boxShadow: '0 12px 32px rgba(0,0,0,.14)', padding: 14,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: '#2c2530' }}>Avisos</div>
+                    <span onClick={() => setNotifOpen(false)} style={{ color: '#8b8391', cursor: 'pointer', fontWeight: 700 }}>×</span>
+                  </div>
+
+                  {notificacoes.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: '#8b8391', marginTop: 10, lineHeight: 1.5 }}>
+                      Nada pendente por aqui. Meta batida e nenhuma questão errada esperando revisão.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                      {notificacoes.map((n, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                          <div style={{ width: 30, height: 30, borderRadius: 9, background: `${n.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                            <Icon name={n.icone} color={n.cor} size={16} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: '#2c2530', lineHeight: 1.35 }}>{n.titulo}</div>
+                            <div style={{ fontSize: 11.5, color: '#8b8391', marginTop: 2 }}>{n.texto}</div>
+                            {n.acao && (
+                              <button
+                                onClick={() => { setNotifOpen(false); goTo(n.acao.ir); }}
+                                style={{ ...s.btnOutline, marginTop: 6, padding: '5px 10px', fontSize: 11.5 }}
+                              >
+                                {n.acao.rotulo}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -383,15 +586,13 @@ export default function App() {
               }}
             >
               <span>{erroSync}</span>
-              <span onClick={() => setErroSync(null)} style={{ fontWeight: 700 }}>×</span>
+              <span onClick={() => setErroSync(null)} style={{ fontWeight: 700, cursor: 'pointer' }}>×</span>
             </div>
           )}
           {state.screen === 'dashboard' && (
-            <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} config={state.configuracoes} />
+            <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} acervo={acervo} />
           )}
-          {state.screen === 'cronograma' && (
-            <Cronograma {...screenProps} cronograma={state.cronograma} setCronograma={(p) => updateSlice('cronograma', p)} />
-          )}
+          {state.screen === 'cronograma' && <Cronograma {...screenProps} />}
           {state.screen === 'questoes' && (
             <Questoes
               {...screenProps}
@@ -404,7 +605,13 @@ export default function App() {
             />
           )}
           {state.screen === 'simulados' && (
-            <Simulados {...screenProps} sim={state.simulados} setSim={(p) => updateSlice('simulados', p)} setResultadosHistorico={(p) => updateSlice('resultados_historico', p)} />
+            <Simulados
+              {...screenProps}
+              sim={state.simulados}
+              setSim={(p) => updateSlice('simulados', p)}
+              setResultadosHistorico={(p) => updateSlice('resultados_historico', p)}
+              registrar={registrar}
+            />
           )}
           {state.screen === 'revisoes' && (
             <Revisoes
@@ -416,7 +623,7 @@ export default function App() {
             />
           )}
           {state.screen === 'desempenho' && (
-            <Desempenho {...screenProps} perf={state.desempenho} setPerf={(p) => updateSlice('desempenho', p)} usuarioTentativas={state.usuarioTentativas} calcularDesempenho={calcular} />
+            <Desempenho {...screenProps} perf={state.desempenho} setPerf={(p) => updateSlice('desempenho', p)} />
           )}
           {state.screen === 'estatisticas' && (
             <Estatisticas {...screenProps} filtros={state.estatisticas} setFiltros={(p) => updateSlice('estatisticas', p)} />
@@ -426,21 +633,21 @@ export default function App() {
               {...screenProps}
               disc={state.disciplinas}
               setDisc={(p) => updateSlice('disciplinas', p)}
-              iniciarSimuladoDe={(nome) => {
-                updateSlice('simulados', { preDisciplina: nome });
-                goTo('simulados');
-              }}
             />
           )}
           {state.screen === 'anotacoes' && (
             <Anotacoes {...screenProps} notas={state.anotacoes} setNotas={(p) => updateSlice('anotacoes', p)} />
           )}
-          {state.screen === 'favoritos' && <Favoritos {...screenProps} favoritos={state.favoritos} />}
+          {state.screen === 'favoritos' && (
+            <Favoritos {...screenProps} favoritos={state.favoritos} toggleFavorito={toggleFavorito} />
+          )}
           {state.screen === 'configuracoes' && (
             <Configuracoes
               {...screenProps}
-              config={state.configuracoes}
-              setConfig={(p) => updateSlice('configuracoes', p)}
+              perfil={perfil}
+              nome={nome}
+              atualizarNome={atualizarNome}
+              atualizarConfig={atualizarConfig}
               themeKey={state.theme}
               setTheme={setTheme}
             />

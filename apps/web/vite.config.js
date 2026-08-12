@@ -30,6 +30,11 @@ export default defineConfig({
       '/api/auth': GATEWAY,
       '/api/tentativas': GATEWAY,
       '/api/questoes': GATEWAY,
+      // `/api/users` entrou junto com o perfil real (nome, e-mail, meta, data
+      // da prova). Esquecer esta linha não quebra nada visível: o pedido cai
+      // no DEV_API, que responde ECONNREFUSED, e a tela só deixa de mostrar o
+      // nome. Foi assim que apareceu na primeira execução do e2e.
+      '/api/users': GATEWAY,
       '/api': DEV_API,
     },
   },
