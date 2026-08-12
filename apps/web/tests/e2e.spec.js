@@ -216,3 +216,65 @@ test.describe('MA Questões E2E', () => {
     }
   });
 });
+
+// Fora do describe acima de propósito: aquele `beforeEach` entra com o usuário
+// semeado, e o assunto aqui é justamente não ter conta ainda.
+test.describe('Criar conta', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+  });
+
+  test('cria a conta e entra já logada, com histórico vazio', async ({ page }) => {
+    // E-mail novo a cada execução: o cadastro grava de verdade, e reusar um
+    // fixo faria o segundo `npm run test:e2e` falhar com 409 — teste que só
+    // passa em banco limpo é teste que passa uma vez.
+    const email = `e2e-${Date.now()}@exemplo.test`;
+
+    await page.click('[data-testid="trocar-modo"]');
+    await page.fill('[data-testid="campo-nome"]', 'Teste E2E');
+    await page.fill('input[type="email"]', email);
+    await page.fill('#campo-senha', 'senha-de-teste-123');
+    await page.fill('[data-testid="campo-confirmacao"]', 'senha-de-teste-123');
+    await page.click('button[type="submit"]');
+
+    // Entrou sem passar pela tela de login: o /register já devolveu o token.
+    await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+
+    // A prova de que a conta é nova e o token é dela: o usuário semeado tem
+    // tentativas dos outros testes, este tem zero. Se o cadastro tivesse
+    // reaproveitado a sessão anterior, aqui viria um número maior.
+    expect(await contarTentativas(page)).toBe(0);
+  });
+
+  test('recusa e-mail já cadastrado, e aponta o caminho', async ({ page }) => {
+    await page.click('[data-testid="trocar-modo"]');
+    await page.fill('input[type="email"]', EMAIL);
+    await page.fill('#campo-senha', 'outra-senha-123');
+    await page.fill('[data-testid="campo-confirmacao"]', 'outra-senha-123');
+    await page.click('button[type="submit"]');
+
+    await expect(page.locator('[role="alert"]')).toContainText('já tem conta');
+    // E continua na tela, sem token: 409 não pode deixar sessão pela metade.
+    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('ma-questoes-token-v1'))).toBeNull();
+  });
+
+  test('senha e confirmação diferentes nem chegam ao servidor', async ({ page }) => {
+    let chamou = false;
+    await page.route('**/api/auth/register', (rota) => {
+      chamou = true;
+      return rota.continue();
+    });
+
+    await page.click('[data-testid="trocar-modo"]');
+    await page.fill('input[type="email"]', `e2e-${Date.now()}@exemplo.test`);
+    await page.fill('#campo-senha', 'senha-de-teste-123');
+    await page.fill('[data-testid="campo-confirmacao"]', 'senha-diferente-123');
+    await page.click('button[type="submit"]');
+
+    await expect(page.locator('[role="alert"]')).toContainText('não são iguais');
+    expect(chamou).toBe(false);
+  });
+});

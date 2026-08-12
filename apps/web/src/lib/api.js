@@ -104,6 +104,25 @@ export async function login(email, password) {
   return dados.user;
 }
 
+// O /register já devolve token, então criar conta e entrar são a mesma ida ao
+// servidor. Fazer um login logo depois seria uma volta inteira só para repetir
+// o que o servidor acabou de confirmar.
+export async function criarConta({ nome, email, password }) {
+  const dados = await req('/api/auth/register', {
+    method: 'POST',
+    // `name` é opcional para o auth-service, mas não é decorativo: viaja no
+    // evento `user.registered` e vira o perfil no user-service. Omitido, o
+    // consumidor cai no trecho antes do @ do e-mail.
+    body: { email, password, name: nome || undefined },
+    auth: false,
+  });
+
+  if (!dados?.token) throw new ApiError('Conta criada, mas sem token — entre novamente', 502);
+
+  setToken(dados.token);
+  return dados.user;
+}
+
 // ---------------------------------------------------------------------------
 // Tentativas
 // ---------------------------------------------------------------------------

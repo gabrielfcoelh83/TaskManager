@@ -1,29 +1,60 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
-import { login } from '../lib/api';
+import { login, criarConta } from '../lib/api';
 
-// Tela mínima de propósito: sem cadastro, sem "esqueci a senha", sem lembrar
-// de mim. O que ela precisa provar é que existe um token de verdade por trás
-// das tentativas — o resto do fluxo de conta é problema de outra fatia.
+// Entrar e criar conta na mesma tela, alternados por um botão. Duas telas
+// separadas custariam rota, estado de navegação e um caminho de volta — para
+// dois formulários que diferem em dois campos.
+//
+// Continua sem "esqueci a senha": ele exige e-mail transacional, que esta
+// plataforma não tem. Enquanto não existir, a confirmação de senha no cadastro
+// é o que impede alguém de ficar trancado para fora por um erro de digitação.
 export default function Login({ theme, s, onEntrar }) {
+  const [modo, setModo] = useState('entrar'); // 'entrar' | 'criar'
+  const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
+  const [confirmacao, setConfirmacao] = useState('');
   const [erro, setErro] = useState(null);
   const [enviando, setEnviando] = useState(false);
+
+  const criando = modo === 'criar';
+
+  const trocarModo = () => {
+    setModo(criando ? 'entrar' : 'criar');
+    // O erro é sempre sobre o formulário que acabou de sair de cena; mantê-lo
+    // faria "este e-mail já tem conta" aparecer sobre a tela de entrar, onde
+    // ele não faz sentido nenhum.
+    setErro(null);
+    setConfirmacao('');
+  };
 
   const submeter = async (e) => {
     e.preventDefault();
     if (enviando) return;
 
+    // Comparação antes de sair do navegador: o servidor não recebe a
+    // confirmação e não teria como recusar por isso.
+    if (criando && senha !== confirmacao) {
+      setErro('As senhas não são iguais.');
+      return;
+    }
+
     setErro(null);
     setEnviando(true);
     try {
-      const usuario = await login(email.trim(), senha);
+      const usuario = criando
+        ? await criarConta({ nome: nome.trim(), email: email.trim(), password: senha })
+        : await login(email.trim(), senha);
       onEntrar(usuario);
     } catch (err) {
-      // A mensagem vem do auth-service ("Credenciais inválidas") ou do
-      // cliente, quando nem chegou a sair do navegador.
-      setErro(err.message);
+      // 409 é o único erro aqui com um próximo passo óbvio, então ele ganha
+      // uma mensagem que aponta o caminho em vez de só constatar o problema.
+      setErro(
+        err.status === 409
+          ? 'Este e-mail já tem conta. Use "Entrar" logo abaixo.'
+          : err.message
+      );
       setEnviando(false);
     }
   };
@@ -39,6 +70,8 @@ export default function Login({ theme, s, onEntrar }) {
     background: '#fff',
     outlineColor: theme.primary,
   };
+
+  const rotulo = { ...s.statLabel, display: 'block', marginBottom: 5 };
 
   return (
     <div
@@ -64,13 +97,36 @@ export default function Login({ theme, s, onEntrar }) {
           </div>
         </div>
 
-        <div style={{ ...s.sectionTitle, marginBottom: 4 }}>Entrar</div>
+        <div style={{ ...s.sectionTitle, marginBottom: 4 }}>
+          {criando ? 'Criar conta' : 'Entrar'}
+        </div>
         <div style={{ ...s.pageSub, marginBottom: 18 }}>
           Suas respostas ficam guardadas na sua conta.
         </div>
 
-        <label style={{ ...s.statLabel, display: 'block', marginBottom: 5 }}>E-mail</label>
+        {criando && (
+          <>
+            <label style={rotulo} htmlFor="campo-nome">
+              Nome
+            </label>
+            <input
+              id="campo-nome"
+              data-testid="campo-nome"
+              type="text"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              autoComplete="name"
+              placeholder="Como quer ser chamada"
+              style={{ ...campo, marginBottom: 13 }}
+            />
+          </>
+        )}
+
+        <label style={rotulo} htmlFor="campo-email">
+          E-mail
+        </label>
         <input
+          id="campo-email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -79,15 +135,40 @@ export default function Login({ theme, s, onEntrar }) {
           style={{ ...campo, marginBottom: 13 }}
         />
 
-        <label style={{ ...s.statLabel, display: 'block', marginBottom: 5 }}>Senha</label>
+        <label style={rotulo} htmlFor="campo-senha">
+          Senha
+        </label>
         <input
+          id="campo-senha"
           type="password"
           value={senha}
           onChange={(e) => setSenha(e.target.value)}
-          autoComplete="current-password"
+          // O gerenciador de senhas do navegador se comporta de formas
+          // diferentes nos dois casos: oferecer a senha salva ao entrar,
+          // propor uma nova ao cadastrar.
+          autoComplete={criando ? 'new-password' : 'current-password'}
           required
-          style={{ ...campo, marginBottom: 18 }}
+          minLength={criando ? 8 : undefined}
+          style={{ ...campo, marginBottom: criando ? 13 : 18 }}
         />
+
+        {criando && (
+          <>
+            <label style={rotulo} htmlFor="campo-confirmacao">
+              Repita a senha
+            </label>
+            <input
+              id="campo-confirmacao"
+              data-testid="campo-confirmacao"
+              type="password"
+              value={confirmacao}
+              onChange={(e) => setConfirmacao(e.target.value)}
+              autoComplete="new-password"
+              required
+              style={{ ...campo, marginBottom: 18 }}
+            />
+          </>
+        )}
 
         {erro && (
           <div
@@ -118,8 +199,36 @@ export default function Login({ theme, s, onEntrar }) {
             opacity: enviando ? 0.7 : 1,
           }}
         >
-          {enviando ? 'Entrando…' : 'Entrar'}
+          {enviando
+            ? criando
+              ? 'Criando…'
+              : 'Entrando…'
+            : criando
+              ? 'Criar conta'
+              : 'Entrar'}
         </button>
+
+        <div style={{ ...s.pageSub, textAlign: 'center', marginTop: 16, fontSize: 12.5 }}>
+          {criando ? 'Já tem conta?' : 'Primeira vez por aqui?'}{' '}
+          {/* type="button" é obrigatório: dentro de um <form>, um botão sem
+              type é submit, e alternar o modo enviaria o formulário. */}
+          <button
+            type="button"
+            data-testid="trocar-modo"
+            onClick={trocarModo}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              font: 'inherit',
+              color: theme.primary,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {criando ? 'Entrar' : 'Criar conta'}
+          </button>
+        </div>
       </form>
     </div>
   );

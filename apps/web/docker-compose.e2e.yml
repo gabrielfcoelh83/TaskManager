@@ -83,7 +83,14 @@ services:
     image: ghcr.io/gabrielfcoelh83/microservices-gateway:latest
     # A única porta publicada: é onde o proxy do Vite vai bater.
     ports:
-      - "${GATEWAY_PORT:-3000}:3000"
+      # Preso ao loopback. Sem o `127.0.0.1:` o Docker publica em 0.0.0.0, e
+      # numa máquina com IP público isso põe o gateway (e o auth atrás dele)
+      # na internet. Já aconteceu aqui: uma stack de teste ficou 18 minutos
+      # aberta na 3010. O firewall do host não protege — o Docker publica por
+      # DNAT e o pacote nunca passa pela chain INPUT.
+      # Quem precisa alcançar isto é o proxy do Vite, que roda na mesma
+      # máquina; o mundo não precisa.
+      - "127.0.0.1:${GATEWAY_PORT:-3000}:3000"
     environment:
       AUTH_SERVICE_URL: http://auth-service:3001
       ESTUDO_SERVICE_URL: http://estudo-service:3004
