@@ -302,7 +302,12 @@ jobs:
           # conteúdo de arquivo montado não conta, e sem este reload a config
           # nova ficaria em disco sem nunca entrar em vigor. Recarregar um
           # nginx recém-criado é inofensivo, então não vale ramificar.
-          docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload
+          # `< /dev/null` NÃO é decoração. O script inteiro chega neste shell
+          # pela stdin (`ssh 'bash -s' <<REMOTE`), e `exec -T` repassa a stdin
+          # para o container — sem redirecionar, ele ENGOLE o resto do script.
+          # Foi o que aconteceu: dois deploys terminaram verdes tendo parado
+          # exatamente aqui, sem nunca rodar o `up -d` que sobe os serviços.
+          docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload < /dev/null
 
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
           docker image prune -f
@@ -343,6 +348,27 @@ jobs:
               if [ -n "$ESTADO" ] && ! printf '%s' "$ESTADO" | grep -q 'DOWN'; then
                 echo "nginx (TLS), gateway e serviços UP"
                 printf '%s\n' "$ESTADO"
+
+                # Um deploy que não aplicou é indistinguível de um deploy bom
+                # olhando só para a saúde: os serviços ANTIGOS respondem
+                # perfeitamente. Dois deploys seguidos passaram verdes sem
+                # trocar imagem nenhuma. Comparar o que roda com o que foi
+                # implantado é a única checagem que enxerga isso.
+                ESPERADA=$(grep '^IMAGE_TAG=' .env | cut -d= -f2)
+                DIVERGENTES=""
+                for s in api-gateway auth-service user-service task-service estudo-service questoes-service; do
+                  RODANDO=$(docker compose -f docker-compose.prod.yml ps -q "$s" 2>/dev/null \
+                    | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null \
+                    | sed 's/.*://')
+                  if [ "$RODANDO" != "$ESPERADA" ]; then
+                    DIVERGENTES="$DIVERGENTES $s(${RODANDO:-ausente})"
+                  fi
+                done
+                if [ -n "$DIVERGENTES" ]; then
+                  echo "::error::Deploy não aplicou. Esperada $ESPERADA, mas:$DIVERGENTES"
+                  exit 1
+                fi
+                echo "todos os serviços rodando a tag $ESPERADA"
 
                 # CORS é a única parte desta stack que só quebra no
                 # navegador: o curl não liga para o cabeçalho, e
