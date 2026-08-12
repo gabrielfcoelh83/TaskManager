@@ -23,6 +23,16 @@ if [ "${1:-up}" = "down" ]; then
   exit 0
 fi
 
+# As imagens são `:latest`, e `docker compose up` NÃO rebusca uma tag que já
+# está em cache. Na sua máquina isso significa subir o backend de semanas
+# atrás: hoje custou dois vermelhos que pareciam bug de front — o PATCH de
+# feedback voltando 404 porque o gateway em cache não tinha a rota, e a coluna
+# `tipo` ausente porque o estudo-service em cache não tinha a migration. No CI
+# o runner nasce vazio e o pull acontece de qualquer jeito, então isto só
+# custa tempo onde já se pagaria por ele.
+echo "Atualizando as imagens do backend…"
+$COMPOSE pull -q
+
 echo "Subindo o backend (postgres, redis, auth, estudo, questoes, gateway)…"
 # --wait respeita os healthchecks do compose: quando ele volta, os serviços
 # responderam de verdade. Sem isso restaria adivinhar um `sleep`.
