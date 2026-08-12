@@ -24,13 +24,21 @@ const { migrate } = require('./migrate');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// Ordem de preferência; qualquer falha cai para o próximo, como na rota de
-// geração do front. Modelos gratuitos: classificar 80 questões não justifica
-// gasto, e rotular é tarefa fácil o bastante para eles.
+// Ordem de preferência; qualquer falha cai para o próximo. Modelos gratuitos:
+// classificar 80 questões não justifica gasto, e escolher rótulo de uma lista
+// fechada é tarefa fácil o bastante para eles.
+//
+// Estes ids foram conferidos contra GET /api/v1/models antes de entrar aqui, e
+// isso não é zelo excessivo: os três ids que este arquivo tinha na primeira
+// versão — copiados da rota de geração do front — NÃO EXISTEM na OpenRouter.
+// Model id errado devolve 404, o laço cai para o próximo, o último também
+// falha, e o resultado é "nenhum modelo respondeu" — que parece rede ruim ou
+// chave inválida. Ao trocar um id, confira contra a API, não contra a memória
+// de como o modelo se chama.
 const MODELOS = [
-  'qwen/qwen-3-coder:free',
-  'meta/llama-4-maverick:free',
-  'google/gemini-2.0-flash:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'google/gemma-4-31b-it:free',
+  'openai/gpt-oss-20b:free',
 ];
 
 // Lista fechada, tirada do edital da 1ª fase. É o coração deste arquivo.
@@ -312,10 +320,10 @@ async function classificar({
 
       restantes -= pendentes.length;
 
-      // Sem `aplicar` o banco não muda, então buscar de novo devolveria as
-      // mesmas questões para sempre. Uma passada só já mostra o suficiente
-      // para decidir se vale aplicar.
-      if (!aplicar) break;
+      // Sem `aplicar` o banco não muda, mas a rodada continua: quem decide se
+      // vale aplicar precisa ver o acervo inteiro classificado, não os dez
+      // primeiros. Quem impede o laço de reencontrar as mesmas questões é a
+      // lista `jaTentadas`, não a gravação.
     }
   } finally {
     cliente.release();

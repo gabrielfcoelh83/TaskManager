@@ -147,19 +147,34 @@ describe('classificar', () => {
     expect(depois.revisada).toBe(false);
   });
 
-  it('não grava nada sem --aplicar', async () => {
-    const id = await inserir(1);
+  it('não grava nada sem --aplicar, e ainda assim percorre o acervo todo', async () => {
+    // A conferência precisa mostrar TUDO: quem decide se vale aplicar não
+    // decide olhando os dez primeiros. O que impede o laço de reencontrar as
+    // mesmas questões — que continuam sem disciplina, porque nada foi gravado
+    // — é a lista de já tentadas, não a gravação.
+    const ids = [];
+    for (let n = 1; n <= 3; n++) ids.push(await inserir(n));
+    const id = ids[0];
 
     const resumo = await classificar({
       exame: EXAME_TESTE,
       aplicar: false,
       log: () => {},
-      chamarModelo: modeloQueResponde(`[{"id":${id},"disciplina":"Direito Penal","tema":"Furto"}]`),
+      lote: 1,
+      chamarModelo: jest.fn(async (prompt) => {
+        const doLote = ids.filter((x) => prompt.includes(`"id": ${x}`));
+        return {
+          conteudo: JSON.stringify(doLote.map((x) => ({ id: x, disciplina: 'Direito Penal', tema: 'Furto' }))),
+          modelo: 'teste',
+        };
+      }),
     });
 
-    expect(resumo.aceitas).toBe(1);
+    // Três lidas em lotes de um: a conferência não parou no primeiro lote.
+    expect(resumo.lidas).toBe(3);
+    expect(resumo.aceitas).toBe(3);
     expect(resumo.gravadas).toBe(0);
-    expect((await buscar(id)).disciplina).toBeNull();
+    for (const x of ids) expect((await buscar(x)).disciplina).toBeNull();
   });
 
   it('não toca em questão já classificada', async () => {
