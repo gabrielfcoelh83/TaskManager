@@ -21,6 +21,21 @@ function contarTentativas(page) {
   });
 }
 
+// A tentativa mais recente do usuário, direto da API. O GET já devolve da
+// mais nova para a mais antiga, então a primeira linha é a que acabou de ser
+// respondida.
+function ultimaTentativa(page) {
+  return page.evaluate(async () => {
+    const token = localStorage.getItem('ma-questoes-token-v1');
+    if (!token) return null;
+    const res = await fetch('/api/tentativas?limite=1', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json())[0] || null;
+  });
+}
+
 async function entrar(page) {
   await page.goto('/');
   // Limpar antes de logar: a sessão não pode vazar de um teste para o outro.
@@ -215,6 +230,91 @@ test.describe('MA Questões E2E', () => {
       JSON.parse(localStorage.getItem('ma-questoes-state-v1') || '{}')
     );
     expect(salvoLocal.usuarioTentativas).toBeUndefined();
+  });
+
+  // O critério de pronto da fatia 2. Mesma forma do teste acima, porque o
+  // dado é o mesmo tipo de dado: coletado na tela, gravado no servidor, e a
+  // prova é ele continuar lá depois de o navegador ser esvaziado.
+  test('o "foi chute" sobrevive ao localStorage apagado', async ({ page }) => {
+    // Segura o POST da tentativa por 1,5s. Sem este atraso o teste não
+    // exerce o problema que a ADR-001 existe para resolver: em localhost o
+    // POST volta em milissegundos, muito antes de o Playwright conseguir
+    // clicar no feedback, e a janela em que o `id` ainda não chegou nunca
+    // se abre. Com o atraso, ler o id do estado (a alternativa rejeitada
+    // pela ADR) falha aqui, e segurar a promessa passa.
+    // Casa por `pathname` e não por glob: `**/api/tentativas` só não pega os
+    // GETs porque eles levam `?limite=`, o que é precisão por acidente — no
+    // dia em que um GET vier sem query, o teste passaria a segurar a leitura
+    // também e ninguém entenderia por quê.
+    await page.route(
+      (url) => url.pathname === '/api/tentativas',
+      async (route) => {
+        if (route.request().method() === 'POST') {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        await route.continue();
+      }
+    );
+
+    // Contagem antes, como no teste da fatia 1: sem isto o teste se contenta
+    // com "existe uma tentativa marcada como chute", e a das execuções
+    // anteriores serve. Foi assim que uma primeira versão deste teste passou
+    // com o feedback indo parar na tentativa errada.
+    const inicial = await contarTentativas(page);
+
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('button:has-text("Gerar quiz")');
+
+    const alternativa = page.locator('[data-testid="alt-0"]');
+    await expect(alternativa).toBeVisible();
+    await alternativa.click();
+
+    // O modal abre no mesmo instante em que o POST sai, então este clique
+    // acontece com a gravação ainda em voo — que é o ponto.
+    await page.click('button:has-text("Foi chute")');
+
+    // Primeiro espera a tentativa NOVA existir. Enquanto o POST atrasado não
+    // chega, a "mais recente" ainda é a de antes — e cobrar o feedback dela
+    // aprovaria justamente o bug que a ADR-001 evita.
+    await expect.poll(() => contarTentativas(page), { timeout: 15000 }).toBe(inicial + 1);
+
+    // Só agora, e sobre ela: o feedback tem de estar na tentativa desta
+    // resposta, não em alguma outra do histórico.
+    await expect.poll(() => ultimaTentativa(page), { timeout: 15000 }).toMatchObject({
+      tipo: 'chute',
+      certeza: 30,
+    });
+
+    const nova = await ultimaTentativa(page);
+    const questaoId = nova.questao_id;
+
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+
+    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await page.fill('input[type="email"]', EMAIL);
+    await page.fill('input[type="password"]', SENHA);
+    await page.click('button[type="submit"]');
+    await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+
+    // A segunda metade da afirmação, e a que faltava: não basta o dado
+    // estar no servidor, o front tem de ler. Chamar `listarTentativas` do
+    // módulo real exercita `paraFormatoLocal` — que antes desta fatia
+    // devolvia `tipo: null` fixo e passaria por qualquer asserção feita
+    // com `fetch` direto na API.
+    // Depende do dev server do Vite servir o fonte cru em /src — que é como
+    // o `webServer` do playwright.config sobe o app. Se um dia a suíte passar
+    // a rodar contra o build, este import precisa virar outra coisa (expor a
+    // função no `window` em modo de teste, por exemplo) em vez de sumir.
+    const doFront = await page.evaluate(async ({ qId, id }) => {
+      const api = await import('/src/lib/api.js');
+      const porQuestao = await api.listarTentativas();
+      const tentativas = porQuestao[qId]?.tentativas || [];
+      // Pela id, não pela posição: a questão pode ter histórico anterior.
+      return tentativas.find((t) => String(t.id) === String(id)) || null;
+    }, { qId: questaoId, id: nova.id });
+
+    expect(doFront).toMatchObject({ tipo: 'chute', certeza: 30 });
   });
 
   test('Gerar questões com IA (API)', async ({ page }) => {

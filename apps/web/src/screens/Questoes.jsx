@@ -93,7 +93,11 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
 
   const avancarProxima = (tipo, certeza) => {
     const q = quest.quiz[quest.idx];
-    anotarFeedback(q.id, tipo, certeza);
+    // `anotarFeedback` é assíncrona e trata os próprios erros; o `.catch`
+    // aqui não é redundância, é contrato: sem ele, qualquer erro futuro que
+    // escape do try interno vira unhandledrejection silencioso — sem log,
+    // sem aviso na tela e sem teste que perceba.
+    anotarFeedback(q.id, tipo, certeza).catch(() => {});
     setFeedbackAberto(null);
     nextQuestion();
   };

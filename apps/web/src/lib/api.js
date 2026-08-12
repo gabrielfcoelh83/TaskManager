@@ -140,10 +140,13 @@ function paraFormatoLocal(linha) {
     resposta: linha.alternativa,
     correta: linha.correta,
     tempo_gasto_segundos: linha.tempo_seg,
-    // `tipo` e `certeza` não existem na tabela: são preenchidos na tela de
-    // feedback e vivem só nesta sessão. Ver o README da fatia.
-    tipo: null,
-    certeza: null,
+    // Vêm nulos até a pessoa responder "como você chegou nessa resposta?" —
+    // a tentativa é gravada no clique da alternativa, o feedback vem depois.
+    // `?? null` porque uma linha gravada antes da migration 002 nem traz as
+    // chaves, e `undefined` vazando para o estado quebraria o `JSON.stringify`
+    // do localStorage de um jeito difícil de rastrear.
+    tipo: linha.tipo ?? null,
+    certeza: linha.certeza ?? null,
   };
 }
 
@@ -209,6 +212,18 @@ export async function registrarTentativa({ questaoId, correta, alternativa, temp
       alternativa: Number.isInteger(alternativa) ? alternativa : null,
       tempo_seg: Number.isInteger(tempoSeg) && tempoSeg >= 0 ? tempoSeg : null,
     },
+  });
+
+  return paraFormatoLocal(linha);
+}
+
+// O feedback chega depois da tentativa já gravada, então é PATCH sobre uma
+// linha existente. Precisa do `id` que o POST devolveu — quem chama tem de
+// garantir que ele já voltou do servidor (ver `registroPendente` no App).
+export async function anotarFeedbackTentativa(id, tipo, certeza) {
+  const linha = await req(`/api/tentativas/${id}`, {
+    method: 'PATCH',
+    body: { tipo, certeza },
   });
 
   return paraFormatoLocal(linha);

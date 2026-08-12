@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { THEMES } from './lib/theme';
 import { buildStyles } from './lib/theme';
 import { Icon } from './lib/icons';
 import { NAV, PAGE_META, DISCIPLINAS, SIMULADOS, CRONOGRAMA_DIAS, ANOTACOES, ANOTACOES_FOLDERS } from './lib/mockData';
 import { loadState, saveState } from './lib/storage';
 import { diasAteProva } from './lib/metrics';
-import { getToken, logout, listarTentativas, listarQuestoes, registrarTentativa } from './lib/api';
+import { getToken, logout, listarTentativas, listarQuestoes, registrarTentativa, anotarFeedbackTentativa } from './lib/api';
 
 import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';
@@ -155,51 +155,122 @@ export default function App() {
 
   const setTheme = (themeKey) => setState((st) => ({ ...st, theme: themeKey }));
 
+  // A gravação em curso de cada questão, guardada pela promessa e não pelo
+  // resultado. A tela de feedback abre no mesmo instante em que o POST sai
+  // (`Questoes.jsx` não espera, de propósito, para o quiz não travar em rede
+  // ruim), então quando a pessoa clica "Foi chute" o `id` da tentativa pode
+  // ainda não ter voltado. Segurar a promessa deixa o feedback esperar por
+  // ela em vez de ler um estado que talvez não esteja preenchido. Ver ADR-001.
+  const registroPendente = useRef(new Map());
+
+  // Contador de sessão. Toda escrita de estado que acontece *depois* de um
+  // await compara este número com o que valia quando a operação começou —
+  // é o mesmo cuidado do `let cancelado` no efeito de carga, e existe porque
+  // sair do app não cancela um POST que já saiu. Sem isto, a resposta que
+  // chega depois do logout reinsere a tentativa num app deslogado, e ela
+  // fica esperando a próxima pessoa que entrar neste navegador.
+  const sessaoEpoch = useRef(0);
+
   // Grava no servidor primeiro e só depois no estado: o que aparece na tela
   // como respondido é o que a API confirmou ter gravado.
-  const registrar = async ({ questaoId, correta, alternativa, tempoSeg }) => {
+  const registrar = ({ questaoId, correta, alternativa, tempoSeg }) => {
     setErroSync(null);
-    try {
-      const tentativa = await registrarTentativa({ questaoId, correta, alternativa, tempoSeg });
-      setState((st) => {
-        const registro = st.usuarioTentativas[questaoId] || { tentativas: [], desempenho: 'necessita' };
-        return {
-          ...st,
-          usuarioTentativas: {
-            ...st.usuarioTentativas,
-            [questaoId]: { ...registro, tentativas: [...registro.tentativas, tentativa] },
-          },
-        };
-      });
-      return true;
-    } catch (err) {
-      if (err.status === 401) { setSessao('ausente'); return false; }
-      // O quiz continua andando; o que se perdeu foi o registro. Dizer isso
-      // é melhor que deixar a pessoa achar que estudou e nada ficou gravado.
-      setErroSync(`Esta resposta não foi salva: ${err.message}`);
-      return false;
-    }
+    const epoch = sessaoEpoch.current;
+
+    const pendente = (async () => {
+      try {
+        const tentativa = await registrarTentativa({ questaoId, correta, alternativa, tempoSeg });
+
+        // Saiu enquanto o POST estava no ar: a tentativa foi gravada e
+        // pertence a quem a respondeu, mas não pode voltar para a tela de
+        // quem entrar depois. Devolvemos o valor para quem esperava a
+        // promessa; só o estado da interface fica de fora.
+        if (sessaoEpoch.current !== epoch) return tentativa;
+
+        setState((st) => {
+          const registro = st.usuarioTentativas[questaoId] || { tentativas: [], desempenho: 'necessita' };
+          return {
+            ...st,
+            usuarioTentativas: {
+              ...st.usuarioTentativas,
+              [questaoId]: { ...registro, tentativas: [...registro.tentativas, tentativa] },
+            },
+          };
+        });
+        return tentativa;
+      } catch (err) {
+        if (err.status === 401) { setSessao('ausente'); return null; }
+        // O quiz continua andando; o que se perdeu foi o registro. Dizer isso
+        // é melhor que deixar a pessoa achar que estudou e nada ficou gravado.
+        setErroSync(`Esta resposta não foi salva: ${err.message}`);
+        return null;
+      }
+    })();
+
+    registroPendente.current.set(questaoId, pendente);
+    return pendente;
   };
 
-  // `tipo` e `certeza` não têm coluna na tabela: valem só para esta sessão.
-  const anotarFeedback = (questaoId, tipo, certeza) =>
-    setState((st) => {
-      const registro = st.usuarioTentativas[questaoId];
-      if (!registro || registro.tentativas.length === 0) return st;
+  // "Como você chegou nessa resposta?" — chute, intuição, eliminação. É o que
+  // separa acertar sabendo de acertar por sorte, e desde a migration 002 tem
+  // coluna própria em vez de morrer junto com a sessão.
+  const anotarFeedback = async (questaoId, tipo, certeza) => {
+    const epoch = sessaoEpoch.current;
 
-      const tentativas = registro.tentativas.slice();
-      tentativas[tentativas.length - 1] = { ...tentativas[tentativas.length - 1], tipo, certeza };
+    // Espera a gravação que a alternativa disparou: sem o `id` não há o que
+    // atualizar no servidor.
+    const tentativa = await registroPendente.current.get(questaoId);
+    registroPendente.current.delete(questaoId);
 
-      return {
-        ...st,
-        usuarioTentativas: { ...st.usuarioTentativas, [questaoId]: { ...registro, tentativas } },
-      };
-    });
+    // Mesmo motivo do `registrar`: este await pode ter atravessado um logout.
+    if (sessaoEpoch.current !== epoch) return;
+
+    // Atualização otimista. O quiz já avançou para a próxima questão quando
+    // esta linha roda — devolver a tela ao estado anterior por causa de um
+    // PATCH que falhou seria mais confuso que o erro.
+    const aplicarLocal = (patch) =>
+      setState((st) => {
+        const registro = st.usuarioTentativas[questaoId];
+        if (!registro || registro.tentativas.length === 0) return st;
+
+        const tentativas = registro.tentativas.slice();
+        // Por id quando ele existe: numa questão respondida mais de uma vez,
+        // "a última do array" e "a que acabou de ser gravada" só coincidem
+        // enquanto nada chega fora de ordem.
+        const alvo = tentativa?.id
+          ? tentativas.findIndex((t) => t.id === tentativa.id)
+          : tentativas.length - 1;
+        if (alvo < 0) return st;
+
+        tentativas[alvo] = { ...tentativas[alvo], ...patch };
+        return {
+          ...st,
+          usuarioTentativas: { ...st.usuarioTentativas, [questaoId]: { ...registro, tentativas } },
+        };
+      });
+
+    aplicarLocal({ tipo, certeza });
+
+    // Sem id, a tentativa não chegou a ser gravada — o erro disso já foi dito
+    // ao registrar, e repetir aqui seria a segunda mensagem sobre a mesma falha.
+    if (!tentativa?.id) return;
+
+    try {
+      await anotarFeedbackTentativa(tentativa.id, tipo, certeza);
+    } catch (err) {
+      if (err.status === 401) { setSessao('ausente'); return; }
+      setErroSync(`A resposta foi salva, mas o "como você chegou" não: ${err.message}`);
+    }
+  };
 
   const sair = () => {
     logout();
     // O histórico sai da memória junto com a sessão: ele pertence a quem
-    // estava logado, não à aba.
+    // estava logado, não à aba. As gravações em curso vão junto — um PATCH
+    // resolvido depois do logout escreveria com um token que já não vale.
+    registroPendente.current.clear();
+    // E o que já estava no ar não pode voltar para a tela depois daqui.
+    sessaoEpoch.current += 1;
     setState((st) => ({ ...st, usuarioTentativas: {} }));
     setErroSync(null);
     setSessao('ausente');
