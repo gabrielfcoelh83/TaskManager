@@ -163,7 +163,18 @@ describe('classificar', () => {
   });
 
   it('não toca em questão já classificada', async () => {
-    const jaFeita = await inserir(1, { disciplina: 'Direito Civil', tema: 'Posse', disciplina_fonte: 'humano' });
+    // Marcador no enunciado, e não o id: o prompt traz um exemplo de formato
+    // com `"id": 123` dentro, então procurar por um id pequeno como "3" acha
+    // o exemplo e o teste passa a acusar o que não existe. Já aconteceu aqui —
+    // localmente os ids eram grandes e a asserção passava por sorte.
+    const MARCA = 'ENUNCIADO-QUE-NAO-PODE-SER-ENVIADO';
+
+    const jaFeita = await inserir(1, {
+      enunciado: `${MARCA}: esta questão já tem disciplina.`,
+      disciplina: 'Direito Civil',
+      tema: 'Posse',
+      disciplina_fonte: 'humano',
+    });
     const pendente = await inserir(2);
 
     const espiao = modeloQueResponde(
@@ -173,7 +184,7 @@ describe('classificar', () => {
     await classificar({ exame: EXAME_TESTE, aplicar: true, log: () => {}, chamarModelo: espiao });
 
     // O prompt enviado não pode nem ter mencionado a questão já classificada.
-    expect(espiao.mock.calls[0][0]).not.toContain(String(jaFeita));
+    expect(espiao.mock.calls[0][0]).not.toContain(MARCA);
 
     const intacta = await buscar(jaFeita);
     expect(intacta.disciplina).toBe('Direito Civil');
