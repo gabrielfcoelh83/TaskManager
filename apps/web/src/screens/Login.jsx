@@ -116,7 +116,7 @@ export default function Login({ theme, s, onEntrar }) {
               value={nome}
               onChange={(e) => setNome(e.target.value)}
               autoComplete="name"
-              placeholder="Como quer ser chamada"
+              placeholder="Como quer ser chamado(a)"
               style={{ ...campo, marginBottom: 13 }}
             />
           </>
