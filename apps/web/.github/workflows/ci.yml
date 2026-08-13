@@ -108,41 +108,26 @@ jobs:
           name: build
           path: dist/
 
-  # Job 4: Deploy to Vercel (só em push na main, e só se VERCEL_TOKEN configurado)
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check deploy credentials
-        id: creds
-        run: |
-          if [ -n "$VERCEL_TOKEN" ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "VERCEL_TOKEN não configurado — pulando deploy."
-          fi
-
-      - name: Setup Node
-        if: steps.creds.outputs.ok == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install Vercel CLI
-        if: steps.creds.outputs.ok == 'true'
-        run: npm install -g vercel
-
-      - name: Deploy to Vercel
-        if: steps.creds.outputs.ok == 'true'
-        run: vercel deploy --prod --token="$VERCEL_TOKEN"
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+# QUEM PUBLICA
+#
+# A integração Git da Vercel, ligada ao repositório — não este workflow.
+#
+# Havia aqui um job `deploy` que rodava `vercel deploy --prod` com um
+# VERCEL_TOKEN dos secrets, e que era condicional: sem o token, imprimia
+# "pulando deploy" e SAÍA COM SUCESSO. Sem o token configurado, o resultado
+# era o pior possível — pipeline verde, nenhum alerta, e produção parada no
+# tempo por semanas. A quebra de imports que derrubou o build só não afetou
+# ninguém porque nada era publicado mesmo.
+#
+# Um passo que falha em silêncio é pior que passo nenhum: ele produz a
+# aparência de deploy sem o deploy. Com a integração Git, publicar deixa de
+# depender de segredo que pode faltar, e um deploy que não sai aparece no
+# painel da Vercel como falha, não como sucesso.
+#
+# O que este workflow ainda faz importa: lint, e2e e build precisam continuar
+# barrando o que estiver quebrado antes de virar commit em main.
+#
+# As variáveis de build agora vivem no painel da Vercel (Settings →
+# Environment Variables), não nos secrets do GitHub. VITE_API_URL é a que não
+# pode faltar: ela entra no bundle em tempo de build, e sem ela o front chama
+# a própria origem da Vercel, onde nenhuma rota da API responde.
