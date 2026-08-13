@@ -92,6 +92,21 @@ def ler_gabarito(pdf, tipo):
     """
     texto = rodar(['pdftotext', '-layout', str(pdf), '-'])
 
+    # A FGV publica o gabarito duas vezes: um no dia seguinte à prova e outro
+    # depois de julgar os recursos. Só o segundo traz as anulações e as trocas
+    # de resposta — no 46º Exame a questão 70 passou de A para B, e importar
+    # pelo preliminar deixaria o acervo ensinando a alternativa errada.
+    #
+    # Os dois arquivos convivem na mesma pasta e o nome não distingue: o
+    # definitivo do 41º se chama "oab242_gabarito_definitivo.pdf" e o do 44º,
+    # "OAB44 Gabaritos para publicação - definitivo.pdf". O cabeçalho de
+    # dentro é o que dá para conferir, então é ele que avisa.
+    if re.search(r'GABARITOS?\s+PRELIMINAR', texto, re.IGNORECASE):
+        print('⚠️  gabarito PRELIMINAR: anulações e trocas decididas em recurso',
+              file=sys.stderr)
+        print('    não estão aqui. Procure o definitivo com listar_arquivos.py',
+              file=sys.stderr)
+
     # O cabeçalho de cada grade muda de exame para exame: o 42º escreve
     # "PROVA TIPO 1" e o 40º, "40º EXAME DE ORDEM UNIFICADO - TIPO 1". Casar
     # a string exata fazia o 40º morrer em 'gabarito não contém "PROVA TIPO
