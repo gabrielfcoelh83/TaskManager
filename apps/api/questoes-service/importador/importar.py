@@ -31,6 +31,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+TOTAL_DE_QUESTOES = 80
 LARGURA_A4_300DPI = 2480
 ALTURA_A4_300DPI = 3508
 
@@ -77,7 +78,18 @@ def texto_por_ocr(pdf, primeira_pagina=1):
 
 
 def ler_gabarito(pdf, tipo):
-    """Lê o gabarito definitivo. A grade é 'linha de números / linha de letras'."""
+    """Lê o gabarito. A grade é 'linha de números / linha de letras'.
+
+    Questão anulada vem como '*' no lugar da letra. Devolve, além do
+    gabarito, o conjunto dos números anulados — quem anula é a banca, e essa
+    informação só existe aqui.
+
+    Antes, qualquer símbolo fora de ABCD invalidava a LINHA INTEIRA: um '*'
+    entre vinte respostas descartava as vinte. No 43º Exame, dois asteriscos
+    em linhas diferentes derrubaram 40 das 80 respostas, e o exame foi
+    recusado por "gabarito com 40 entradas". O silêncio era o problema — a
+    linha sumia sem dizer por quê.
+    """
     texto = rodar(['pdftotext', '-layout', str(pdf), '-'])
 
     marcador = f'PROVA TIPO {tipo}'
@@ -87,18 +99,27 @@ def ler_gabarito(pdf, tipo):
     bloco = texto.split(marcador, 1)[1].split('PROVA TIPO', 1)[0]
     linhas = [l for l in bloco.split('\n') if l.strip()]
 
-    gabarito = {}
+    gabarito, anuladas = {}, set()
     for i in range(len(linhas) - 1):
         nums = linhas[i].split()
         letras = linhas[i + 1].split()
         if not nums or not all(n.isdigit() for n in nums):
             continue
-        if len(letras) != len(nums) or not all(l in 'ABCD' for l in letras):
+        if len(letras) != len(nums) or not all(l in 'ABCD*' for l in letras):
             continue
         for n, l in zip(nums, letras):
-            gabarito[int(n)] = 'ABCD'.index(l)
+            numero = int(n)
+            if l == '*':
+                anuladas.add(numero)
+                # Uma anulada precisa de gabarito para o schema aceitar a
+                # linha, e qualquer valor serve: `anulada = TRUE` já a tira
+                # de toda listagem. Deixar de fora exigiria coluna anulável e
+                # um caso a mais em cada consulta.
+                gabarito[numero] = 0
+            else:
+                gabarito[numero] = 'ABCD'.index(l)
 
-    return gabarito
+    return gabarito, anuladas
 
 
 # Depois da questão 80 o caderno traz um questionário de opinião sobre a
@@ -272,20 +293,36 @@ def main():
     p.add_argument('--forcar-ocr', action='store_true')
     args = p.parse_args()
 
-    print(f'lendo gabarito definitivo (tipo {args.tipo})...')
-    gabarito = ler_gabarito(args.gabarito, args.tipo)
+    print(f'lendo gabarito (tipo {args.tipo})...')
+    gabarito, anuladas = ler_gabarito(args.gabarito, args.tipo)
     print(f'  {len(gabarito)} respostas oficiais')
+    if anuladas:
+        print(f'  {len(anuladas)} anulada(s) pela banca: {sorted(anuladas)}')
 
+    # A escolha entre extração e OCR olhava só se o texto era legível. Isso
+    # deixa passar um caso que não é de legibilidade e sim de LAYOUT: o
+    # caderno tem duas colunas, e `pdftotext -layout` intercala as duas num
+    # PDF que extrai limpo. O texto sai perfeitamente legível e a fatia não
+    # acha questão nenhuma — o 43º Exame montou 2 de 80 assim.
+    #
+    # O melhor juiz do texto é o que se consegue tirar dele. Tenta o caminho
+    # barato e, se ele não montar o exame inteiro, cai para o OCR, que trata
+    # cada coluna em separado.
     texto = '' if args.forcar_ocr else texto_por_extracao(args.prova)
-    if args.forcar_ocr or not parece_portugues(texto):
-        print('texto ilegível na extração direta — caindo para OCR (demora)...')
-        texto = texto_por_ocr(args.prova)
-    else:
-        print('texto extraído direto do PDF')
+    questoes = []
 
-    texto = cortar_no_questionario(texto)
-    questoes = montar_questoes(texto)
-    print(f'  {len(questoes)} questões montadas')
+    if not args.forcar_ocr and parece_portugues(texto):
+        questoes = montar_questoes(cortar_no_questionario(texto))
+        print(f'texto extraído direto do PDF — {len(questoes)} questões montadas')
+
+    if len(questoes) < TOTAL_DE_QUESTOES:
+        motivo = ('forçado' if args.forcar_ocr
+                  else 'texto ilegível' if not parece_portugues(texto)
+                  else f'extração direta rendeu {len(questoes)} de {TOTAL_DE_QUESTOES}')
+        print(f'OCR ({motivo}) — demora...')
+        texto = texto_por_ocr(args.prova)
+        questoes = montar_questoes(cortar_no_questionario(texto))
+        print(f'  {len(questoes)} questões montadas')
 
     questoes, corrigidos = renumerar_por_posicao(questoes)
     for posicao, lido in corrigidos:
@@ -307,6 +344,9 @@ def main():
         'enunciado': q['enunciado'],
         'alternativas': q['alternativas'],
         'gabarito': gabarito[q['numero']],
+        # Quem anula é a banca, e o '*' do gabarito é onde ela diz isso. Sem
+        # levar adiante, a questão entraria no acervo com resposta inventada.
+        'anulada': q['numero'] in anuladas,
     } for q in sorted(questoes, key=lambda q: q['numero'])]
 
     Path(args.saida).write_text(json.dumps(saida, ensure_ascii=False, indent=2))
