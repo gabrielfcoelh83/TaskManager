@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../lib/icons';
-import { embaralhar, montarFontes } from '../lib/acervo';
+import { embaralhar, montarFontes } from '../lib/questions/acervo';
 
 const DIFICULDADE_COR = { 'Fácil': '#10B981', 'Média': '#F59E0B', 'Difícil': '#EF4444' };
 

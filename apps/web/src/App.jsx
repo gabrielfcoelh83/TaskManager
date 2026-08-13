@@ -10,7 +10,7 @@ import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil
 import {
   getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
   anotarFeedbackTentativa, buscarPerfil, salvarPerfil,
-} from './lib/api';
+} from './lib/api/api';
 
 import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';

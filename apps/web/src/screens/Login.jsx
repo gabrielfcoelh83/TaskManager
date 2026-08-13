@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
-import { login, criarConta } from '../lib/api';
+import { login, criarConta } from '../lib/api/api';
 
 // Entrar e criar conta na mesma tela, alternados por um botão. Duas telas
 // separadas custariam rota, estado de navegação e um caminho de volta — para
