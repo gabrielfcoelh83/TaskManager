@@ -240,8 +240,22 @@ export async function buscarPaginaDeQuestoes({
   if (aleatorio) params.set('aleatorio', '1');
   params.set('limite', String(limite));
   if (offset) params.set('offset', String(offset));
+  // Sem este parâmetro a rota devolve array puro, que é o contrato antigo e
+  // segue valendo para o front já publicado. O envelope é opt-in justamente
+  // porque serviço e front sobem em ritmos diferentes.
+  params.set('paginado', '1');
 
   const envelope = await req(`/api/questoes?${params}`);
+
+  // Um serviço mais antigo que este código responde com array. Aceitar as duas
+  // formas evita que a tela morra durante a janela em que as versões
+  // divergem — foi exatamente esse descompasso que derrubou o acervo em
+  // produção quando o envelope entrou sem retrocompatibilidade.
+  if (Array.isArray(envelope)) {
+    const questoes = envelope.map(paraQuestaoDeTela);
+    return { questoes, total: questoes.length, limite, offset };
+  }
+
   return {
     questoes: (envelope?.questoes || []).map(paraQuestaoDeTela),
     total: envelope?.total ?? 0,
