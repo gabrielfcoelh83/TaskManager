@@ -228,19 +228,63 @@ export async function listarTentativas() {
 // A tradução entre o formato do acervo e o das telas mora em `acervo.js`, que
 // não depende de rede e por isso pode ser testada no `node`.
 
-export async function listarQuestoes({ disciplina, exame, aleatorio, limite = 200 } = {}) {
+// Uma página do acervo. Devolve o envelope do serviço — `total` é o tamanho
+// do filtro inteiro, não o desta página, e é o que distingue "acabou" de
+// "bateu no teto".
+export async function buscarPaginaDeQuestoes({
+  disciplina, exame, aleatorio, limite = 200, offset = 0,
+} = {}) {
   const params = new URLSearchParams();
   if (disciplina) params.set('disciplina', disciplina);
   if (exame !== undefined && exame !== null) params.set('exame', String(exame));
   if (aleatorio) params.set('aleatorio', '1');
-  // 200 é o teto do serviço. Com um exame carregado isso traz o acervo
-  // inteiro numa ida só, e o front filtra na memória. Quando houver mais
-  // exames do que cabe aqui, o que falta é filtrar no servidor (a rota já
-  // aceita `disciplina` e `exame`) — não um limite maior.
   params.set('limite', String(limite));
+  if (offset) params.set('offset', String(offset));
 
-  const linhas = await req(`/api/questoes?${params}`);
-  return (linhas || []).map(paraQuestaoDeTela);
+  const envelope = await req(`/api/questoes?${params}`);
+  return {
+    questoes: (envelope?.questoes || []).map(paraQuestaoDeTela),
+    total: envelope?.total ?? 0,
+    limite: envelope?.limite ?? limite,
+    offset: envelope?.offset ?? offset,
+  };
+}
+
+// Antes daqui existia uma chamada só, com `limite=200`, e o comentário dizia
+// que 200 bastava "com um exame carregado". Bastava mesmo — e é exatamente
+// esse o problema: no dia em que o acervo passasse de 200, a tela receberia as
+// primeiras 200 sem erro nenhum e o acervo pareceria menor do que é. Uma lista
+// truncada que se apresenta como completa não tem sintoma; só tem consequência.
+//
+// Agora as páginas são percorridas até somar `total`. O teto de segurança
+// existe para um caso específico: se o serviço passar a devolver página vazia
+// com `total` alto, o laço pararia mesmo assim — mas se algum dia devolver
+// sempre a mesma página, é ele que evita o laço infinito.
+const MAX_PAGINAS = 60;
+
+export async function listarQuestoes(filtros = {}) {
+  // `aleatorio` sorteia a cada consulta: paginar sobre ele repetiria e
+  // perderia questão, e o serviço recusa a combinação. Uma página só.
+  if (filtros.aleatorio) {
+    const { questoes } = await buscarPaginaDeQuestoes(filtros);
+    return questoes;
+  }
+
+  const acervo = [];
+  let offset = 0;
+
+  for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
+    const { questoes, total } = await buscarPaginaDeQuestoes({ ...filtros, offset });
+    acervo.push(...questoes);
+
+    if (questoes.length === 0 || acervo.length >= total) return acervo;
+    offset = acervo.length;
+  }
+
+  console.warn(
+    `listarQuestoes parou em ${MAX_PAGINAS} páginas com ${acervo.length} questões — o acervo pode estar incompleto.`,
+  );
+  return acervo;
 }
 
 export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg }) {
