@@ -74,6 +74,22 @@ app.get('/questoes', verifyToken, async (req, res) => {
     return res.status(400).json({ error: 'limite deve ser inteiro entre 1 e 200' });
   }
 
+  const offsetBruto = req.query.offset === undefined ? 0 : Number(req.query.offset);
+  if (!Number.isInteger(offsetBruto) || offsetBruto < 0) {
+    return res.status(400).json({ error: 'offset deve ser inteiro maior ou igual a zero' });
+  }
+
+  // Paginar sobre `random()` não devolve página: devolve sorteio novo a cada
+  // chamada. A página 2 reordena tudo antes de pular as 20 primeiras, então
+  // repete questão que já veio e some com outra que nunca virá. Recusar é
+  // melhor que entregar uma lista silenciosamente furada — quem quer sorteio
+  // pede `aleatorio=1` com o `limite` que vai usar, de uma vez.
+  if (aleatorio === '1' && offsetBruto > 0) {
+    return res.status(400).json({
+      error: 'offset não combina com aleatorio=1: a ordem muda a cada consulta',
+    });
+  }
+
   const condicoes = ['anulada = FALSE'];
   const valores = [];
 
@@ -95,19 +111,51 @@ app.get('/questoes', verifyToken, async (req, res) => {
   // tabela inteira; com dezenas de milhares de questões isso vira o gargalo
   // e a saída é TABLESAMPLE. Enquanto o acervo é de alguns milhares, trocar
   // agora seria complicar sem medir.
+  // Ordem estável é o que torna a paginação possível: `exame DESC, numero ASC`
+  // é única por causa do UNIQUE (exame, tipo_prova, numero), então nenhuma
+  // questão aparece em duas páginas nem escapa de todas.
   const ordem = aleatorio === '1' ? 'random()' : 'exame DESC, numero ASC';
 
+  const filtro = condicoes.join(' AND ');
   valores.push(limiteBruto);
+  const posLimite = valores.length;
+  valores.push(offsetBruto);
+  const posOffset = valores.length;
 
   try {
+    // `COUNT(*) OVER()` traz o total do filtro na mesma varredura, sem uma
+    // segunda ida ao banco. Sem o total, o front não sabe se chegou ao fim ou
+    // se parou no teto — que é o modo como uma lista truncada passa por
+    // completa.
     const { rows } = await pool.query(
-      `SELECT ${COLUNAS} FROM questoes
-       WHERE ${condicoes.join(' AND ')}
-       ORDER BY ${ordem}
-       LIMIT $${valores.length}`,
+      `SELECT ${COLUNAS}, COUNT(*) OVER() AS total_filtrado
+         FROM questoes
+        WHERE ${filtro}
+        ORDER BY ${ordem}
+        LIMIT $${posLimite} OFFSET $${posOffset}`,
       valores
     );
-    res.json(rows);
+
+    let total;
+    if (rows.length > 0) {
+      total = Number(rows[0].total_filtrado);
+    } else if (offsetBruto > 0) {
+      // Página vazia com offset além do fim: a janela não devolveu linha
+      // nenhuma, então o total precisa vir de uma consulta própria. Só cai
+      // aqui quem pediu página inexistente — é raro e barato.
+      const contagem = await pool.query(
+        `SELECT COUNT(*)::int AS total FROM questoes WHERE ${filtro}`,
+        valores.slice(0, posLimite - 1)
+      );
+      total = contagem.rows[0].total;
+    } else {
+      total = 0;
+    }
+
+    // A coluna da janela é detalhe da consulta, não parte da questão.
+    const questoes = rows.map(({ total_filtrado, ...questao }) => questao);
+
+    res.json({ questoes, total, limite: limiteBruto, offset: offsetBruto });
   } catch (error) {
     console.error('Erro ao listar questões:', error);
     res.status(500).json({ error: 'Erro ao buscar questões' });
