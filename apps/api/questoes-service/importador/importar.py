@@ -238,6 +238,31 @@ def montar_questoes(texto):
         if alt:
             if atual is None:
                 continue
+
+            # Alternativa chegando numa questão que já tem as quatro: o
+            # número da PRÓXIMA questão se perdeu no OCR — acontece quando ele
+            # lê o dígito isolado como parte do cabeçalho da página.
+            #
+            # Descartar aqui custava duas questões em vez de uma: a atual está
+            # íntegra e ia para o lixo junto com a que perdeu o número. Era o
+            # que fazia o 32º cair para 76 de 80, com os buracos sempre em
+            # pares consecutivos — 37/38 e 59/60.
+            #
+            # Fechar a que está pronta recupera uma das duas. A outra não dá
+            # para reconstruir: o enunciado dela veio antes do "A)" e já foi
+            # absorvido como continuação da alternativa D da anterior, sem
+            # marca que diga onde uma termina e a outra começa. Abrir um bloco
+            # para ela produzia questão de enunciado vazio — a validação pegou,
+            # mas o certo é não fabricar.
+            #
+            # O exame vai ser recusado por 79 de 80, e é isso mesmo: o caderno
+            # tem quatro tipos, e o mesmo conteúdo costuma sair inteiro em
+            # outro deles.
+            if len(atual['alternativas']) == 4 and alt.group(1).upper() == 'A':
+                fechar()
+                atual = None
+                continue
+
             esperada = 'ABCD'[len(atual['alternativas'])] if len(atual['alternativas']) < 4 else None
             # Alternativa fora de ordem significa que a fatia se perdeu.
             # Ignorar em silêncio produziria questão com resposta trocada,
