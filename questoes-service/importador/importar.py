@@ -92,12 +92,21 @@ def ler_gabarito(pdf, tipo):
     """
     texto = rodar(['pdftotext', '-layout', str(pdf), '-'])
 
-    marcador = f'PROVA TIPO {tipo}'
-    if marcador not in texto:
-        raise SystemExit(f'gabarito não contém "{marcador}"')
+    # O cabeçalho de cada grade muda de exame para exame: o 42º escreve
+    # "PROVA TIPO 1" e o 40º, "40º EXAME DE ORDEM UNIFICADO - TIPO 1". Casar
+    # a string exata fazia o 40º morrer em 'gabarito não contém "PROVA TIPO
+    # 1"' — mensagem que sugere gabarito errado quando o arquivo está certo.
+    cabecalho = re.compile(r'(?:PROVA\s+)?TIPO\s+(\d)', re.IGNORECASE)
 
-    bloco = texto.split(marcador, 1)[1].split('PROVA TIPO', 1)[0]
-    linhas = [l for l in bloco.split('\n') if l.strip()]
+    marcas = [(m.start(), m.end(), int(m.group(1))) for m in cabecalho.finditer(texto)]
+    inicio = next((fim for _, fim, t in marcas if t == tipo), None)
+    if inicio is None:
+        vistos = sorted({t for _, _, t in marcas})
+        raise SystemExit(f'gabarito não tem o tipo {tipo} (encontrados: {vistos or "nenhum"})')
+
+    # A grade vai até o próximo cabeçalho de tipo, qualquer que seja.
+    proximo = next((ini for ini, _, _ in marcas if ini >= inicio), len(texto))
+    linhas = [l for l in texto[inicio:proximo].split('\n') if l.strip()]
 
     gabarito, anuladas = {}, set()
     for i in range(len(linhas) - 1):
