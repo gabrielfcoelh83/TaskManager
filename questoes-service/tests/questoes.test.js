@@ -85,7 +85,7 @@ describe('GET /questoes', () => {
       .set('Authorization', TOKEN);
 
     expect(res.status).toBe(200);
-    const q = res.body.find((x) => x.id === id);
+    const q = res.body.questoes.find((x) => x.id === id);
     expect(q.alternativas).toEqual(['alfa', 'beta', 'gama', 'delta']);
     // O índice é o contrato com o front: ele compara com o clique.
     expect(q.gabarito).toBe(2);
@@ -100,7 +100,7 @@ describe('GET /questoes', () => {
       .get(`/questoes?exame=${EXAME_TESTE}`)
       .set('Authorization', TOKEN);
 
-    const ids = res.body.map((q) => q.id);
+    const ids = res.body.questoes.map((q) => q.id);
     expect(ids).toContain(viva);
     expect(ids).not.toContain(morta);
   });
@@ -113,7 +113,7 @@ describe('GET /questoes', () => {
       .get('/questoes?disciplina=Direito Penal')
       .set('Authorization', TOKEN);
 
-    const ids = res.body.map((q) => q.id);
+    const ids = res.body.questoes.map((q) => q.id);
     expect(ids).toContain(penal);
     expect(ids).not.toContain(consti);
   });
@@ -125,7 +125,7 @@ describe('GET /questoes', () => {
       .get(`/questoes?exame=${EXAME_TESTE}&limite=3`)
       .set('Authorization', TOKEN);
 
-    expect(res.body).toHaveLength(3);
+    expect(res.body.questoes).toHaveLength(3);
   });
 
   it('recusa limite inválido em vez de cair no default', async () => {
@@ -144,8 +144,70 @@ describe('GET /questoes', () => {
       .get(`/questoes?exame=${EXAME_TESTE}`)
       .set('Authorization', TOKEN);
 
-    expect(res.body[0].explicacao_fonte).toBe('ia');
-    expect(res.body[0].revisada).toBe(false);
+    expect(res.body.questoes[0].explicacao_fonte).toBe('ia');
+    expect(res.body.questoes[0].revisada).toBe(false);
+  });
+
+  it('informa o total do filtro, não o tamanho da página', async () => {
+    for (let n = 1; n <= 5; n++) await inserir({ numero: n });
+
+    const res = await request(app)
+      .get(`/questoes?exame=${EXAME_TESTE}&limite=2`)
+      .set('Authorization', TOKEN);
+
+    // É esta diferença que impede uma lista truncada de passar por completa.
+    expect(res.body.questoes).toHaveLength(2);
+    expect(res.body.total).toBe(5);
+    expect(res.body.limite).toBe(2);
+    expect(res.body.offset).toBe(0);
+  });
+
+  it('pagina sem repetir nem pular questão', async () => {
+    for (let n = 1; n <= 5; n++) await inserir({ numero: n });
+
+    const vistos = [];
+    for (let offset = 0; offset < 5; offset += 2) {
+      const res = await request(app)
+        .get(`/questoes?exame=${EXAME_TESTE}&limite=2&offset=${offset}`)
+        .set('Authorization', TOKEN);
+      expect(res.status).toBe(200);
+      vistos.push(...res.body.questoes.map((q) => q.id));
+    }
+
+    expect(vistos).toHaveLength(5);
+    expect(new Set(vistos).size).toBe(5);
+  });
+
+  it('offset além do fim devolve página vazia com o total certo', async () => {
+    for (let n = 1; n <= 3; n++) await inserir({ numero: n });
+
+    const res = await request(app)
+      .get(`/questoes?exame=${EXAME_TESTE}&limite=10&offset=50`)
+      .set('Authorization', TOKEN);
+
+    expect(res.status).toBe(200);
+    expect(res.body.questoes).toEqual([]);
+    // Sem linha nenhuma não há janela de onde tirar o total: ele vem de uma
+    // contagem própria, e precisa continuar correto.
+    expect(res.body.total).toBe(3);
+  });
+
+  it('recusa offset inválido', async () => {
+    for (const offset of ['abc', '-1', '1.5']) {
+      const res = await request(app)
+        .get(`/questoes?offset=${offset}`)
+        .set('Authorization', TOKEN);
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('recusa offset com aleatorio, que devolveria sorteio e não página', async () => {
+    const res = await request(app)
+      .get('/questoes?aleatorio=1&offset=10')
+      .set('Authorization', TOKEN);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/aleatorio/);
   });
 });
 
