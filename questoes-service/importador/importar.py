@@ -222,8 +222,18 @@ def montar_questoes(texto):
         if not s:
             continue
 
-        alt = re.match(r'^\(?([A-D])\)\s*(.*)', s)
-        num = re.fullmatch(r'(\d{1,2})', s)
+        # O OCR às vezes duplica a letra da alternativa ou troca a caixa —
+        # "Cc)" no lugar de "C)" foi o que fez o 30º Exame montar 79 de 80,
+        # com a questão 7 perdendo a alternativa C e nunca fechando. Aceitar
+        # a minúscula opcional recupera esses casos sem afrouxar a fatia: a
+        # ordem A→B→C→D continua obrigatória logo abaixo.
+        alt = re.match(r'^\(?([A-Da-d])[a-d]?\)\s*(.*)', s)
+        # Do 30º em diante o número da questão aparece sozinho na linha; até o
+        # 24º ele vem escrito por extenso, em tarja preta: "Questão 6". Sem
+        # aceitar as duas formas, o 24º não reconhecia questão nenhuma e
+        # montava zero blocos. `fullmatch` mantém a exigência de a linha ser
+        # só isso, então "assinale a questão correta" continua sendo texto.
+        num = re.fullmatch(r'(?:Quest[ãa]o\s+)?(\d{1,2})', s, re.IGNORECASE)
 
         if alt:
             if atual is None:
@@ -232,7 +242,7 @@ def montar_questoes(texto):
             # Alternativa fora de ordem significa que a fatia se perdeu.
             # Ignorar em silêncio produziria questão com resposta trocada,
             # que é exatamente o defeito que este serviço existe para evitar.
-            if alt.group(1) != esperada:
+            if alt.group(1).upper() != esperada:
                 atual = None
                 continue
             atual['alternativas'].append([alt.group(2)])
