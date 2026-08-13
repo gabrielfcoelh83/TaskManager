@@ -57,7 +57,7 @@ def texto_por_extracao(pdf):
     return rodar(['pdftotext', '-layout', str(pdf), '-'])
 
 
-def texto_por_ocr(pdf, primeira_pagina=3):
+def texto_por_ocr(pdf, primeira_pagina=1):
     paginas = int(re.search(r'Pages:\s+(\d+)', rodar(['pdfinfo', str(pdf)])).group(1))
     metade = LARGURA_A4_300DPI // 2
     partes = []
@@ -101,13 +101,57 @@ def ler_gabarito(pdf, tipo):
     return gabarito
 
 
+# Depois da questão 80 o caderno traz um questionário de opinião sobre a
+# própria prova — "o grau de dificuldade desta prova foi", "qual foi o tempo
+# gasto" — numerado de 1 a 10 e com alternativas no mesmo formato. Para o
+# parser é indistinguível de questão, e no 42º Exame ele montou as dez como se
+# fossem, reiniciando a numeração e produzindo 86 blocos.
+#
+# Cortar pelo cabeçalho é melhor que parar em 80: se a fatia perder uma
+# questão no meio, parar em 80 engoliria a primeira pergunta do questionário
+# para fechar a conta, e o resultado seria um acervo com pergunta de pesquisa
+# no lugar de questão de Direito.
+MARCADOR_DO_QUESTIONARIO = re.compile(
+    r'question[áa]rio\s+de\s+percep[çc][ãa]o|question[áa]rio.{0,20}facultativo',
+    re.IGNORECASE,
+)
+
+
+def cortar_no_questionario(texto):
+    """Descarta o questionário de opinião do fim do caderno.
+
+    O marcador aparece DUAS vezes, e cortar na primeira apaga a prova
+    inteira: as instruções da capa anunciam "este caderno contendo 80
+    questões objetivas e o questionário de percepção sobre a prova". Só a
+    ocorrência do fim delimita o questionário de verdade.
+
+    Ignorar o primeiro terço resolve com folga — as instruções cabem em duas
+    páginas e as 80 questões ocupam o resto — e é mais estável que cortar na
+    última ocorrência, que cairia no meio do questionário se ele se
+    mencionasse de novo.
+    """
+    piso = len(texto) // 3
+    for achado in MARCADOR_DO_QUESTIONARIO.finditer(texto):
+        if achado.start() >= piso:
+            return texto[: achado.start()]
+    return texto
+
+
 def montar_questoes(texto):
     """Fatia o texto corrido em questões.
 
-    O formato é estável há anos: número da questão sozinho numa linha,
-    enunciado, e as alternativas abertas por (A) a (D). Linhas de
-    continuação pertencem ao último bloco aberto — sem isso, alternativa
-    longa perde tudo depois da primeira linha.
+    Número da questão sozinho numa linha, enunciado, e as alternativas
+    abertas por A a D. Linhas de continuação pertencem ao último bloco
+    aberto — sem isso, alternativa longa perde tudo depois da primeira
+    linha.
+
+    O parêntese de abertura é OPCIONAL porque o caderno não é tão estável
+    quanto parecia: o 45º Exame abre as alternativas com "(A)" e o 42º com
+    "A)". Exigir "(A)" fazia o 42º montar ZERO questões — e, por sorte, a
+    validação de 80 barrou o exame inteiro em vez de importar um pedaço.
+    Aceitar as duas formas não afrouxa a fatia: a ordem A→B→C→D continua
+    obrigatória logo abaixo, e é ela que impede uma linha começada por "A)"
+    no meio de um texto de virar alternativa.
     """
     questoes, atual, alvo = [], None, None
 
@@ -122,7 +166,7 @@ def montar_questoes(texto):
         if not s:
             continue
 
-        alt = re.match(r'^\(([A-D])\)\s*(.*)', s)
+        alt = re.match(r'^\(?([A-D])\)\s*(.*)', s)
         num = re.fullmatch(r'(\d{1,2})', s)
 
         if alt:
@@ -239,6 +283,7 @@ def main():
     else:
         print('texto extraído direto do PDF')
 
+    texto = cortar_no_questionario(texto)
     questoes = montar_questoes(texto)
     print(f'  {len(questoes)} questões montadas')
 
