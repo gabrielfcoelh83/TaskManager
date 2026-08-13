@@ -107,11 +107,22 @@ def ler_gabarito(pdf, tipo):
         print('    não estão aqui. Procure o definitivo com listar_arquivos.py',
               file=sys.stderr)
 
-    # O cabeçalho de cada grade muda de exame para exame: o 42º escreve
-    # "PROVA TIPO 1" e o 40º, "40º EXAME DE ORDEM UNIFICADO - TIPO 1". Casar
-    # a string exata fazia o 40º morrer em 'gabarito não contém "PROVA TIPO
-    # 1"' — mensagem que sugere gabarito errado quando o arquivo está certo.
-    cabecalho = re.compile(r'(?:PROVA\s+)?TIPO\s+(\d)', re.IGNORECASE)
+    # O cabeçalho de cada grade muda de exame para exame, e já apareceram três
+    # formas para a mesma coisa:
+    #
+    #   42º, 43º, 45º, 46º   "PROVA TIPO 1"
+    #   40º                  "40º EXAME DE ORDEM UNIFICADO - TIPO 1"
+    #   39º                  "XXXIX EXAME DE ORDEM UNIFICADO - PROVA 1"
+    #
+    # Casar a string exata fazia o exame morrer em 'gabarito não contém "PROVA
+    # TIPO 1"' — mensagem que acusa o arquivo quando o desatualizado é o
+    # parser. As três formas viram uma só aqui; a mais específica vem primeiro
+    # para "PROVA TIPO 1" não casar só o "PROVA 1".
+    #
+    # Aceitar "PROVA \d" sozinho abre espaço para casar texto corrido, e é a
+    # exigência de grade logo abaixo que fecha: a linha seguinte precisa ser
+    # de números e a próxima, de letras do mesmo tamanho.
+    cabecalho = re.compile(r'(?:PROVA\s+TIPO|TIPO|PROVA)\s+(\d)', re.IGNORECASE)
 
     marcas = [(m.start(), m.end(), int(m.group(1))) for m in cabecalho.finditer(texto)]
     inicio = next((fim for _, fim, t in marcas if t == tipo), None)
