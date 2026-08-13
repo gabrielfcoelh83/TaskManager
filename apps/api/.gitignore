@@ -9,3 +9,7 @@ nginx/certs/
 certbot/conf/
 certbot/www/
 backups/
+
+# bytecode do Python, gerado ao importar o módulo do importador
+__pycache__/
+*.pyc
