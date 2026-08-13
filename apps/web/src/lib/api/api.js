@@ -1,4 +1,4 @@
-import { paraQuestaoDeTela } from './acervo.js';
+import { paraQuestaoDeTela } from '../questions/acervo.js';
 
 // Cliente da API da plataforma (gateway :3000 atrás do nginx).
 //

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Icon } from '../lib/icons';
+import { Icon } from '../../lib/icons';
 
 const QUANTIDADES = [10, 20, 30, 40, 50, 60, 70, 80];
 

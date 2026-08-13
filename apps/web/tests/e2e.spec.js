@@ -307,7 +307,7 @@ test.describe('MA Questões E2E', () => {
     // a rodar contra o build, este import precisa virar outra coisa (expor a
     // função no `window` em modo de teste, por exemplo) em vez de sumir.
     const doFront = await page.evaluate(async ({ qId, id }) => {
-      const api = await import('/src/lib/api.js');
+      const api = await import('/src/lib/api/api.js');
       const porQuestao = await api.listarTentativas();
       const tentativas = porQuestao[qId]?.tentativas || [];
       // Pela id, não pela posição: a questão pode ter histórico anterior.

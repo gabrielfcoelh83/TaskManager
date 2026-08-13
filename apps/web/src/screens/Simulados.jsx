@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
 import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
-import ConfigSimulado from '../components/ConfigSimulado';
-import Cronometro from '../components/Cronometro';
+import ConfigSimulado from '../components/ui/ConfigSimulado';
+import Cronometro from '../components/ui/Cronometro';
 
 export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico, go, registrar, praticarDisciplina }) {
   const preDisciplina = sim?.preDisciplina || null;

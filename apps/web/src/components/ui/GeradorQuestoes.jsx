@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Icon } from '../lib/icons';
+import { Icon } from '../../lib/icons';
 
 export default function GeradorQuestoes({ theme, s, onQuestoesGeradas }) {
   const [tema, setTema] = useState('');

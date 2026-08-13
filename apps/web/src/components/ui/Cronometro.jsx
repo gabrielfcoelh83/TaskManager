@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Icon } from '../lib/icons';
+import { Icon } from '../../lib/icons';
 
 export default function Cronometro({ tempoTotalMinutos, aoTerminar }) {
   const [tempoRestante, setTempoRestante] = useState(tempoTotalMinutos * 60);

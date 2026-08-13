@@ -13,7 +13,7 @@
 // transforma resposta certa em errada sem lançar erro nenhum, sem quebrar
 // nenhuma tela, e sem aparecer em revisão de código. O aluno é quem descobre.
 
-import { paraQuestaoDeTela, montarFontes, embaralhar } from '../src/lib/acervo.js';
+import { paraQuestaoDeTela, montarFontes, embaralhar } from '../src/lib/questions/acervo.js';
 
 const falhas = [];
 const exigir = (condicao, mensagem) => {
