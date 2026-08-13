@@ -67,6 +67,20 @@ const COLUNAS = `
 app.get('/questoes', verifyToken, async (req, res) => {
   const { disciplina, exame, aleatorio } = req.query;
 
+  // Formato da resposta, e por que há dois.
+  //
+  // Esta rota devolvia um array puro. Trocá-la por um envelope com metadados
+  // de paginação parece melhoria óbvia e derrubou a tela de questões em
+  // produção no mesmo dia: o front publicado fazia `(resposta || []).map(...)`,
+  // e um objeto não tem `.map`. Serviço e front sobem em ritmos diferentes —
+  // aqui, `docker compose up` contra um deploy na Vercel — então o cliente
+  // antigo é sempre um cliente possível, e quebrar o contrato dele é quebrar o
+  // site de quem já estava usando.
+  //
+  // O array continua sendo o padrão. Quem quer paginar pede `paginado=1` e
+  // recebe `{ questoes, total, limite, offset }`.
+  const paginado = req.query.paginado === '1';
+
   const limiteBruto = req.query.limite === undefined ? 20 : Number(req.query.limite);
   // Query param inválido devolve 400 em vez de virar o default em silêncio:
   // `limite=abc` virando 20 esconde um bug de quem chamou.
@@ -155,7 +169,7 @@ app.get('/questoes', verifyToken, async (req, res) => {
     // A coluna da janela é detalhe da consulta, não parte da questão.
     const questoes = rows.map(({ total_filtrado, ...questao }) => questao);
 
-    res.json({ questoes, total, limite: limiteBruto, offset: offsetBruto });
+    res.json(paginado ? { questoes, total, limite: limiteBruto, offset: offsetBruto } : questoes);
   } catch (error) {
     console.error('Erro ao listar questões:', error);
     res.status(500).json({ error: 'Erro ao buscar questões' });

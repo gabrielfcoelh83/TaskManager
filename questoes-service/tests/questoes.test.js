@@ -81,7 +81,7 @@ describe('GET /questoes', () => {
     const id = await inserir({ gabarito: 2 });
 
     const res = await request(app)
-      .get(`/questoes?exame=${EXAME_TESTE}`)
+      .get(`/questoes?exame=${EXAME_TESTE}&paginado=1`)
       .set('Authorization', TOKEN);
 
     expect(res.status).toBe(200);
@@ -97,7 +97,7 @@ describe('GET /questoes', () => {
     const morta = await inserir({ numero: 2, anulada: true });
 
     const res = await request(app)
-      .get(`/questoes?exame=${EXAME_TESTE}`)
+      .get(`/questoes?exame=${EXAME_TESTE}&paginado=1`)
       .set('Authorization', TOKEN);
 
     const ids = res.body.questoes.map((q) => q.id);
@@ -110,7 +110,7 @@ describe('GET /questoes', () => {
     const penal = await inserir({ numero: 2, disciplina: 'Direito Penal' });
 
     const res = await request(app)
-      .get('/questoes?disciplina=Direito Penal')
+      .get('/questoes?disciplina=Direito Penal&paginado=1')
       .set('Authorization', TOKEN);
 
     const ids = res.body.questoes.map((q) => q.id);
@@ -122,7 +122,7 @@ describe('GET /questoes', () => {
     for (let n = 1; n <= 5; n++) await inserir({ numero: n });
 
     const res = await request(app)
-      .get(`/questoes?exame=${EXAME_TESTE}&limite=3`)
+      .get(`/questoes?exame=${EXAME_TESTE}&limite=3&paginado=1`)
       .set('Authorization', TOKEN);
 
     expect(res.body.questoes).toHaveLength(3);
@@ -141,18 +141,32 @@ describe('GET /questoes', () => {
     await inserir({ explicacao: 'texto gerado', explicacao_fonte: 'ia', revisada: false });
 
     const res = await request(app)
-      .get(`/questoes?exame=${EXAME_TESTE}`)
+      .get(`/questoes?exame=${EXAME_TESTE}&paginado=1`)
       .set('Authorization', TOKEN);
 
     expect(res.body.questoes[0].explicacao_fonte).toBe('ia');
     expect(res.body.questoes[0].revisada).toBe(false);
   });
 
+  it('sem paginado devolve array puro, como o contrato antigo', async () => {
+    await inserir({ numero: 1 });
+
+    const res = await request(app)
+      .get(`/questoes?exame=${EXAME_TESTE}`)
+      .set('Authorization', TOKEN);
+
+    // O front publicado faz `(resposta || []).map(...)`. Um objeto aqui
+    // derruba a tela de questões — foi o que aconteceu quando o envelope
+    // entrou sem retrocompatibilidade.
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(typeof res.body.map).toBe('function');
+  });
+
   it('informa o total do filtro, não o tamanho da página', async () => {
     for (let n = 1; n <= 5; n++) await inserir({ numero: n });
 
     const res = await request(app)
-      .get(`/questoes?exame=${EXAME_TESTE}&limite=2`)
+      .get(`/questoes?exame=${EXAME_TESTE}&limite=2&paginado=1`)
       .set('Authorization', TOKEN);
 
     // É esta diferença que impede uma lista truncada de passar por completa.
@@ -168,7 +182,7 @@ describe('GET /questoes', () => {
     const vistos = [];
     for (let offset = 0; offset < 5; offset += 2) {
       const res = await request(app)
-        .get(`/questoes?exame=${EXAME_TESTE}&limite=2&offset=${offset}`)
+        .get(`/questoes?exame=${EXAME_TESTE}&limite=2&offset=${offset}&paginado=1`)
         .set('Authorization', TOKEN);
       expect(res.status).toBe(200);
       vistos.push(...res.body.questoes.map((q) => q.id));
@@ -182,7 +196,7 @@ describe('GET /questoes', () => {
     for (let n = 1; n <= 3; n++) await inserir({ numero: n });
 
     const res = await request(app)
-      .get(`/questoes?exame=${EXAME_TESTE}&limite=10&offset=50`)
+      .get(`/questoes?exame=${EXAME_TESTE}&limite=10&offset=50&paginado=1`)
       .set('Authorization', TOKEN);
 
     expect(res.status).toBe(200);
