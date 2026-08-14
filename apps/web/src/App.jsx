@@ -4,7 +4,9 @@ import { Icon } from './lib/icons';
 import { NAV, PAGE_META } from './lib/navegacao';
 import { loadState, saveState, limparEstado } from './lib/storage';
 import { diasAteProva, metaDiaria, sequenciaAtual } from './lib/metrics';
-import { montarDisciplinas, prioridadeDeEstudo } from './lib/disciplinas';
+import { montarDisciplinas } from './lib/disciplinas';
+import { planoDaSemana } from './lib/agenda';
+import { embaralhar } from './lib/questions/acervo';
 import { classificarRevisao } from './lib/revisao';
 import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
 import {
@@ -340,10 +342,34 @@ export default function App() {
     }));
   };
 
-  const praticarDisciplina = (nome) => {
+  // `iniciar` distingue os dois jeitos de chegar ao quiz de uma matéria.
+  //
+  // Sem ele — como Disciplinas, Simulados e Cronograma chamam — a tela abre
+  // com a fonte marcada e o usuário decide quantas responder. Com ele, o quiz
+  // já vem montado: é o caminho do "Foco de hoje", onde a pergunta "qual
+  // matéria, quantas questões" já foi respondida pelo plano e repeti-la ao
+  // usuário é só uma tela a mais entre ele e a primeira questão.
+  const praticarDisciplina = (nome, { iniciar = false } = {}) => {
     const daMateria = acervo.questoes.filter((q) => (q.disciplina || 'Sem classificação') === nome);
     if (daMateria.length === 0) { goTo('questoes'); return; }
-    setState((st) => ({ ...st, screen: 'questoes', questoes: { ...st.questoes, selected: [nome], quiz: null, done: false } }));
+
+    if (!iniciar) {
+      setState((st) => ({ ...st, screen: 'questoes', questoes: { ...st.questoes, selected: [nome], quiz: null, done: false } }));
+      return;
+    }
+
+    // Quantas abrir: o que falta para a meta. Abrir as 80 da matéria quando
+    // faltam 12 transforma um objetivo alcançável numa lista sem fim — e a
+    // barra de progresso do quiz passaria a medir outra coisa que não a meta.
+    // Com a meta já batida, quem clicou quer continuar: abre o que houver.
+    const quantas = meta.batida ? daMateria.length : Math.max(1, meta.faltam);
+    const lista = embaralhar(daMateria).slice(0, quantas);
+
+    setState((st) => ({
+      ...st,
+      screen: 'questoes',
+      questoes: { ...st.questoes, selected: [nome], quiz: lista, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
+    }));
   };
 
   const sair = () => {
@@ -373,7 +399,6 @@ export default function App() {
   const meta = metaDiaria(state.configuracoes, usuarioTentativas, state.resultados_historico);
   const sequencia = sequenciaAtual(usuarioTentativas, state.resultados_historico);
   const diasProva = diasAteProva(state.configuracoes);
-  const prioridade = prioridadeDeEstudo(disciplinas);
 
   const cabecalho = state.screen === 'dashboard'
     ? { title: saudacao(nome), sub: PAGE_META.dashboard.sub }
@@ -421,10 +446,31 @@ export default function App() {
     });
   }
 
-  const foco = !meta.batida && meta.respondidas === 0 && prioridade.length > 0
-    ? `Comece por ${prioridade[0].nome} — ${prioridade[0].motivo || 'é onde você mais perde ponto'}.`
-    : meta.batida
-      ? `Meta batida: ${meta.respondidas} questões hoje. O que vier agora é lucro.`
+  // A matéria de hoje sai do MESMO plano que o Cronograma desenha. Calcular
+  // aqui por outro caminho — "a primeira da lista de prioridade", que era o
+  // que este bloco fazia — dá certo hoje e diverge no dia em que o plano
+  // mudar de regra, com a sidebar mandando estudar uma matéria e o cronograma
+  // outra.
+  // Sem useMemo de propósito: este trecho roda depois do early return do
+  // Login, e hook após return condicional quebra a ordem entre renders — o
+  // ESLint barrou a primeira versão. `planoDaSemana` percorre sete dias sobre
+  // listas já derivadas, então o custo não justifica mover tudo para cima.
+  const materiaDeHoje = planoDaSemana({
+    disciplinas,
+    tentativas: usuarioTentativas,
+    meta: state.configuracoes.meta,
+  }).find((d) => d.hoje) || null;
+
+  // O foco dizia "faltam 12 questões" sem dizer de quê, e não levava a lugar
+  // nenhum: para começar era preciso adivinhar a matéria, abrir Questões e
+  // filtrar na mão. Agora ele nomeia a matéria em todos os estados e o cartão
+  // inteiro abre o quiz já filtrado nela.
+  const foco = meta.batida
+    ? `Meta batida: ${meta.respondidas} ${meta.respondidas === 1 ? 'questão' : 'questões'} hoje. O que vier agora é lucro.`
+    : materiaDeHoje?.disciplina
+      ? meta.respondidas === 0
+        ? `Comece por ${materiaDeHoje.disciplina} — ${materiaDeHoje.motivo || 'é onde você mais perde ponto'}.`
+        : `Faltam ${meta.faltam} em ${materiaDeHoje.disciplina} para bater a meta.`
       : `Faltam ${meta.faltam} ${meta.faltam === 1 ? 'questão' : 'questões'} para bater a meta de hoje.`;
 
   const navItems = NAV.map((n) => {
@@ -473,12 +519,35 @@ export default function App() {
           ))}
         </div>
 
-        <div style={s.focusCard}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
+        {/* Botão, e não div, quando há matéria: o cartão é o caminho mais
+            curto entre "abri o app" e "estou respondendo questão da matéria
+            certa". Sem matéria definida — acervo ainda sem classificação — ele
+            continua sendo só o aviso que sempre foi, porque um botão que não
+            leva a lugar nenhum é pior que texto. */}
+        {materiaDeHoje?.disciplina ? (
+          <button
+            type="button"
+            data-testid="foco-do-dia"
+            onClick={() => praticarDisciplina(materiaDeHoje.disciplina, { iniciar: true })}
+            style={{ ...s.focusCard, width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer', font: 'inherit', display: 'block' }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
+            </div>
+            <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: theme.primaryDark, marginTop: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Icon name="play" color={theme.primaryDark} size={12} />
+              {meta.batida ? 'Continuar em ' : 'Estudar '}{materiaDeHoje.disciplina}
+            </div>
+          </button>
+        ) : (
+          <div style={s.focusCard}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
+            </div>
+            <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
           </div>
-          <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
-        </div>
+        )}
 
         <div style={s.profileRow}>
           <div style={s.avatar} data-testid="avatar">{iniciais(nome, '·')}</div>

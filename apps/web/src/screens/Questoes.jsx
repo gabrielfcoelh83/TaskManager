@@ -206,6 +206,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
 
         {fontes.length > 0 && (
           <button
+            data-testid="selecionar-todas"
             style={{ width: '100%', marginTop: 14, background: '#fff', border: `1px solid ${theme.primarySoft}`, color: theme.primary, borderRadius: 9, padding: 8, fontSize: 12, fontWeight: 600 }}
             onClick={toggleAll}
           >
@@ -301,7 +302,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
                   {current.banca ? ` · ${current.banca}` : ''}
                 </span>
                 {current.disciplina && (
-                  <span style={s.pill(theme.primarySoft, theme.primaryDark)}>{current.disciplina}</span>
+                  <span data-testid="disciplina-da-questao" style={s.pill(theme.primarySoft, theme.primaryDark)}>{current.disciplina}</span>
                 )}
                 {current.dificuldade && <span style={{ ...dificuldadePill, marginLeft: 'auto' }}>{current.dificuldade}</span>}
               </div>

@@ -655,6 +655,59 @@ test.describe('Revisões', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Foco do dia
+// ---------------------------------------------------------------------------
+
+test.describe('Foco do dia', () => {
+  // O acervo de teste não tem disciplina em nenhuma questão — de propósito,
+  // para exercitar o agrupamento por exame da barra lateral. Mas o "Foco de
+  // hoje" só sugere matéria que exista classificada, então este cenário se
+  // monta aqui, na resposta da API, em vez de no seed compartilhado.
+  // Classificar uma linha no seed troca o agrupamento da barra para o app
+  // inteiro e derruba dois testes que dependem do modo por exame.
+  const ACERVO = [1, 2, 3].map((n) => ({
+    id: 9000 + n,
+    exame: 97,
+    tipo_prova: 1,
+    numero: n,
+    banca: 'FGV',
+    ano: 2025,
+    enunciado: `Questão ${n} de ética profissional, montada para o teste do foco do dia.`,
+    alternativas: [`q${n} A`, `q${n} B`, `q${n} C`, `q${n} D`],
+    gabarito: 1,
+    anulada: false,
+    disciplina: 'Ética Profissional',
+    tema: 'Sigilo profissional',
+    explicacao: null,
+    explicacao_fonte: null,
+    revisada: false,
+  }));
+
+  test('o cartão nomeia a matéria e abre o quiz já filtrado nela', async ({ page }) => {
+    await page.route('**/api/questoes*', (rota) =>
+      rota.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACERVO) }));
+
+    await entrar(page);
+
+    const foco = page.locator('[data-testid="foco-do-dia"]');
+    await expect(foco).toBeVisible();
+
+    // O rótulo muda com a meta: 'Estudar X' antes de bater, 'Continuar em X'
+    // depois. Os dois nomeiam a matéria, que é o que este teste verifica —
+    // antes o cartão dizia só "faltam N questões" e não levava a lugar nenhum.
+    const materia = (await foco.innerText()).match(/(?:Estudar|Continuar em) (.+)$/m)?.[1]?.trim();
+    expect(materia, 'o cartão precisa nomear a matéria').toBe('Ética Profissional');
+
+    await foco.click();
+
+    // Abre o quiz montado, e não a tela de escolher fontes: a pergunta "qual
+    // matéria" já foi respondida pelo plano do dia.
+    await expect(page.locator('[data-testid="enunciado"]')).toBeVisible();
+    await expect(page.locator('[data-testid="disciplina-da-questao"]')).toHaveText('Ética Profissional');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Todas as telas abrem
 // ---------------------------------------------------------------------------
 //
