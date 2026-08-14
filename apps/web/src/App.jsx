@@ -534,8 +534,15 @@ export default function App() {
             <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
             </div>
-            <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: theme.primaryDark, marginTop: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+            {/* O dashboard já traz a mesma sugestão no card "Próximo passo",
+                com o mesmo texto e mais espaço para ele. Repetir aqui, na
+                mesma tela, é ruído — mas o atalho continua valendo, porque a
+                barra acompanha todas as outras telas, onde aquele card não
+                existe. Some o texto, fica o caminho. */}
+            {state.screen !== 'dashboard' && (
+              <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
+            )}
+            <div style={{ fontSize: 12, fontWeight: 600, color: theme.primaryDark, marginTop: state.screen === 'dashboard' ? 6 : 8, display: 'flex', alignItems: 'center', gap: 5 }}>
               <Icon name="play" color={theme.primaryDark} size={12} />
               {meta.batida ? 'Continuar em ' : 'Estudar '}{materiaDeHoje.disciplina}
             </div>

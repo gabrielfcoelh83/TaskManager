@@ -705,6 +705,35 @@ test.describe('Foco do dia', () => {
     await expect(page.locator('[data-testid="enunciado"]')).toBeVisible();
     await expect(page.locator('[data-testid="disciplina-da-questao"]')).toHaveText('Ética Profissional');
   });
+
+  test('no dashboard o cartão encolhe, porque o card "Próximo passo" já diz o mesmo', async ({ page }) => {
+    await page.route('**/api/questoes*', (rota) =>
+      rota.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACERVO) }));
+
+    await entrar(page);
+    const foco = page.locator('[data-testid="foco-do-dia"]');
+
+    // No dashboard fica só o caminho: o motivo já está no card central, com
+    // mais espaço, e repeti-lo na mesma tela é ruído.
+    // O rótulo alterna entre "Estudar X" e "Continuar em X" conforme a meta
+    // do dia, e a suíte inteira compartilha a mesma conta — fixar uma das
+    // variantes deixa o teste refém da ordem de execução.
+    const rotulo = /(?:Estudar|Continuar em) Ética Profissional/;
+    const noDashboard = (await foco.innerText()).trim();
+    expect(noDashboard).toMatch(rotulo);
+
+    // Fora dele o cartão volta inteiro — ali não há card nenhum dizendo isso.
+    await page.click('[data-testid="nav-revisoes"]');
+    const foraDoDashboard = (await foco.innerText()).trim();
+    expect(foraDoDashboard).toMatch(rotulo);
+
+    // Comparar o tamanho, e não uma frase: o motivo muda com o progresso do
+    // dia — "Comece por X" antes da primeira questão, "Faltam N em X" depois —
+    // e os testes da suíte dividem a mesma conta. O que a mudança faz é a
+    // linha do motivo sumir no dashboard, e é isso que se verifica.
+    expect(foraDoDashboard.length, 'fora do dashboard o cartão traz o motivo')
+      .toBeGreaterThan(noDashboard.length);
+  });
 });
 
 // ---------------------------------------------------------------------------
