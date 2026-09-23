@@ -55,6 +55,24 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Exposta para consumidores fora da rede interna (as rotas de IA do
+// MlDireito, na Vercel) validarem um token antes de chamar serviço pago —
+// o auth-service já tinha /verify, só não era alcançável de fora.
+app.post('/api/auth/verify', async (req, res) => {
+  try {
+    const response = await axios.post(
+      `${services.auth}/verify`,
+      {},
+      { headers: { authorization: req.headers.authorization } }
+    );
+    res.json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao verificar token',
+    });
+  }
+});
+
 // ===== ROTAS DE USUÁRIOS =====
 app.get('/api/users/:id', async (req, res) => {
   try {
