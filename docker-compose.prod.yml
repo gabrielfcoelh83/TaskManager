@@ -1,6 +1,10 @@
 # Compose de produção: consome as imagens publicadas no Docker Hub pelo
 # workflow de CI/CD, em vez de buildar a partir do código-fonte.
 # As variáveis vêm do .env gerado na VM a cada deploy (nunca commitado).
+# Nome fixo: sem isso o Compose deriva o projeto do nome da pasta, e mudar
+# a pasta criaria um volume de banco novo e vazio (taskmanager_postgres_data
+# é o volume real dos dados).
+name: taskmanager
 services:
   # Nginx — proxy reverso, TLS e único ponto de entrada
   nginx:
