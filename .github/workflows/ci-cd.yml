@@ -271,9 +271,14 @@ jobs:
           echo "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
           trap 'docker logout "$REGISTRY" > /dev/null 2>&1 || true' EXIT
 
+          # Só os scripts que ainda não são executáveis. `chmod` exige ser o
+          # dono do arquivo, e a pasta é compartilhada pelo grupo devs: um
+          # `chmod +x scripts/*.sh` incondicional falha num script criado por
+          # outro usuário mesmo que ele já esteja executável, e derruba o
+          # deploy (foi o que aconteceu na mudança para /srv/projects).
+          find scripts -name '*.sh' ! -perm -u+x -exec chmod +x {} +
           # O nginx não inicia um bloco 443 sem certificado no lugar.
           # Só cria se não houver — nunca sobrescreve o do Let's Encrypt.
-          chmod +x scripts/*.sh
           # Criados aqui para pertencerem ao usuário; se o Docker os criar
           # ao montar, vêm como root e o backup falha ao escrever.
           mkdir -p backups
