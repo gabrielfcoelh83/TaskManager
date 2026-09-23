@@ -9,7 +9,10 @@ services:
     ports:
       - "80:80"      # validação do Let's Encrypt e redirecionamento
       - "443:443"    # a aplicação sobre TLS
-      - "3000:8080"  # rota de fuga em HTTP puro, ver conf.d/default.conf
+      # Sem "3000:8080": a rota de fuga em HTTP puro ficava pública apesar
+      # do UFW (o Docker publica portas via DNAT, antes das regras do ufw),
+      # expondo tokens em texto puro. O server da 8080 segue no default.conf
+      # para o compose de dev.
     volumes:
       # DIRETÓRIOS, e não os arquivos um a um. Bind-mount de arquivo prende
       # o INODE: quando o deploy copia uma versão nova por cima, o caminho
