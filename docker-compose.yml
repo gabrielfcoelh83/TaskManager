@@ -30,14 +30,12 @@ services:
     environment:
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
-      TASK_SERVICE_URL: http://task-service:3003
       ESTUDO_SERVICE_URL: http://estudo-service:3004
       QUESTOES_SERVICE_URL: http://questoes-service:3005
       REDIS_URL: redis://redis:6379
     depends_on:
       - auth-service
       - user-service
-      - task-service
       - estudo-service
       - questoes-service
       - redis
@@ -76,28 +74,6 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: user_db
-      DB_USER: postgres
-      DB_PASSWORD: ${DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    networks:
-      - microservices-network
-
-  # Serviço de Tarefas
-  task-service:
-    build: ./task-service
-    ports:
-      - "3003:3003"
-    environment:
-      PORT: 3003
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: task_db
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}

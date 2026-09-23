@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, auth-service, user-service, task-service, estudo-service, questoes-service]
+        service: [gateway, auth-service, user-service, estudo-service, questoes-service]
 
     steps:
       - uses: actions/checkout@v4
@@ -153,7 +153,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, auth-service, user-service, task-service, estudo-service, questoes-service]
+        service: [gateway, auth-service, user-service, estudo-service, questoes-service]
 
     steps:
       - uses: actions/checkout@v4
@@ -356,7 +356,7 @@ jobs:
                 # implantado é a única checagem que enxerga isso.
                 ESPERADA=$(grep '^IMAGE_TAG=' .env | cut -d= -f2)
                 DIVERGENTES=""
-                for s in api-gateway auth-service user-service task-service estudo-service questoes-service; do
+                for s in api-gateway auth-service user-service estudo-service questoes-service; do
                   RODANDO=$(docker compose -f docker-compose.prod.yml ps -q "$s" 2>/dev/null \
                     | xargs -r docker inspect --format '{{.Config.Image}}' 2>/dev/null \
                     | sed 's/.*://')

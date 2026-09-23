@@ -15,7 +15,6 @@ Plataforma de microserviços para educação jurídica (preparação OAB/Magistr
 | **API Gateway** | 3000 | - | Roteamento único (Express) |
 | **Auth Service** | 3001 | `auth_db` | Registro, login, JWT |
 | **User Service** | 3002 | `user_db` | Perfis de usuário |
-| **Task Service** | 3003 | `task_db` | CRUD de tarefas |
 | **Estudo Service** | 3004 | `estudo_db` | Registro de tentativas de questões |
 | **Questões Service** | 3005 | `questoes_db` | Banco de questões do Exame de Ordem |
 
@@ -31,8 +30,7 @@ TaskManager/
 │   │   └── errorHandler.js     # Tratamento de erro unificado
 │   ├── validators/             # (Vazio por agora)
 │   │   ├── user.js
-│   │   ├── question.js
-│   │   └── task.js
+│   │   └── question.js
 │   ├── utils/
 │   │   ├── db.js               # Configuração PostgreSQL
 │   │   └── redis.js            # Configuração Redis
@@ -53,12 +51,6 @@ TaskManager/
 │   ├── app.js
 │   ├── migrations/
 │   ├── tests/
-│   ├── package.json            # Adiciona: "@shared": "file:../shared"
-│   └── index.js
-├── task-service/               # Tarefas
-│   ├── app.js
-│   ├── migrations/             # (NOVO)
-│   ├── tests/                  # (NOVO - sem testes atualmente)
 │   ├── package.json            # Adiciona: "@shared": "file:../shared"
 │   └── index.js
 ├── estudo-service/             # Registro de tentativas
@@ -95,7 +87,6 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 
 - `auth_db` - usuários, tokens
 - `user_db` - perfis, preferências
-- `task_db` - tarefas
 - `estudo_db` - tentativas de questões
 - `questoes_db` - banco de questões
 
@@ -162,10 +153,10 @@ docker compose up --build
 ```
 
 Sobe:
-- PostgreSQL (5 bancos)
+- PostgreSQL (4 bancos)
 - Redis
 - Nginx (proxy reverso)
-- 6 serviços Node.js
+- 5 serviços Node.js
 
 ### Produção (GitHub Actions + Docker)
 1. Audit: `npm audit` por serviço
@@ -213,7 +204,6 @@ node migrate.js --rollback 001     # Reverter uma
 ### Curto Prazo (1-2 semanas)
 - [x] Centralizar `verifyToken` em `shared/`
 - [ ] Adicionar MAXLEN ao Redis Streams (1 linha)
-- [ ] Testes para task-service
 - [ ] Padronizar validação (Zod/Yup)
 
 ### Médio Prazo (1 mês)
@@ -239,7 +229,6 @@ node migrate.js --rollback 001     # Reverter uma
 - user-service: ✅ Testes de integração
 - estudo-service: ✅ Testes básicos
 - questoes-service: ✅ Testes básicos
-- task-service: ❌ SEM TESTES (oportunidade)
 - gateway: ⚠️ Apenas health check
 
 **Rodando testes:**
@@ -262,7 +251,6 @@ npm test
 ❌ **Falta**
 - Observabilidade (apenas logs de console)
 - Resiliência avançada (sem circuit breaker)
-- Testes de task-service
 - Rate limiting
 - Centralização de logs
 
@@ -279,7 +267,7 @@ npm test
 
 ## 📞 Questões Comuns
 
-**P: Por que 6 serviços?**  
+**P: Por que 5 serviços?**  
 R: Separação de responsabilidades. Cada serviço é escalável independentemente.
 
 **P: E se um serviço cair?**  
