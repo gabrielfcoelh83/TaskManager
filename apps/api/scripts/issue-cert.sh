@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DOMINIO="${DOMINIO:-163-176-30-179.sslip.io}"
+DOMINIO="${DOMINIO:-api.mlkoab.tech}"
 EMAIL="${EMAIL:-gabrielfcoelh83@gmail.com}"
 COMPOSE="${COMPOSE:-docker-compose.prod.yml}"
 

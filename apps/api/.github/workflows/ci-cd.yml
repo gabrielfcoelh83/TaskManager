@@ -277,7 +277,7 @@ jobs:
           # Criados aqui para pertencerem ao usuário; se o Docker os criar
           # ao montar, vêm como root e o backup falha ao escrever.
           mkdir -p backups
-          DOMINIO=163-176-30-179.sslip.io ./scripts/bootstrap-cert.sh
+          DOMINIO=api.mlkoab.tech ./scripts/bootstrap-cert.sh
 
           docker compose -f docker-compose.prod.yml pull
 
