@@ -14,6 +14,7 @@ import {
   buscarJurisprudencia,
   gerarTextoEnriquecimento,
 } from './_lib/datajud.js';
+import { exigirAutenticacao } from './_lib/auth.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -37,6 +38,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método não permitido' });
   }
+
+  if (!(await exigirAutenticacao(req, res))) return;
 
   const { tema, quantidade = 5, disciplina = 'Direito Constitucional' } =
     req.body || {};

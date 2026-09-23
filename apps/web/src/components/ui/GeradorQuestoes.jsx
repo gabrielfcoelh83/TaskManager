@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../../lib/icons';
+import { getToken } from '../../lib/api/api.js';
 
 export default function GeradorQuestoes({ theme, s, onQuestoesGeradas }) {
   const [tema, setTema] = useState('');
@@ -18,7 +19,10 @@ export default function GeradorQuestoes({ theme, s, onQuestoesGeradas }) {
     try {
       const response = await fetch('/api/gerar-questoes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken() || ''}`,
+        },
         body: JSON.stringify({
           tema: tema,
           quantidade: 5,

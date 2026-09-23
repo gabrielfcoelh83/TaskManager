@@ -8,11 +8,14 @@ import {
   buscarJurisprudencia,
   gerarTextoEnriquecimento,
 } from './_lib/datajud.js';
+import { exigirAutenticacao } from './_lib/auth.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método não permitido' });
   }
+
+  if (!(await exigirAutenticacao(req, res))) return;
 
   const { questao } = req.body || {};
 
