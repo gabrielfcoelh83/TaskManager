@@ -16,7 +16,6 @@ app.use(express.json());
 const services = {
   auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
   user: process.env.USER_SERVICE_URL || 'http://localhost:3002',
-  task: process.env.TASK_SERVICE_URL || 'http://localhost:3003',
   estudo: process.env.ESTUDO_SERVICE_URL || 'http://localhost:3004',
   questoes: process.env.QUESTOES_SERVICE_URL || 'http://localhost:3005',
 };
@@ -96,59 +95,6 @@ app.put('/api/users/:id', async (req, res) => {
   } catch (error) {
     res.status(error.response?.status || 500).json({
       error: error.response?.data?.error || 'Erro ao atualizar usuário',
-    });
-  }
-});
-
-// ===== ROTAS DE TAREFAS =====
-app.get('/api/tasks', async (req, res) => {
-  try {
-    const response = await axios.get(`${services.task}/tasks`, {
-      headers: { authorization: req.headers.authorization },
-    });
-    res.json(response.data);
-  } catch (error) {
-    res.status(error.response?.status || 500).json({
-      error: error.response?.data?.error || 'Erro ao buscar tarefas',
-    });
-  }
-});
-
-app.post('/api/tasks', async (req, res) => {
-  try {
-    const response = await axios.post(`${services.task}/tasks`, req.body, {
-      headers: { authorization: req.headers.authorization },
-    });
-    res.json(response.data);
-  } catch (error) {
-    res.status(error.response?.status || 500).json({
-      error: error.response?.data?.error || 'Erro ao criar tarefa',
-    });
-  }
-});
-
-app.put('/api/tasks/:id', async (req, res) => {
-  try {
-    const response = await axios.put(`${services.task}/tasks/${req.params.id}`, req.body, {
-      headers: { authorization: req.headers.authorization },
-    });
-    res.json(response.data);
-  } catch (error) {
-    res.status(error.response?.status || 500).json({
-      error: error.response?.data?.error || 'Erro ao atualizar tarefa',
-    });
-  }
-});
-
-app.delete('/api/tasks/:id', async (req, res) => {
-  try {
-    const response = await axios.delete(`${services.task}/tasks/${req.params.id}`, {
-      headers: { authorization: req.headers.authorization },
-    });
-    res.json(response.data);
-  } catch (error) {
-    res.status(error.response?.status || 500).json({
-      error: error.response?.data?.error || 'Erro ao deletar tarefa',
     });
   }
 });

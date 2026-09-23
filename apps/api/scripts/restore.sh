@@ -29,4 +29,4 @@ echo "Restaurando..."
 gunzip -c "$ARQUIVO" | docker exec -i "$CONTAINER" psql -U postgres -d "$BANCO" -q
 
 echo "✅ $BANCO restaurado. Reinicie os serviços para reconectar:"
-echo "   docker compose -f docker-compose.prod.yml restart auth-service user-service task-service"
+echo "   docker compose -f docker-compose.prod.yml restart auth-service user-service"

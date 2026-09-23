@@ -9,16 +9,16 @@ Plataforma de tarefas dividida em serviços independentes, cada um com seu próp
    Cliente ────────▶│ API Gateway │  :3000
                     └──────┬──────┘
                            │
-         ┌─────────────────┼─────────────────┐
-         ▼                 ▼                 ▼
-   ┌──────────┐      ┌──────────┐      ┌──────────┐
-   │   Auth   │◀─────│   User   │      │   Task   │
-   │  :3001   │      │  :3002   │      │  :3003   │
-   └────┬─────┘      └────┬─────┘      └────┬─────┘
-        │                 │                 │
-        ▼                 ▼                 ▼
-     auth_db           user_db           task_db
-        └─────── PostgreSQL :5432 ───────────┘
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │   Auth   │◀│   User   │ │  Estudo/ │
+        │  :3001   │ │  :3002   │ │ Questões │
+        └────┬─────┘ └────┬─────┘ └────┬─────┘
+             │            │            │
+             ▼            ▼            ▼
+          auth_db      user_db    estudo_db/questoes_db
+             └─────── PostgreSQL :5432 ───────┘
 
               Redis :6379 (cache / eventos)
 ```
@@ -32,8 +32,9 @@ Plataforma de tarefas dividida em serviços independentes, cada um com seu próp
 | `api-gateway` | 3000 | Roteamento, ponto de entrada único |
 | `auth-service` | 3001 | Registro, login, emissão e validação de JWT |
 | `user-service` | 3002 | Perfis de usuário |
-| `task-service` | 3003 | CRUD de tarefas |
-| `postgres` | 5432 | Persistência (3 bancos) |
+| `estudo-service` | 3004 | Tentativas de resposta |
+| `questoes-service` | 3005 | Acervo de questões |
+| `postgres` | 5432 | Persistência (múltiplos bancos) |
 | `redis` | 6379 | Cache e message broker |
 
 ## Como rodar
@@ -61,14 +62,8 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"teste@exemplo.com","password":"senha123"}' | jq -r .token)
 
-# 3. Criar tarefa
-curl -X POST http://localhost:3000/api/tasks \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"title":"Estudar Docker","description":"Subir os containers"}'
-
-# 4. Listar tarefas
-curl http://localhost:3000/api/tasks -H "Authorization: Bearer $TOKEN"
+# 3. Listar questões do acervo
+curl http://localhost:3000/api/questoes -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Roteiro de estudos
@@ -77,11 +72,11 @@ Cada item abaixo é uma modificação real neste código. Faça na ordem.
 
 **1. Fundamentos**
 - Suba os serviços e leia os logs (`docker compose logs -f auth-service`)
-- Derrube só o task-service (`docker compose stop task-service`) e veja o gateway responder DOWN
+- Derrube só o estudo-service (`docker compose stop estudo-service`) e veja o gateway responder DOWN
 - Entre num container: `docker compose exec postgres psql -U postgres auth_db`
 
 **2. Comunicação entre serviços**
-- Hoje user-service e task-service chamam auth-service em *toda* requisição para validar o token. Isso é um gargalo e um ponto único de falha. Substitua por validação local da assinatura JWT.
+- Hoje user-service, estudo-service e questoes-service chamam auth-service em *toda* requisição para validar o token. Isso é um gargalo e um ponto único de falha. Substitua por validação local da assinatura JWT.
 - Depois compare: quando validação centralizada faz sentido? (revogação de token)
 
 **3. Cache com Redis**
@@ -103,7 +98,7 @@ Cada item abaixo é uma modificação real neste código. Faça na ordem.
 - Adicione métricas com `prom-client` e suba Prometheus + Grafana no compose
 
 **7. Escala**
-- `docker compose up --scale task-service=3` — o que quebra? Por quê?
+- `docker compose up --scale estudo-service=3` — o que quebra? Por quê?
 - Coloque Nginx na frente como load balancer
 
 ## Problemas conhecidos (de propósito)
