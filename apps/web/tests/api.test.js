@@ -1,16 +1,76 @@
 import axios from 'axios';
 
-const API_URL = process.env.API_URL || 'http://localhost:3000';
+// Rotas serverless do próprio app (server/dev-api.js). Porta 3100, a mesma
+// que o vite.config.js espera: a 3000 é do gateway da plataforma.
+const API_URL = process.env.API_URL || 'http://localhost:3100';
+
+// Gateway do backend de teste (scripts/e2e-backend.sh), de onde sai o token.
+// As rotas de IA exigem login (api/_lib/auth.js) e validam o token contra
+// VITE_API_URL — que no CI aponta para este mesmo backend, nunca para a
+// produção.
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3000';
+const EMAIL = process.env.E2E_EMAIL || 'maria.lais@email.com';
+const SENHA = process.env.E2E_SENHA || 'senha-de-teste-123';
+
+const ROTAS_PROTEGIDAS = ['/api/gerar-questoes', '/api/enriquecer-questao', '/api/buscar-datajud'];
+
+async function obterToken() {
+  const { data } = await axios.post(`${GATEWAY_URL}/api/auth/login`, { email: EMAIL, password: SENHA });
+  if (!data?.token) throw new Error('login não devolveu token');
+  return data.token;
+}
+
+// Sem login, nenhuma rota que gasta cota paga (OpenRouter, DATAJUD) pode
+// responder: é a garantia que api/_lib/auth.js existe para dar.
+async function testRotasSemToken() {
+  console.log('Testing rotas de IA sem token (should be 401)...');
+  let ok = true;
+
+  for (const rota of ROTAS_PROTEGIDAS) {
+    try {
+      await axios.post(`${API_URL}${rota}`, {});
+      console.error(`❌ ${rota} sem token respondeu 2xx (deveria ser 401)`);
+      ok = false;
+    } catch (err) {
+      if (err.response?.status === 401) {
+        console.log(`✅ ${rota} sem token retornou 401`);
+      } else {
+        console.error(`❌ ${rota} sem token FAILED (expected 401, got ${err.response?.status ?? err.code})`);
+        ok = false;
+      }
+    }
+  }
+  return ok;
+}
+
+async function testTokenInvalido() {
+  console.log('Testing /api/gerar-questoes com token inválido (should be 401)...');
+
+  try {
+    await axios.post(`${API_URL}/api/gerar-questoes`, { tema: 'x' }, {
+      headers: { Authorization: 'Bearer token-invalido' }
+    });
+    console.error('❌ token inválido foi aceito (deveria ser 401)');
+    return false;
+  } catch (err) {
+    if (err.response?.status === 401) {
+      console.log('✅ token inválido retornou 401');
+      return true;
+    }
+    console.error(`❌ token inválido FAILED (expected 401, got ${err.response?.status ?? err.code})`);
+    return false;
+  }
+}
 
 // Helper to test /api/gerar-questoes without tema (should be 400)
-async function testGerarQuestoesSemTema() {
+async function testGerarQuestoesSemTema(auth) {
   console.log('Testing /api/gerar-questoes without tema...');
 
   try {
-    const response = await axios.post(`${API_URL}/api/gerar-questoes`, {
+    await axios.post(`${API_URL}/api/gerar-questoes`, {
       quantidade: 3,
       disciplina: 'Direito Constitucional'
-    });
+    }, auth);
 
     // Should NOT succeed
     console.error('❌ /api/gerar-questoes sem tema FAILED (should be 400)');
@@ -27,7 +87,7 @@ async function testGerarQuestoesSemTema() {
 }
 
 // Helper to test /api/gerar-questoes with tema (should be 200)
-async function testGerarQuestoesComTema() {
+async function testGerarQuestoesComTema(auth) {
   console.log('Testing /api/gerar-questoes with tema...');
 
   try {
@@ -36,6 +96,7 @@ async function testGerarQuestoesComTema() {
       quantidade: 3,
       disciplina: 'Direito Constitucional'
     }, {
+      ...auth,
       timeout: 30000  // 30 second timeout
     });
 
@@ -76,7 +137,7 @@ async function testGerarQuestoesComTema() {
 }
 
 // Helper to test /api/enriquecer-questao
-async function testEnriquecerQuestao() {
+async function testEnriquecerQuestao(auth) {
   console.log('Testing /api/enriquecer-questao...');
 
   try {
@@ -89,6 +150,7 @@ async function testEnriquecerQuestao() {
         explicacao: 'A resposta é A porque...'
       }
     }, {
+      ...auth,
       timeout: 20000  // 20 second timeout
     });
 
@@ -101,8 +163,13 @@ async function testEnriquecerQuestao() {
       return false;
     }
   } catch (err) {
-    // 503 é OK (DATAJUD pode estar indisponível)
-    if (err.response?.status === 503) {
+    // 401 com token válido é bug de autenticação, não indisponibilidade
+    // do DATAJUD — não pode cair no "aceitável" abaixo.
+    if (err.response?.status === 401) {
+      console.error('❌ /api/enriquecer-questao recusou um token válido (401)');
+      return false;
+    } else if (err.response?.status === 503) {
+      // 503 é OK (DATAJUD pode estar indisponível)
       console.log('✅ /api/enriquecer-questao returned 503 (DATAJUD unavailable, acceptable)');
       return true;
     } else if (err.code === 'ECONNREFUSED') {
@@ -124,16 +191,28 @@ async function runTests() {
   console.log('🧪 Starting API tests...\n');
 
   try {
-    const test1 = await testGerarQuestoesSemTema();
+    const resultados = [];
+
+    resultados.push(await testRotasSemToken());
     console.log();
 
-    const test2 = await testGerarQuestoesComTema();
+    resultados.push(await testTokenInvalido());
     console.log();
 
-    const test3 = await testEnriquecerQuestao();
+    const token = await obterToken();
+    const auth = { headers: { Authorization: `Bearer ${token}` } };
+    console.log('🔑 Login do usuário de teste OK\n');
+
+    resultados.push(await testGerarQuestoesSemTema(auth));
     console.log();
 
-    if (test1 && test2 && test3) {
+    resultados.push(await testGerarQuestoesComTema(auth));
+    console.log();
+
+    resultados.push(await testEnriquecerQuestao(auth));
+    console.log();
+
+    if (resultados.every(Boolean)) {
       console.log('✅ All API tests passed!');
       process.exit(0);
     } else {

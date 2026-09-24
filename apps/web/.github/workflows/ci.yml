@@ -57,6 +57,23 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
+      # Roda ANTES de derrubar o backend: as rotas de IA exigem login
+      # (api/_lib/auth.js), e o token do usuário de teste sai do gateway em
+      # localhost:3000. VITE_API_URL aponta o dev-api para esse mesmo backend —
+      # sem ela, a validação do token cairia na API de produção.
+      # dev-api na 3100 (a 3000 é do gateway), como no vite.config.js.
+      - name: Run API tests
+        run: |
+          node server/dev-api.js &
+          for i in $(seq 1 20); do curl -s -o /dev/null http://localhost:3100 && break; sleep 0.5; done
+          npm run test:api
+        env:
+          PORT: 3100
+          API_URL: http://localhost:3100
+          GATEWAY_URL: http://localhost:3000
+          VITE_API_URL: http://localhost:3000
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
       # Sem isto, uma falha de teste vira "elemento não encontrado" sem pista
       # de que a causa foi um serviço que não subiu.
       - name: Logs do backend (só quando falha)
@@ -66,14 +83,6 @@ jobs:
       - name: Derrubar o backend
         if: always()
         run: ./scripts/e2e-backend.sh down
-
-      - name: Run API tests
-        run: |
-          node server/dev-api.js &
-          sleep 2
-          npm run test:api
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
       - name: Upload test results
         if: always()
