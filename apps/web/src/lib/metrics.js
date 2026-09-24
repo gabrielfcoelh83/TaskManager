@@ -95,6 +95,23 @@ export function flattenTentativas(usuarioTentativas = {}, questoes = []) {
 }
 
 // ---------------------------------------------------------------------------
+// Simulados que já estão nas tentativas
+// ---------------------------------------------------------------------------
+
+// Desde o PR #14 (12/08/2026), cada resposta de simulado vira uma tentativa
+// no servidor, igual às do quiz — e as tentativas já entram na meta e na
+// taxa. Somar também a `quantidade` e os `acertos` do histórico contava cada
+// questão de simulado duas vezes, e as deixadas em branco como erro: um
+// simulado de 10 questões hoje punha 20 na meta. O histórico só completa a
+// conta para simulados concluídos antes disso, que não têm tentativa nenhuma.
+const INICIO_DAS_RESPOSTAS_NO_SERVIDOR = Date.parse('2026-08-12T22:13:33Z');
+
+function simuladoSemTentativas(resultado) {
+  const quando = Date.parse(resultado.data_conclusao);
+  return Number.isFinite(quando) && quando < INICIO_DAS_RESPOSTAS_NO_SERVIDOR;
+}
+
+// ---------------------------------------------------------------------------
 // 1) Taxa de acertos (consolidada: prática + simulados)
 // ---------------------------------------------------------------------------
 
@@ -103,7 +120,7 @@ export function taxaDeAcertos(usuarioTentativas = {}, resultadosHistorico = [], 
   let acertos = tentativas.filter((t) => t.correta).length;
   let total = tentativas.length;
 
-  for (const r of resultadosHistorico) {
+  for (const r of resultadosHistorico.filter(simuladoSemTentativas)) {
     acertos += r.acertos || 0;
     total += r.quantidade || 0;
   }
@@ -164,8 +181,10 @@ export function metaDiaria(config = {}, usuarioTentativas = {}, resultadosHistor
   for (const t of flattenTentativas(usuarioTentativas)) {
     if (t.dia === hojeKey) respondidas++;
   }
-  for (const r of resultadosHistorico) {
-    if (r.data_conclusao && dateKey(r.data_conclusao) === hojeKey) respondidas += r.quantidade || 0;
+  // Na prática nenhum simulado de hoje passa por este filtro — todos já estão
+  // nas tentativas. Ele fica para a meta seguir a mesma regra da taxa.
+  for (const r of resultadosHistorico.filter(simuladoSemTentativas)) {
+    if (dateKey(r.data_conclusao) === hojeKey) respondidas += r.quantidade || 0;
   }
 
   const faltam = Math.max(0, meta - respondidas);

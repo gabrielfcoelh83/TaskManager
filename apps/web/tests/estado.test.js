@@ -9,6 +9,7 @@
 //
 // Por isso os módulos são puros: dá para exercitá-los aqui, sem navegador.
 
+import { metaDiaria, taxaDeAcertos } from '../src/lib/metrics.js';
 import { payloadDoToken, primeiroNome, iniciais, saudacao, nomeDeExibicao } from '../src/lib/perfil.js';
 import { montarDisciplinas, temasDaDisciplina, prioridadeDeEstudo, corDaDisciplina } from '../src/lib/disciplinas.js';
 import { classificarRevisao, situacaoDaQuestao } from '../src/lib/revisao.js';
@@ -344,6 +345,44 @@ const t = (correta, data = '2026-08-10T10:00:00Z', tempo = null) => ({ correta, 
   const tempos = tempoPorDisciplina(tentativas, questoes);
   exigir(tempos.length === 1, `só Penal tem tempo medido, vieram ${tempos.length}`);
   exigir(tempos[0].mediaSeg === 150, `média deveria ser 150s, veio ${tempos[0].mediaSeg}`);
+}
+
+{
+  // Simulado feito hoje: das 10 questões, 8 foram respondidas (6 certas) e
+  // viraram tentativas no servidor; 2 ficaram em branco. O histórico local
+  // também guarda o resultado, com quantidade 10 e 6 acertos. A meta contava
+  // os dois — 8 tentativas + 10 do histórico = 18 — e a taxa somava 12 acertos
+  // em 18, com as brancas como erro.
+  // Horários locais, sem Z: o dia tem de ser o mesmo em qualquer fuso.
+  const hoje = new Date('2026-09-20T15:00:00');
+  const t = (correta) => ({ data: '2026-09-20T14:00:00', correta });
+  const tentativas = {
+    s1: { tentativas: [t(true)] }, s2: { tentativas: [t(true)] }, s3: { tentativas: [t(true)] },
+    s4: { tentativas: [t(true)] }, s5: { tentativas: [t(true)] }, s6: { tentativas: [t(true)] },
+    s7: { tentativas: [t(false)] }, s8: { tentativas: [t(false)] },
+  };
+  const deHoje = { quantidade: 10, acertos: 6, data_conclusao: '2026-09-20T14:30:00' };
+
+  const meta = metaDiaria({ meta: 20 }, tentativas, [deHoje], hoje);
+  exigir(meta.respondidas === 8, `simulado de hoje contado em dobro na meta: ${meta.respondidas} respondidas, esperado 8`);
+
+  const taxa = taxaDeAcertos(tentativas, [deHoje]);
+  exigir(taxa.acertos === 6 && taxa.total === 8, `simulado contado em dobro na taxa: ${taxa.acertos}/${taxa.total}, esperado 6/8`);
+
+  // Simulado de antes de 12/08/2026 não virou tentativa nenhuma: só existe no
+  // histórico, e sem ele a taxa perderia essas questões.
+  const antigo = { quantidade: 10, acertos: 4, data_conclusao: '2026-07-01T14:00:00' };
+  const comAntigo = taxaDeAcertos(tentativas, [deHoje, antigo]);
+  exigir(comAntigo.acertos === 10 && comAntigo.total === 18, `simulado antigo sumiu da taxa: ${comAntigo.acertos}/${comAntigo.total}, esperado 10/18`);
+
+  // Sem data de conclusão não há como saber se está nas tentativas: não soma,
+  // em vez de arriscar contar em dobro.
+  exigir(taxaDeAcertos({}, [{ quantidade: 5, acertos: 5 }]).total === 0, 'simulado sem data entrou na taxa');
+
+  // A meta de um dia anterior ao corte ainda soma o simulado daquele dia: é o
+  // único caso em que o histórico entra na meta.
+  const naqueleDia = metaDiaria({ meta: 20 }, {}, [antigo], new Date('2026-07-01T18:00:00'));
+  exigir(naqueleDia.respondidas === 10, `simulado antigo fora da meta do próprio dia: ${naqueleDia.respondidas}`);
 }
 
 {
