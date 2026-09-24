@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { THEMES, buildStyles } from './lib/theme';
 import { Icon } from './lib/icons';
 import { NAV, PAGE_META } from './lib/navegacao';
@@ -88,6 +88,50 @@ export default function App() {
   const [acervo, setAcervo] = useState({ estado: 'carregando', questoes: [], erro: null });
   const [recarga, setRecarga] = useState(0);
 
+  // A gravação em curso de cada questão, guardada pela promessa e não pelo
+  // resultado. A tela de feedback abre no mesmo instante em que o POST sai
+  // (`Questoes.jsx` não espera, de propósito, para o quiz não travar em rede
+  // ruim), então quando a pessoa clica "Foi chute" o `id` da tentativa pode
+  // ainda não ter voltado. Segurar a promessa deixa o feedback esperar por
+  // ela em vez de ler um estado que talvez não esteja preenchido. Ver ADR-001.
+  const registroPendente = useRef(new Map());
+
+  // Contador de sessão. Toda escrita de estado que acontece *depois* de um
+  // await compara este número com o que valia quando a operação começou —
+  // é o mesmo cuidado do `let cancelado` no efeito de carga, e existe porque
+  // sair do app não cancela um POST que já saiu. Sem isto, a resposta que
+  // chega depois do logout reinsere a tentativa num app deslogado, e ela
+  // fica esperando a próxima pessoa que entrar neste navegador. Sobe em
+  // `encerrarSessao`, que é por onde passam o "Sair" e o 401.
+  const sessaoEpoch = useRef(0);
+
+  // As gravações de preferência entram numa fila de um só: quem edita a meta e
+  // logo em seguida a data da prova dispara dois PUT, e sem a fila eles correm
+  // soltos — se o primeiro chegar ao servidor depois do segundo, o valor mais
+  // novo é sobrescrito pelo mais velho e a tela mostra uma coisa que o banco
+  // não tem. Foi assim que o teste de e2e ficou intermitente.
+  const gravacaoDePreferencias = useRef(Promise.resolve());
+
+  // O fim de uma sessão, seja por "Sair" ou por token vencido (401).
+  //
+  // O 401 só trocava a tela para o login. Nada do que estava no ar era
+  // invalidado: um POST da conta anterior que voltasse depois de outra pessoa
+  // entrar caía no histórico dela, e um PUT de preferência ainda na fila saía
+  // com o token de quem entrou. Por isso o epoch sobe e as gravações pendentes
+  // saem daqui, nos dois caminhos.
+  //
+  // A tela (`state`) fica: no 401, quem entra de novo com a mesma conta volta
+  // ao que estava fazendo, e se entrar outra conta `estadoDaConta` troca o
+  // estado no login. Limpar a tela é coisa do `sair`.
+  const encerrarSessao = useCallback(() => {
+    registroPendente.current.clear();
+    sessaoEpoch.current += 1;
+    setUsuarioTentativas({});
+    setPerfil({ estado: 'carregando', id: null, name: null, email: null });
+    setErroSync(null);
+    setSessao('ausente');
+  }, []);
+
   useEffect(() => {
     saveState(state);
     // Sem conta (depois do logout) não grava: o estado padrão escreveria
@@ -100,7 +144,7 @@ export default function App() {
     if (sessao !== 'ativa') return undefined;
 
     const payload = payloadDoToken(getToken());
-    if (!payload) { setSessao('ausente'); return undefined; }
+    if (!payload) { encerrarSessao(); return undefined; }
 
     let cancelado = false;
 
@@ -137,14 +181,14 @@ export default function App() {
       })
       .catch((err) => {
         if (cancelado) return;
-        if (err.status === 401) { setSessao('ausente'); return; }
+        if (err.status === 401) { encerrarSessao(); return; }
         // Perfil é o nome no canto da tela: sem ele o app funciona inteiro.
         // Cair aqui não pode virar tela de erro — vira nome vazio.
         setPerfil({ estado: 'erro', id: payload.id, name: null, email: payload.email });
       });
 
     return () => { cancelado = true; };
-  }, [sessao]);
+  }, [sessao, encerrarSessao]);
 
   // ---- Histórico de tentativas ----
   useEffect(() => {
@@ -166,12 +210,12 @@ export default function App() {
       })
       .catch((err) => {
         if (cancelado) return;
-        if (err.status === 401) { setSessao('ausente'); return; }
+        if (err.status === 401) { encerrarSessao(); return; }
         setErroSync(`Não foi possível carregar seu histórico: ${err.message}`);
       });
 
     return () => { cancelado = true; };
-  }, [sessao]);
+  }, [sessao, encerrarSessao]);
 
   // ---- Acervo ----
   useEffect(() => {
@@ -184,7 +228,7 @@ export default function App() {
       .then((questoes) => { if (!cancelado) setAcervo({ estado: 'pronto', questoes, erro: null }); })
       .catch((err) => {
         if (cancelado) return;
-        if (err.status === 401) { setSessao('ausente'); return; }
+        if (err.status === 401) { encerrarSessao(); return; }
         // Erro do acervo não vira o aviso de sincronização do topo: aquele
         // fala de resposta que não foi salva. Este impede o estudo inteiro,
         // e quem mostra é a própria tela de questões, com botão de tentar de
@@ -193,7 +237,7 @@ export default function App() {
       });
 
     return () => { cancelado = true; };
-  }, [sessao, recarga]);
+  }, [sessao, recarga, encerrarSessao]);
 
   const theme = THEMES[state.theme] || THEMES.rosa;
   const s = useMemo(() => buildStyles(theme), [theme]);
@@ -229,29 +273,6 @@ export default function App() {
 
   const setTheme = (themeKey) => setState((st) => ({ ...st, theme: themeKey }));
 
-  // A gravação em curso de cada questão, guardada pela promessa e não pelo
-  // resultado. A tela de feedback abre no mesmo instante em que o POST sai
-  // (`Questoes.jsx` não espera, de propósito, para o quiz não travar em rede
-  // ruim), então quando a pessoa clica "Foi chute" o `id` da tentativa pode
-  // ainda não ter voltado. Segurar a promessa deixa o feedback esperar por
-  // ela em vez de ler um estado que talvez não esteja preenchido. Ver ADR-001.
-  const registroPendente = useRef(new Map());
-
-  // Contador de sessão. Toda escrita de estado que acontece *depois* de um
-  // await compara este número com o que valia quando a operação começou —
-  // é o mesmo cuidado do `let cancelado` no efeito de carga, e existe porque
-  // sair do app não cancela um POST que já saiu. Sem isto, a resposta que
-  // chega depois do logout reinsere a tentativa num app deslogado, e ela
-  // fica esperando a próxima pessoa que entrar neste navegador.
-  const sessaoEpoch = useRef(0);
-
-  // As gravações de preferência entram numa fila de um só: quem edita a meta e
-  // logo em seguida a data da prova dispara dois PUT, e sem a fila eles correm
-  // soltos — se o primeiro chegar ao servidor depois do segundo, o valor mais
-  // novo é sobrescrito pelo mais velho e a tela mostra uma coisa que o banco
-  // não tem. Foi assim que o teste de e2e ficou intermitente.
-  const gravacaoDePreferencias = useRef(Promise.resolve());
-
   // Meta e data da prova vão para o servidor (coluna profile_data); o estado
   // local muda na hora para a tela não ficar esperando a rede.
   const atualizarConfig = (partial) => {
@@ -264,18 +285,37 @@ export default function App() {
 
     if (perfil.id == null) return;
 
+    const epoch = sessaoEpoch.current;
+    const id = perfil.id;
     gravacaoDePreferencias.current = gravacaoDePreferencias.current
-      .then(() => salvarPerfil(perfil.id, { preferencias: { meta: configuracoes.meta, dataProva: configuracoes.dataProva } }))
-      .catch((err) => setErroSync(`Preferência não salva no servidor: ${err.message}`));
+      // A fila pode andar depois do fim da sessão: um PUT que ainda esperava a
+      // vez sairia com o token de quem entrou em seguida. Não sai.
+      .then(() => {
+        if (sessaoEpoch.current !== epoch) return undefined;
+        return salvarPerfil(id, { preferencias: { meta: configuracoes.meta, dataProva: configuracoes.dataProva } });
+      })
+      .catch((err) => {
+        if (sessaoEpoch.current !== epoch) return;
+        // Token vencido volta ao login, como nas cargas. Antes a faixa dizia
+        // "Sessão expirada" e deixava a pessoa numa tela que já não salvava nada.
+        if (err.status === 401) { encerrarSessao(); return; }
+        setErroSync(`Preferência não salva no servidor: ${err.message}`);
+      });
   };
 
   const atualizarNome = async (nome) => {
     if (perfil.id == null) return false;
+    const epoch = sessaoEpoch.current;
     try {
       const p = await salvarPerfil(perfil.id, { nome });
+      // Saiu com o PUT no ar: o nome antigo não pode voltar ao perfil zerado,
+      // nem a mensagem aparecer para quem entrar depois.
+      if (sessaoEpoch.current !== epoch) return false;
       setPerfil((atual) => ({ ...atual, name: p.name }));
       return true;
     } catch (err) {
+      if (sessaoEpoch.current !== epoch) return false;
+      if (err.status === 401) { encerrarSessao(); return false; }
       setErroSync(`Nome não salvo: ${err.message}`);
       return false;
     }
@@ -306,7 +346,10 @@ export default function App() {
         });
         return tentativa;
       } catch (err) {
-        if (err.status === 401) { setSessao('ausente'); return null; }
+        // Mesmo cuidado do caminho de sucesso: a falha de uma sessão que já
+        // acabou não pode aparecer na faixa de erro de quem entrou depois.
+        if (sessaoEpoch.current !== epoch) return null;
+        if (err.status === 401) { encerrarSessao(); return null; }
         // O quiz continua andando; o que se perdeu foi o registro. Dizer isso
         // é melhor que deixar a pessoa achar que estudou e nada ficou gravado.
         setErroSync(`Esta resposta não foi salva: ${err.message}`);
@@ -362,7 +405,8 @@ export default function App() {
     try {
       await anotarFeedbackTentativa(tentativa.id, tipo, certeza);
     } catch (err) {
-      if (err.status === 401) { setSessao('ausente'); return; }
+      if (sessaoEpoch.current !== epoch) return;
+      if (err.status === 401) { encerrarSessao(); return; }
       setErroSync(`A resposta foi salva, mas o "como você chegou" não: ${err.message}`);
     }
   };
@@ -412,13 +456,9 @@ export default function App() {
 
   const sair = () => {
     logout();
-    // O histórico sai da memória junto com a sessão: ele pertence a quem
-    // estava logado, não à aba. As gravações em curso vão junto — um PATCH
-    // resolvido depois do logout escreveria com um token que já não vale.
-    registroPendente.current.clear();
-    // E o que já estava no ar não pode voltar para a tela depois daqui.
-    sessaoEpoch.current += 1;
-    setUsuarioTentativas({});
+    // O histórico, as gravações em curso e o que já estava no ar saem junto
+    // com a sessão — ver `encerrarSessao`.
+    encerrarSessao();
     // O que era desta conta sai da tela — quem entrar depois não pode
     // encontrá-lo. Favoritos, anotações e histórico de simulado continuam
     // guardados na chave da conta (o efeito de gravação os mantém em dia a cada
@@ -426,9 +466,6 @@ export default function App() {
     // como antes, fazia "Sair" destruir tudo o que ela tinha escrito.
     limparEstado();
     setState({ ...DEFAULT_STATE, theme: state.theme });
-    setPerfil({ estado: 'carregando', id: null, name: null, email: null });
-    setErroSync(null);
-    setSessao('ausente');
   };
 
   if (sessao !== 'ativa') {

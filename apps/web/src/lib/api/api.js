@@ -59,8 +59,9 @@ async function req(caminho, { method = 'GET', body, auth = true } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
+  // O token desta requisição, guardado para o 401 abaixo.
+  const token = auth ? getToken() : null;
   if (auth) {
-    const token = getToken();
     if (!token) throw new ApiError('Sessão não iniciada', 401);
     headers.Authorization = `Bearer ${token}`;
   }
@@ -84,8 +85,11 @@ async function req(caminho, { method = 'GET', body, auth = true } = {}) {
 
   if (res.status === 401) {
     // Token expirado (a janela é de 7 dias) ou assinado com outro segredo.
-    // Descartar aqui evita a tela ficar tentando com credencial morta.
-    logout();
+    // Descartar aqui evita a tela ficar tentando com credencial morta — mas
+    // só se ele ainda for o salvo. Um pedido lento da sessão anterior que
+    // volta 401 depois de alguém já ter entrado de novo apagaria o token novo,
+    // e a próxima chamada mandaria essa pessoa de volta ao login sem motivo.
+    if (getToken() === token) logout();
     throw new ApiError(dados?.error || 'Sessão expirada', 401);
   }
 

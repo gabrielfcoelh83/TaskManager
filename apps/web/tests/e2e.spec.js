@@ -581,6 +581,30 @@ test.describe('Perfil e preferências', () => {
     await expect(page.locator('text=para a prova da OAB')).toBeVisible();
     await expect(page.locator('text=Definir data')).toHaveCount(0);
   });
+
+  // Token vencido no meio da sessão, descoberto numa gravação e não numa
+  // carga. As cargas já levavam ao login; a gravação da meta só punha
+  // "Sessão expirada" na faixa de erro e deixava a pessoa numa tela que não
+  // salvava mais nada. O 401 aqui é forçado: esperar um token vencer de
+  // verdade levaria dias.
+  test('sessão que vence ao salvar a meta volta para o login', async ({ page }) => {
+    await criarConta(page, 'Sessão Vencida');
+    // Sem o perfil carregado a meta nem vai ao servidor — é ele que dá o id.
+    await expect(page.locator('[data-testid="perfil-nome"]')).toHaveText('Sessão Vencida', { timeout: 10000 });
+
+    await page.route(
+      (url) => url.pathname.startsWith('/api/users/'),
+      (rota) => (rota.request().method() === 'PUT'
+        ? rota.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'Token expirado' }) })
+        : rota.continue())
+    );
+
+    await page.click('[data-testid="nav-configuracoes"]');
+    await page.fill('[data-testid="campo-meta"]', '9');
+
+    await expect(page.locator('button[type="submit"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="nav-questoes"]')).toHaveCount(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
