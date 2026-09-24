@@ -136,6 +136,23 @@ export async function criarConta({ nome, email, password }) {
   return dados.user;
 }
 
+// Login com o Google: o navegador recebeu do Google um ID token
+// (`credential`), e o auth-service é quem confere assinatura e audiência e
+// devolve o JWT da plataforma — o mesmo que o login por senha. Conta nova é
+// criada ali mesmo, então não há "criar conta com o Google" separado.
+export async function entrarComGoogle(credential) {
+  const dados = await req('/api/auth/google', {
+    method: 'POST',
+    body: { credential },
+    auth: false,
+  });
+
+  if (!dados?.token) throw new ApiError('Resposta do login com o Google sem token', 502);
+
+  setToken(dados.token);
+  return dados.user;
+}
+
 // ---------------------------------------------------------------------------
 // Perfil e preferências
 // ---------------------------------------------------------------------------

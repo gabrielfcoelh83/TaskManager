@@ -401,6 +401,24 @@ test.describe('Criar conta', () => {
     expect(chamou).toBe(false);
   });
 });
+// Sem VITE_GOOGLE_CLIENT_ID no build (como aqui, e em produção até o Client ID
+// ser criado) o botão do Google não aparece e o script dele nem é carregado —
+// a tela de login continua a de sempre. O login com o Google em si precisa do
+// Google de verdade e não roda em e2e; quem confere o token é testado no
+// auth-service.
+test('sem Client ID, o login não mostra o Google nem carrega o script dele', async ({ page }) => {
+  const pedidosAoGoogle = [];
+  page.on('request', (r) => { if (r.url().includes('accounts.google.com')) pedidosAoGoogle.push(r.url()); });
+
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+
+  await expect(page.locator('button[type="submit"]')).toBeVisible();
+  await expect(page.locator('[data-testid="login-google"]')).toHaveCount(0);
+  expect(pedidosAoGoogle).toEqual([]);
+});
+
 
 // Fora do describe de "Criar conta": estes testes precisam de sessão ativa, e
 // aquele beforeEach começa deslogado de propósito.

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
-import { login, criarConta } from '../lib/api/api';
+import { login, criarConta, entrarComGoogle } from '../lib/api/api';
+import BotaoGoogle from '../components/ui/BotaoGoogle';
 
 // Entrar e criar conta na mesma tela, alternados por um botão. Duas telas
 // separadas custariam rota, estado de navegação e um caminho de volta — para
@@ -53,6 +54,25 @@ export default function Login({ theme, s, onEntrar }) {
       setErro(
         err.status === 409
           ? 'Este e-mail já tem conta. Use "Entrar" logo abaixo.'
+          : err.message
+      );
+      setEnviando(false);
+    }
+  };
+
+  // O Google já escolheu a conta; falta o auth-service conferir o token.
+  // Mesmo tratamento de erro do formulário, para a mensagem aparecer no mesmo
+  // lugar.
+  const entrarGoogle = async (credential) => {
+    if (enviando) return;
+    setErro(null);
+    setEnviando(true);
+    try {
+      onEntrar(await entrarComGoogle(credential));
+    } catch (err) {
+      setErro(
+        err.status === 503
+          ? 'O login com o Google ainda não está disponível. Use e-mail e senha.'
           : err.message
       );
       setEnviando(false);
@@ -207,6 +227,15 @@ export default function Login({ theme, s, onEntrar }) {
               ? 'Criar conta'
               : 'Entrar'}
         </button>
+
+        {/* Serve para entrar e para criar conta: na primeira vez, o
+            auth-service cria a conta com o nome e o e-mail do Google. */}
+        {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ ...s.pageSub, textAlign: 'center', fontSize: 12, marginBottom: 10 }}>ou</div>
+            <BotaoGoogle onCredencial={entrarGoogle} />
+          </div>
+        )}
 
         <div style={{ ...s.pageSub, textAlign: 'center', marginTop: 16, fontSize: 12.5 }}>
           {criando ? 'Já tem conta?' : 'Primeira vez por aqui?'}{' '}
