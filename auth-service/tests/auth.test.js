@@ -132,6 +132,22 @@ describe('POST /verify', () => {
   });
 });
 
+describe('e-mail sem distinção de maiúsculas', () => {
+  it('cadastro com maiúsculas entra pelo login em minúsculas', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e.toUpperCase(), password: 'senha-forte-123' });
+    const res = await request(app).post('/login').send({ email: e, password: 'senha-forte-123' });
+    expect(res.status).toBe(200);
+  });
+
+  it('não deixa cadastrar o mesmo e-mail em outra caixa de letras', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    const res = await request(app).post('/register').send({ email: e.toUpperCase(), password: 'outra-senha-123' });
+    expect(res.status).toBe(409);
+  });
+});
+
 describe('POST /google', () => {
   // O Google de mentira: devolve o payload que um ID token verdadeiro teria.
   // A conferência de assinatura e de `aud` é da biblioteca do Google; aqui se
@@ -190,9 +206,32 @@ describe('POST /google', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.user.id).toBe(cadastro.body.user.id);
-    // A senha continua valendo.
-    const login = await request(app).post('/login').send({ email: e, password: 'senha-forte-123' });
-    expect(login.status).toBe(200);
+  });
+
+  it('ao ligar, apaga a senha — senão quem cadastrou o e-mail de outra pessoa seguiria entrando', async () => {
+    // O "atacante" cadastra o e-mail da vítima com uma senha dele; a vítima
+    // entra depois pelo Google. A senha do atacante não pode continuar valendo.
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-do-atacante' });
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+
+    const login = await request(app).post('/login').send({ email: e, password: 'senha-do-atacante' });
+    expect(login.status).toBe(401);
+    const { rows } = await pool.query('SELECT password_hash FROM users WHERE lower(email) = $1', [e]);
+    expect(rows[0].password_hash).toBeNull();
+  });
+
+  it('e-mail ligado a outra conta do Google, com outra caixa de letras, não vira segunda conta', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    payload = { sub: sub(), email: e.toUpperCase(), email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(409);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM users WHERE lower(email) = $1', [e]);
+    expect(rows[0].n).toBe(1);
   });
 
   it('recusa e-mail não verificado pelo Google — senão entraria na conta de outra pessoa', async () => {

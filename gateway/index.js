@@ -59,7 +59,8 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/google', async (req, res) => {
   try {
     const response = await axios.post(`${services.auth}/google`, req.body);
-    res.json(response.data);
+    // 201 quando a conta acabou de ser criada, 200 quando já existia.
+    res.status(response.status).json(response.data);
   } catch (error) {
     res.status(error.response?.status || 500).json({
       error: error.response?.data?.error || 'Erro na autenticação',

@@ -43,9 +43,14 @@ app.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Email e senha são obrigatórios' });
   }
 
+  // E-mail sem distinção de maiúsculas: `Joao@x.com` e `joao@x.com` são a
+  // mesma caixa postal. Com o login do Google — que grava em minúsculas — a
+  // diferença virava duas contas para a mesma pessoa.
+  const emailNormalizado = String(email).trim().toLowerCase();
+
   try {
     // Verificar se usuário já existe
-    const existingUser = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const existingUser = await pool.query('SELECT 1 FROM users WHERE lower(email) = $1', [emailNormalizado]);
     if (existingUser.rows.length > 0) {
       return res.status(409).json({ error: 'Email já registrado' });
     }
@@ -56,7 +61,7 @@ app.post('/register', async (req, res) => {
     // Inserir usuário
     const result = await pool.query(
       'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
-      [email, hashedPassword]
+      [emailNormalizado, hashedPassword]
     );
 
     const user = result.rows[0];
@@ -100,8 +105,12 @@ app.post('/login', async (req, res) => {
   }
 
   try {
-    // Buscar usuário
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    // Buscar usuário — sem distinção de maiúsculas, como no cadastro. Contas
+    // antigas gravadas com maiúsculas continuam achadas.
+    const result = await pool.query(
+      'SELECT * FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1',
+      [String(email).trim().toLowerCase()]
+    );
     const user = result.rows[0];
 
     if (!user) {
@@ -195,15 +204,31 @@ app.post('/google', async (req, res) => {
     }
 
     // 2. Já tem conta com esse e-mail (criada com senha): liga a conta do
-    //    Google a ela. O e-mail foi verificado pelo Google acima.
+    //    Google a ela — e APAGA a senha. O cadastro por senha não confirma
+    //    o e-mail, então quem o criou pode não ser o dono dele: um atacante
+    //    cadastra o e-mail da vítima com uma senha sua, a vítima entra depois
+    //    pelo Google e passa a estudar numa conta que o atacante também abre.
+    //    O Google provou que a pessoa é dona do e-mail; a senha não provou
+    //    nada. A partir daqui a conta entra só pelo Google.
     ({ rows } = await pool.query(
-      `UPDATE users SET google_sub = $1
-        WHERE lower(email) = $2 AND google_sub IS NULL
+      `UPDATE users SET google_sub = $1, password_hash = NULL
+        WHERE id = (
+          SELECT id FROM users
+           WHERE lower(email) = $2 AND google_sub IS NULL
+           ORDER BY id LIMIT 1
+        )
         RETURNING id, email`,
       [dados.sub, email]
     ));
     if (rows[0]) {
       return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
+    }
+
+    // O e-mail já é de uma conta ligada a OUTRA conta do Google: não cria uma
+    // segunda conta com o mesmo e-mail em outra caixa de letras.
+    const outra = await pool.query('SELECT 1 FROM users WHERE lower(email) = $1', [email]);
+    if (outra.rows.length > 0) {
+      return res.status(409).json({ error: 'Este e-mail já está ligado a outra conta do Google' });
     }
 
     // 3. Primeira vez: cria o usuário sem senha e avisa o user-service, como
