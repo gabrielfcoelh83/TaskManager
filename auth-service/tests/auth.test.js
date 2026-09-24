@@ -198,35 +198,38 @@ describe('POST /google', () => {
     expect(rows[0].n).toBe(1);
   });
 
-  it('liga a conta do Google a quem já tinha conta com senha e o mesmo e-mail', async () => {
+  it('não liga a conta do Google a um cadastro por senha — responde 409 e a senha segue valendo', async () => {
+    // Cadastro por senha não confirma e-mail: ligar entregaria a conta a quem
+    // cadastrou o e-mail de outra pessoa (pré-sequestro).
     const e = email();
-    const cadastro = await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
     payload = { sub: sub(), email: e.toUpperCase(), email_verified: true };
     const res = await request(app).post('/google').send({ credential: 'ok' });
 
-    expect(res.status).toBe(200);
-    expect(res.body.user.id).toBe(cadastro.body.user.id);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/senha/);
+    const { rows } = await pool.query('SELECT google_sub FROM users WHERE lower(email) = $1', [e]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].google_sub).toBeNull();
+    const login = await request(app).post('/login').send({ email: e, password: 'senha-forte-123' });
+    expect(login.status).toBe(200);
   });
 
-  it('ao ligar, apaga a senha — senão quem cadastrou o e-mail de outra pessoa seguiria entrando', async () => {
-    // O "atacante" cadastra o e-mail da vítima com uma senha dele; a vítima
-    // entra depois pelo Google. A senha do atacante não pode continuar valendo.
+  it('cadastro por senha depois do Google, com o mesmo e-mail, é recusado', async () => {
     const e = email();
-    await request(app).post('/register').send({ email: e, password: 'senha-do-atacante' });
     payload = { sub: sub(), email: e, email_verified: true };
     await request(app).post('/google').send({ credential: 'ok' });
-
-    const login = await request(app).post('/login').send({ email: e, password: 'senha-do-atacante' });
-    expect(login.status).toBe(401);
-    const { rows } = await pool.query('SELECT password_hash FROM users WHERE lower(email) = $1', [e]);
-    expect(rows[0].password_hash).toBeNull();
+    const res = await request(app).post('/register').send({ email: e.toUpperCase(), password: 'senha-do-atacante' });
+    expect(res.status).toBe(409);
   });
 
   it('e-mail ligado a outra conta do Google, com outra caixa de letras, não vira segunda conta', async () => {
+    // Linha antiga gravada com maiúsculas, já ligada a um Google A. O mesmo
+    // e-mail em minúsculas chega por um Google B: o UNIQUE de `email` não
+    // pegaria (caixas diferentes) — é a busca por lower(email) que recusa.
     const e = email();
+    await pool.query('INSERT INTO users (email, password_hash, google_sub) VALUES ($1, NULL, $2)', [e.toUpperCase(), sub()]);
     payload = { sub: sub(), email: e, email_verified: true };
-    await request(app).post('/google').send({ credential: 'ok' });
-    payload = { sub: sub(), email: e.toUpperCase(), email_verified: true };
     const res = await request(app).post('/google').send({ credential: 'ok' });
 
     expect(res.status).toBe(409);

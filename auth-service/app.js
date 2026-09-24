@@ -91,6 +91,11 @@ app.post('/register', async (req, res) => {
       token,
     });
   } catch (error) {
+    // Unicidade recusou: o mesmo e-mail entrou ao mesmo tempo (pelo Google,
+    // por exemplo). É o mesmo "já registrado" de cima, não erro do servidor.
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Email já registrado' });
+    }
     console.error('Erro ao registrar:', error);
     res.status(500).json({ error: 'Erro ao registrar usuário' });
   }
@@ -108,8 +113,10 @@ app.post('/login', async (req, res) => {
     // Buscar usuário — sem distinção de maiúsculas, como no cadastro. Contas
     // antigas gravadas com maiúsculas continuam achadas.
     const result = await pool.query(
-      'SELECT * FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1',
-      [String(email).trim().toLowerCase()]
+      // Se houver duas contas antigas que só diferem na caixa, a de grafia
+      // exata vem primeiro — senão o dono da segunda ficaria trancado fora.
+      'SELECT * FROM users WHERE lower(email) = $1 ORDER BY (email = $2) DESC, id LIMIT 1',
+      [String(email).trim().toLowerCase(), String(email).trim()]
     );
     const user = result.rows[0];
 
@@ -203,32 +210,23 @@ app.post('/google', async (req, res) => {
       return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
     }
 
-    // 2. Já tem conta com esse e-mail (criada com senha): liga a conta do
-    //    Google a ela — e APAGA a senha. O cadastro por senha não confirma
-    //    o e-mail, então quem o criou pode não ser o dono dele: um atacante
-    //    cadastra o e-mail da vítima com uma senha sua, a vítima entra depois
-    //    pelo Google e passa a estudar numa conta que o atacante também abre.
-    //    O Google provou que a pessoa é dona do e-mail; a senha não provou
-    //    nada. A partir daqui a conta entra só pelo Google.
-    ({ rows } = await pool.query(
-      `UPDATE users SET google_sub = $1, password_hash = NULL
-        WHERE id = (
-          SELECT id FROM users
-           WHERE lower(email) = $2 AND google_sub IS NULL
-           ORDER BY id LIMIT 1
-        )
-        RETURNING id, email`,
-      [dados.sub, email]
-    ));
-    if (rows[0]) {
-      return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
-    }
-
-    // O e-mail já é de uma conta ligada a OUTRA conta do Google: não cria uma
-    // segunda conta com o mesmo e-mail em outra caixa de letras.
-    const outra = await pool.query('SELECT 1 FROM users WHERE lower(email) = $1', [email]);
-    if (outra.rows.length > 0) {
-      return res.status(409).json({ error: 'Este e-mail já está ligado a outra conta do Google' });
+    // 2. Já existe conta com esse e-mail. NÃO liga automaticamente.
+    //    O cadastro por senha não confirma o e-mail: quem o criou pode não
+    //    ser o dono. Ligar deixaria o atacante que cadastrou o e-mail da
+    //    vítima dentro da conta que ela passaria a usar — e apagar a senha
+    //    não basta, porque o token que ele já tem vale 7 dias e os serviços
+    //    o conferem sozinhos. Ligar o Google a uma conta com senha fica para
+    //    um fluxo com a pessoa já logada pela senha.
+    const existente = await pool.query(
+      'SELECT google_sub FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1',
+      [email]
+    );
+    if (existente.rows[0]) {
+      return res.status(409).json({
+        error: existente.rows[0].google_sub
+          ? 'Este e-mail já está ligado a outra conta do Google'
+          : 'Este e-mail já tem conta com senha. Entre com e-mail e senha.',
+      });
     }
 
     // 3. Primeira vez: cria o usuário sem senha e avisa o user-service, como
@@ -253,10 +251,16 @@ app.post('/google', async (req, res) => {
 
     return res.status(201).json({ message: 'Usuário registrado com sucesso', user, token: emitirToken(user), novo: true });
   } catch (error) {
-    // Corrida entre dois logins simultâneos da mesma pessoa, ou e-mail já
-    // ligado a OUTRA conta do Google: a restrição de unicidade recusa.
+    // Unicidade recusou o INSERT: ou foi um duplo clique (a outra chamada da
+    // mesma pessoa criou a conta um instante antes — então é só entrar), ou
+    // um cadastro por senha com o mesmo e-mail chegou junto.
     if (error.code === '23505') {
-      return res.status(409).json({ error: 'Este e-mail já está ligado a outra conta do Google' });
+      const jaCriada = await pool.query('SELECT id, email FROM users WHERE google_sub = $1', [dados.sub]).catch(() => ({ rows: [] }));
+      if (jaCriada.rows[0]) {
+        const u = jaCriada.rows[0];
+        return res.json({ message: 'Login realizado com sucesso', user: u, token: emitirToken(u), novo: false });
+      }
+      return res.status(409).json({ error: 'Este e-mail já tem conta. Entre com e-mail e senha.' });
     }
     console.error('Erro no login com o Google:', error);
     return res.status(500).json({ error: 'Erro no login com o Google' });
