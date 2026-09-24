@@ -216,8 +216,6 @@ describe('GET /tentativas — paginação', () => {
     expect(res.body.total).toBe(TOTAL_DO_DONO);
     expect(res.body.limite).toBe(3);
     expect(res.body.offset).toBe(0);
-    // A coluna da janela não pode vazar para a tentativa.
-    expect(res.body.tentativas[0]).not.toHaveProperty('total_filtrado');
   });
 
   it('percorrer as páginas devolve cada tentativa uma vez, inclusive as empatadas', async () => {
@@ -240,6 +238,18 @@ describe('GET /tentativas — paginação', () => {
     // E na mesma ordem da lista inteira de uma vez só.
     const inteira = await pedir('limite=1000');
     expect(vistas).toEqual(inteira.body.map((t) => t.id));
+  });
+
+  it('desempata pelo id, do maior para o menor, as gravadas no mesmo instante', async () => {
+    // Com oito linhas, o Postgres tende a devolver os empates sempre na mesma
+    // ordem mesmo sem `id DESC` — e o teste de cima passaria sem o desempate.
+    // Este cobra a ordem em si: as três entraram num INSERT só, em ordem.
+    const res = await pedir('limite=1000');
+    const empatadas = res.body
+      .map((t) => t.questao_id)
+      .filter((q) => q.startsWith('p-empate-'));
+
+    expect(empatadas).toEqual(['p-empate-c', 'p-empate-b', 'p-empate-a']);
   });
 
   it('página além do fim vem vazia, com o total certo', async () => {
@@ -270,7 +280,9 @@ describe('GET /tentativas — paginação', () => {
   it('recusa offset inválido em vez de voltar para a primeira página', async () => {
     // `offset=abc` virando 0 devolveria a página 1 de novo, e um cliente em
     // laço repetiria as mesmas linhas até o teto de páginas.
-    for (const offset of ['-1', 'abc', '1.5']) {
+    // `1e20` e o de 20 dígitos são inteiros para o JS mas estouram o bigint:
+    // sem o teto, virariam 500 do servidor por um pedido malformado.
+    for (const offset of ['-1', 'abc', '1.5', '1e20', '99999999999999999999']) {
       const res = await pedir(`paginado=1&offset=${offset}`);
       expect(res.status).toBe(400);
     }

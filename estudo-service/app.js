@@ -136,56 +136,54 @@ app.get('/tentativas', verifyToken, async (req, res) => {
   let offsetParam = 0;
   if (offset !== undefined && offset !== '') {
     const n = Number(offset);
-    if (!Number.isInteger(n) || n < 0) {
-      return res.status(400).json({ error: 'offset deve ser inteiro maior ou igual a zero' });
+    // Mesmo cuidado do id no PATCH, com outro teto: `offset=1e20` é inteiro
+    // para o JS, mas o driver o manda como "100000000000000000000", que
+    // estoura o bigint, e o pedido malformado sairia como 500 do servidor.
+    // Aqui o teto é o maior inteiro que o JS representa sem perder precisão —
+    // abaixo dele, o número chega ao Postgres exatamente como foi pedido.
+    if (!Number.isInteger(n) || n < 0 || n > Number.MAX_SAFE_INTEGER) {
+      return res.status(400).json({
+        error: `offset deve ser inteiro entre 0 e ${Number.MAX_SAFE_INTEGER}`,
+      });
     }
     offsetParam = n;
   }
+
+  const filtro = `user_id = $1 AND ($2::timestamptz IS NULL OR respondida_em >= $2)`;
 
   try {
     // `id DESC` desempata tentativas gravadas no mesmo instante. Sem ele a
     // ordem entre elas fica a critério do Postgres, que pode mudar de uma
     // consulta para a outra — e aí uma delas aparece em duas páginas e a
     // vizinha em nenhuma.
-    //
-    // `COUNT(*) OVER()` traz o total do filtro na mesma varredura. Sem ele o
-    // cliente não distingue "acabou" de "bateu no teto", que é justamente o
-    // problema que a paginação existe para resolver.
-    const { rows } = await pool.query(
-      `SELECT id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em,
-              COUNT(*) OVER() AS total_filtrado
+    const { rows: tentativas } = await pool.query(
+      `SELECT id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em
          FROM tentativas
-        WHERE user_id = $1
-          AND ($2::timestamptz IS NULL OR respondida_em >= $2)
+        WHERE ${filtro}
         ORDER BY respondida_em DESC, id DESC
         LIMIT $3 OFFSET $4`,
       [req.user.id, desdeParam, limiteParam, offsetParam]
     );
 
-    let total;
-    if (rows.length > 0) {
-      total = Number(rows[0].total_filtrado);
-    } else if (offsetParam > 0) {
-      // Página além do fim: a janela não devolveu linha, então o total vem de
-      // uma contagem própria. Só cai aqui quem pediu página inexistente.
-      const contagem = await pool.query(
-        `SELECT COUNT(*)::int AS total
-           FROM tentativas
-          WHERE user_id = $1
-            AND ($2::timestamptz IS NULL OR respondida_em >= $2)`,
-        [req.user.id, desdeParam]
-      );
-      total = contagem.rows[0].total;
-    } else {
-      total = 0;
-    }
+    if (!paginado) return res.json(tentativas);
 
-    // A coluna da janela é detalhe da consulta, não parte da tentativa.
-    const tentativas = rows.map(({ total_filtrado, ...tentativa }) => tentativa);
+    // O total vem de uma contagem própria, e só para quem pede `paginado=1`.
+    // `COUNT(*) OVER()` na consulta acima faria o mesmo numa ida só, mas a
+    // janela obriga o Postgres a ler o histórico inteiro antes da primeira
+    // linha: o LIMIT deixa de parar cedo, e até o front antigo — que não quer
+    // total nenhum — pagaria isso a cada abertura do dashboard. Sem o total, o
+    // cliente não distingue "acabou" de "bateu no teto".
+    const contagem = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM tentativas WHERE ${filtro}`,
+      [req.user.id, desdeParam]
+    );
 
-    res.json(paginado
-      ? { tentativas, total, limite: limiteParam, offset: offsetParam }
-      : tentativas);
+    res.json({
+      tentativas,
+      total: contagem.rows[0].total,
+      limite: limiteParam,
+      offset: offsetParam,
+    });
   } catch (error) {
     console.error('Erro ao listar tentativas:', error);
     res.status(500).json({ error: 'Erro ao listar tentativas' });
