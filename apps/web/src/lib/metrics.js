@@ -21,8 +21,22 @@
 // Helpers de data
 // ---------------------------------------------------------------------------
 
-/** 'YYYY-MM-DD' no fuso local a partir de um ISO ou Date. */
+// 'AAAA-MM-DD' puro, sem hora: é o que o `<input type="date">` das
+// Configurações grava em `dataProva`.
+const SO_DATA = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 'YYYY-MM-DD' no fuso local a partir de um ISO ou Date.
+ *
+ * Uma data sem hora já é um dia do calendário, não um instante, e volta como
+ * está. Passá-la por `new Date` a leria como meia-noite UTC — que no Brasil
+ * ainda é o dia anterior —, e a contagem até a prova mostrava um dia a menos:
+ * "0 dias" na véspera. A CI roda em UTC, onde as duas leituras coincidem, e
+ * por isso o erro passava; os testes de lib agora rodam também no fuso de
+ * São Paulo (scripts/testes-lib.js).
+ */
 export function dateKey(value) {
+  if (typeof value === 'string' && SO_DATA.test(value)) return value;
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return null;
   const y = d.getFullYear();

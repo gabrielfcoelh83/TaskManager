@@ -34,30 +34,52 @@ if (arquivos.length === 0) {
 // prenderia o job por horas e, no ci.yml, o e2e, o build e o deploy atrás.
 const TEMPO_MAXIMO_MS = 60_000;
 
+// Cada arquivo roda em dois fusos. O runner da CI está em UTC, onde "meia-noite
+// UTC" e "meia-noite local" são a mesma coisa — e é exatamente aí que um erro
+// de data se esconde: a contagem até a prova mostrou um dia a menos para todo
+// mundo no Brasil com a CI verde. Rodar também no fuso de quem usa o app é o
+// que faz esse tipo de erro reprovar.
+const FUSOS = ['UTC', 'America/Sao_Paulo'];
+
+// Nome de fuso errado não dá erro: o Node cai em UTC em silêncio, e a segunda
+// rodada viraria uma cópia da primeira sem ninguém perceber.
+for (const fuso of FUSOS) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: fuso });
+  } catch {
+    console.error(`Fuso inválido em scripts/testes-lib.js: ${fuso}`);
+    process.exit(1);
+  }
+}
+
 // Roda todos antes de reprovar: quem abriu o PR vê de uma vez tudo o que
 // quebrou, em vez de consertar um arquivo por rodada de CI.
 const reprovados = [];
 for (const arquivo of arquivos) {
-  console.log(`\n▶ ${arquivo}`);
-  const { status, signal, error } = spawnSync(process.execPath, [path.join(pasta, arquivo)], {
-    stdio: 'inherit',
-    cwd: raiz,
-    timeout: TEMPO_MAXIMO_MS,
-  });
-  if (status !== 0) {
-    // Sem isto, processo morto por sinal ou por tempo reprovava sem dizer
-    // por quê: o log mostrava só o nome do arquivo e seguia para o próximo.
-    const motivo = error?.code === 'ETIMEDOUT'
-      ? `passou de ${TEMPO_MAXIMO_MS / 1000}s`
-      : signal ? `morto por ${signal}` : `saiu com código ${status}`;
-    console.error(`✖ ${arquivo}: ${motivo}`);
-    reprovados.push(arquivo);
+  for (const fuso of FUSOS) {
+    console.log(`\n▶ ${arquivo} (${fuso})`);
+    const { status, signal, error } = spawnSync(process.execPath, [path.join(pasta, arquivo)], {
+      stdio: 'inherit',
+      cwd: raiz,
+      timeout: TEMPO_MAXIMO_MS,
+      env: { ...process.env, TZ: fuso },
+    });
+    if (status !== 0) {
+      // Sem isto, processo morto por sinal ou por tempo reprovava sem dizer
+      // por quê: o log mostrava só o nome do arquivo e seguia para o próximo.
+      const motivo = error?.code === 'ETIMEDOUT'
+        ? `passou de ${TEMPO_MAXIMO_MS / 1000}s`
+        : signal ? `morto por ${signal}` : `saiu com código ${status}`;
+      console.error(`✖ ${arquivo} (${fuso}): ${motivo}`);
+      reprovados.push(`${arquivo} (${fuso})`);
+    }
   }
 }
 
+const execucoes = arquivos.length * FUSOS.length;
 if (reprovados.length > 0) {
-  console.error(`\n❌ ${reprovados.length} de ${arquivos.length} arquivo(s) reprovado(s): ${reprovados.join(', ')}`);
+  console.error(`\n❌ ${reprovados.length} de ${execucoes} execução(ões) reprovada(s): ${reprovados.join(', ')}`);
   process.exit(1);
 }
 
-console.log(`\n✅ ${arquivos.length} arquivo(s) de teste de lib passaram.`);
+console.log(`\n✅ ${arquivos.length} arquivo(s) de teste de lib passaram em ${FUSOS.join(' e ')}.`);
