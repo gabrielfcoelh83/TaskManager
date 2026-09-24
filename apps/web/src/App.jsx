@@ -12,6 +12,7 @@ import { planoDaSemana } from './lib/agenda';
 import { embaralhar } from './lib/questions/acervo';
 import { classificarRevisao } from './lib/revisao';
 import { mesclarTentativas } from './lib/historico';
+import { enviarEmFila } from './lib/fila';
 import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
 import {
   getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
@@ -112,6 +113,11 @@ export default function App() {
   // não tem. Foi assim que o teste de e2e ficou intermitente.
   const gravacaoDePreferencias = useRef(Promise.resolve());
 
+  // Quantas respostas de simulado ainda estão na fila (`registrarRespostas`).
+  // Elas só existem na memória desta aba: fechar ou recarregar antes de a fila
+  // terminar as perdia sem aviso nenhum.
+  const respostasNaFila = useRef(0);
+
   // O fim de uma sessão, seja por "Sair" ou por token vencido (401).
   //
   // O 401 só trocava a tela para o login. Nada do que estava no ar era
@@ -130,6 +136,20 @@ export default function App() {
     setPerfil({ estado: 'carregando', id: null, name: null, email: null });
     setErroSync(null);
     setSessao('ausente');
+  }, []);
+
+  // Enquanto houver resposta na fila, o navegador pergunta antes de fechar ou
+  // recarregar a aba. Não cobre a aba descartada pelo sistema (celular) —
+  // ver Pendências no ARCHITECTURE.md.
+  useEffect(() => {
+    const avisar = (evento) => {
+      if (respostasNaFila.current > 0) {
+        evento.preventDefault();
+        evento.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', avisar);
+    return () => window.removeEventListener('beforeunload', avisar);
   }, []);
 
   useEffect(() => {
@@ -323,8 +343,11 @@ export default function App() {
 
   // Grava no servidor primeiro e só depois no estado: o que aparece na tela
   // como respondido é o que a API confirmou ter gravado.
-  const registrar = ({ questaoId, correta, alternativa, tempoSeg }) => {
-    setErroSync(null);
+  // `emLote`: a fila do simulado (`registrarRespostas`) cuida da faixa de erro
+  // uma vez só, no fim — resposta por resposta, cada chamada apagaria a
+  // mensagem da falha anterior.
+  const registrar = ({ questaoId, correta, alternativa, tempoSeg }, { emLote = false } = {}) => {
+    if (!emLote) setErroSync(null);
     const epoch = sessaoEpoch.current;
 
     const pendente = (async () => {
@@ -352,13 +375,56 @@ export default function App() {
         if (err.status === 401) { encerrarSessao(); return null; }
         // O quiz continua andando; o que se perdeu foi o registro. Dizer isso
         // é melhor que deixar a pessoa achar que estudou e nada ficou gravado.
-        setErroSync(`Esta resposta não foi salva: ${err.message}`);
+        if (!emLote) setErroSync(`Esta resposta não foi salva: ${err.message}`);
         return null;
       }
     })();
 
-    registroPendente.current.set(questaoId, pendente);
+    // Só o quiz tem "como você chegou". A fila do simulado gravando aqui
+    // sobrescrevia a promessa de uma questão respondida no quiz ao mesmo
+    // tempo, e o feedback dela ia parar na tentativa do simulado.
+    if (!emLote) registroPendente.current.set(questaoId, pendente);
     return pendente;
+  };
+
+  // As respostas de um simulado inteiro, em fila (ver `lib/fila.js`: todas
+  // juntas passavam do limite do nginx e parte voltava 429).
+  //
+  // A fila confere, antes de cada envio, que a sessão e o token ainda são os
+  // do fim da prova. Ela leva alguns segundos; se nesse meio-tempo a pessoa
+  // sair e outra entrar, o resto não sai com o token de quem entrou — seriam
+  // respostas de uma conta gravadas na outra.
+  //
+  // Quatro de cada vez: em série, 80 respostas levavam dezenas de segundos em
+  // rede ruim — tempo de sobra para alguém fechar a aba. Quatro no ar cabem
+  // no limite do nginx (folga de 50, 30 por segundo), e o 429 que escapar é
+  // repetido pelo `req`.
+  const registrarRespostas = async (respostas) => {
+    const epoch = sessaoEpoch.current;
+    const token = getToken();
+    setErroSync(null);
+    respostasNaFila.current += respostas.length;
+
+    try {
+      const { salvos, falhas, interrompida } = await enviarEmFila(
+        respostas,
+        async (resposta) => (await registrar(resposta, { emLote: true })) !== null,
+        {
+          continuar: () => sessaoEpoch.current === epoch && getToken() === token,
+          simultaneos: 4,
+        },
+      );
+
+      if (sessaoEpoch.current !== epoch) return;
+      // Interrompida (o token mudou em outra aba, por exemplo), o que não
+      // chegou a sair também não foi salvo — não só o que falhou.
+      const naoSalvas = interrompida ? respostas.length - salvos : falhas;
+      if (naoSalvas > 0) {
+        setErroSync(`${naoSalvas} de ${respostas.length} respostas deste simulado não foram salvas no servidor.`);
+      }
+    } finally {
+      respostasNaFila.current -= respostas.length;
+    }
   };
 
   // "Como você chegou nessa resposta?" — chute, intuição, eliminação. É o que
@@ -768,7 +834,7 @@ export default function App() {
               sim={state.simulados}
               setSim={(p) => updateSlice('simulados', p)}
               setResultadosHistorico={(p) => updateSlice('resultados_historico', p)}
-              registrar={registrar}
+              registrarRespostas={registrarRespostas}
             />
           )}
           {state.screen === 'revisoes' && (

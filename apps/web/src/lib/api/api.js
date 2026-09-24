@@ -1,5 +1,6 @@
 import { paraQuestaoDeTela } from '../questions/acervo.js';
 import { paraPagina, percorrerPaginas } from './paginas.js';
+import { repetirEm429 } from './retentativa.js';
 
 // Cliente da API da plataforma (gateway :3000 atrás do nginx).
 //
@@ -66,13 +67,18 @@ async function req(caminho, { method = 'GET', body, auth = true } = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
+  const chamar = () => fetch(`${BASE}${caminho}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
   let res;
   try {
-    res = await fetch(`${BASE}${caminho}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    // Pedido autenticado recusado por excesso (429 do nginx) é repetido com
+    // espera — ver `retentativa.js`. Login e cadastro ficam de fora: lá o
+    // limite existe justamente contra quem tenta senha atrás de senha.
+    res = await (auth ? repetirEm429(chamar) : chamar());
   } catch {
     // fetch só rejeita por falha de rede ou bloqueio de CORS. Distinguir os
     // dois no navegador é impossível de propósito, então a mensagem cobre

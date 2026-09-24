@@ -4,7 +4,7 @@ import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
 import ConfigSimulado from '../components/ui/ConfigSimulado';
 import Cronometro from '../components/ui/Cronometro';
 
-export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico, go, registrar, praticarDisciplina }) {
+export default function Simulados({ theme, s, data, sim, setSim, setResultadosHistorico, resultados_historico, go, registrarRespostas, praticarDisciplina }) {
   const preDisciplina = sim?.preDisciplina || null;
   const [etapa, setEtapa] = useState(preDisciplina ? 'config' : 'lista');
   const [simulado, setSimulado] = useState(null);
@@ -66,14 +66,21 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
     // `tempoSeg` vai nulo de propósito: o simulado tem um cronômetro só para a
     // prova inteira, e dividir o total pelo número de questões seria inventar
     // um tempo por questão que ninguém mediu.
-    if (registrar) {
-      for (const q of simulado.questoes_pool) {
-        const resposta = simulado.respostas[q.id];
-        if (resposta === undefined) continue;   // em branco não é resposta
-        Promise.resolve(
-          registrar({ questaoId: q.id, correta: resposta === q.correta, alternativa: resposta, tempoSeg: null })
-        ).catch(() => { /* o App já avisa na faixa de erro do topo */ });
-      }
+    //
+    // Vão em fila, não todas juntas: um POST por resposta, ao mesmo tempo,
+    // passava do limite do nginx numa prova de 80 questões. A fila corre em
+    // segundo plano — a tela de resultado abre na hora — e o App avisa na
+    // faixa do topo se alguma não foi salva.
+    if (registrarRespostas) {
+      const respostas = simulado.questoes_pool
+        .filter((q) => simulado.respostas[q.id] !== undefined)   // em branco não é resposta
+        .map((q) => ({
+          questaoId: q.id,
+          correta: simulado.respostas[q.id] === q.correta,
+          alternativa: simulado.respostas[q.id],
+          tempoSeg: null,
+        }));
+      registrarRespostas(respostas);
     }
 
     const acertos = simulado.questoes_pool.filter(q => simulado.respostas[q.id] === q.correta).length;
