@@ -174,6 +174,109 @@ describe('GET /tentativas — leitura por dono', () => {
   });
 });
 
+describe('GET /tentativas — paginação', () => {
+  const TOTAL_DO_DONO = 8;
+
+  beforeAll(async () => {
+    await limpar();
+    // Cinco em horários distintos e três no MESMO instante: o empate é o caso
+    // em que só o desempate por id impede a mesma linha de cair em duas
+    // páginas.
+    await pool.query(
+      `INSERT INTO tentativas (user_id, questao_id, correta, respondida_em) VALUES
+         ($1, 'p-1', true,  NOW() - INTERVAL '5 days'),
+         ($1, 'p-2', false, NOW() - INTERVAL '4 days'),
+         ($1, 'p-3', true,  NOW() - INTERVAL '3 days'),
+         ($1, 'p-4', true,  NOW() - INTERVAL '2 days'),
+         ($1, 'p-5', false, NOW() - INTERVAL '1 day'),
+         ($1, 'p-empate-a', true,  '2020-01-01T00:00:00Z'),
+         ($1, 'p-empate-b', false, '2020-01-01T00:00:00Z'),
+         ($1, 'p-empate-c', true,  '2020-01-01T00:00:00Z'),
+         ($2, 'p-do-outro', true, NOW())`,
+      [DONO, OUTRO]
+    );
+  });
+
+  const pedir = (query, quem = DONO) =>
+    request(app).get(`/tentativas?${query}`).set('Authorization', como(quem));
+
+  it('sem paginado=1 continua devolvendo array — é o contrato do front publicado', async () => {
+    const res = await pedir('limite=3');
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(3);
+  });
+
+  it('com paginado=1 devolve o total do filtro, não o da página', async () => {
+    const res = await pedir('paginado=1&limite=3');
+
+    expect(res.status).toBe(200);
+    expect(res.body.tentativas).toHaveLength(3);
+    expect(res.body.total).toBe(TOTAL_DO_DONO);
+    expect(res.body.limite).toBe(3);
+    expect(res.body.offset).toBe(0);
+    // A coluna da janela não pode vazar para a tentativa.
+    expect(res.body.tentativas[0]).not.toHaveProperty('total_filtrado');
+  });
+
+  it('percorrer as páginas devolve cada tentativa uma vez, inclusive as empatadas', async () => {
+    const vistas = [];
+    let offset = 0;
+    let total = Infinity;
+
+    while (offset < total) {
+      const res = await pedir(`paginado=1&limite=3&offset=${offset}`);
+      expect(res.status).toBe(200);
+      vistas.push(...res.body.tentativas.map((t) => t.id));
+      total = res.body.total;
+      offset += res.body.tentativas.length;
+      if (res.body.tentativas.length === 0) break;
+    }
+
+    expect(vistas).toHaveLength(TOTAL_DO_DONO);
+    expect(new Set(vistas).size).toBe(TOTAL_DO_DONO);
+
+    // E na mesma ordem da lista inteira de uma vez só.
+    const inteira = await pedir('limite=1000');
+    expect(vistas).toEqual(inteira.body.map((t) => t.id));
+  });
+
+  it('página além do fim vem vazia, com o total certo', async () => {
+    const res = await pedir('paginado=1&limite=3&offset=100');
+
+    expect(res.status).toBe(200);
+    expect(res.body.tentativas).toEqual([]);
+    expect(res.body.total).toBe(TOTAL_DO_DONO);
+  });
+
+  it('o total respeita ?desde= e não conta tentativa alheia', async () => {
+    const desde = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+    const recentes = await pedir(`paginado=1&desde=${encodeURIComponent(desde)}`);
+    expect(recentes.body.total).toBe(1);
+
+    const doOutro = await pedir('paginado=1', OUTRO);
+    expect(doOutro.body.total).toBe(1);
+    expect(doOutro.body.tentativas[0].questao_id).toBe('p-do-outro');
+  });
+
+  it('limite acima do teto vira o teto, e o envelope diz qual valeu', async () => {
+    const res = await pedir('paginado=1&limite=5000');
+
+    expect(res.status).toBe(200);
+    expect(res.body.limite).toBe(1000);
+  });
+
+  it('recusa offset inválido em vez de voltar para a primeira página', async () => {
+    // `offset=abc` virando 0 devolveria a página 1 de novo, e um cliente em
+    // laço repetiria as mesmas linhas até o teto de páginas.
+    for (const offset of ['-1', 'abc', '1.5']) {
+      const res = await pedir(`paginado=1&offset=${offset}`);
+      expect(res.status).toBe(400);
+    }
+  });
+});
+
 describe('PATCH /tentativas/:id — feedback', () => {
   // Cada teste precisa de uma linha própria: o PATCH altera estado, e
   // reaproveitar a mesma tentativa faria um teste depender da ordem do outro.

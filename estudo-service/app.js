@@ -93,14 +93,25 @@ app.post('/tentativas', verifyToken, async (req, res) => {
 });
 
 // ───────────────────────────────────────────────────────────────
-// GET /tentativas?desde=ISO&limite=N — histórico do próprio usuário
+// GET /tentativas?desde=ISO&limite=N&offset=N&paginado=1 — histórico do
+// próprio usuário
 // ───────────────────────────────────────────────────────────────
 //
 // O filtro `user_id = $1` vem do token, então não existe requisição capaz
 // de ler tentativa alheia — o mesmo desenho de "autorização por dono" do
 // task-service. Não há rota para buscar por id: a lista já é o recurso.
 app.get('/tentativas', verifyToken, async (req, res) => {
-  const { desde, limite } = req.query;
+  const { desde, limite, offset } = req.query;
+
+  // O teto de 1000 existia sem saída: quem passava dele recebia as 1000 mais
+  // recentes como se fossem o histórico inteiro, e o front calculava meta,
+  // sequência e revisão sobre uma lista cortada sem saber. Paginar é a saída.
+  //
+  // O formato segue o de /questoes, e pelo mesmo motivo: o array puro continua
+  // sendo o padrão, porque o front publicado faz `(linhas || [])` e morreria
+  // com um objeto. Quem quer paginar pede `paginado=1` e recebe
+  // `{ tentativas, total, limite, offset }`.
+  const paginado = req.query.paginado === '1';
 
   let desdeParam = null;
   if (desde !== undefined && desde !== '') {
@@ -122,17 +133,59 @@ app.get('/tentativas', verifyToken, async (req, res) => {
     limiteParam = Math.min(n, max);
   }
 
+  let offsetParam = 0;
+  if (offset !== undefined && offset !== '') {
+    const n = Number(offset);
+    if (!Number.isInteger(n) || n < 0) {
+      return res.status(400).json({ error: 'offset deve ser inteiro maior ou igual a zero' });
+    }
+    offsetParam = n;
+  }
+
   try {
+    // `id DESC` desempata tentativas gravadas no mesmo instante. Sem ele a
+    // ordem entre elas fica a critério do Postgres, que pode mudar de uma
+    // consulta para a outra — e aí uma delas aparece em duas páginas e a
+    // vizinha em nenhuma.
+    //
+    // `COUNT(*) OVER()` traz o total do filtro na mesma varredura. Sem ele o
+    // cliente não distingue "acabou" de "bateu no teto", que é justamente o
+    // problema que a paginação existe para resolver.
     const { rows } = await pool.query(
-      `SELECT id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em
+      `SELECT id, questao_id, correta, alternativa, tempo_seg, tipo, certeza, respondida_em,
+              COUNT(*) OVER() AS total_filtrado
          FROM tentativas
         WHERE user_id = $1
           AND ($2::timestamptz IS NULL OR respondida_em >= $2)
-        ORDER BY respondida_em DESC
-        LIMIT $3`,
-      [req.user.id, desdeParam, limiteParam]
+        ORDER BY respondida_em DESC, id DESC
+        LIMIT $3 OFFSET $4`,
+      [req.user.id, desdeParam, limiteParam, offsetParam]
     );
-    res.json(rows);
+
+    let total;
+    if (rows.length > 0) {
+      total = Number(rows[0].total_filtrado);
+    } else if (offsetParam > 0) {
+      // Página além do fim: a janela não devolveu linha, então o total vem de
+      // uma contagem própria. Só cai aqui quem pediu página inexistente.
+      const contagem = await pool.query(
+        `SELECT COUNT(*)::int AS total
+           FROM tentativas
+          WHERE user_id = $1
+            AND ($2::timestamptz IS NULL OR respondida_em >= $2)`,
+        [req.user.id, desdeParam]
+      );
+      total = contagem.rows[0].total;
+    } else {
+      total = 0;
+    }
+
+    // A coluna da janela é detalhe da consulta, não parte da tentativa.
+    const tentativas = rows.map(({ total_filtrado, ...tentativa }) => tentativa);
+
+    res.json(paginado
+      ? { tentativas, total, limite: limiteParam, offset: offsetParam }
+      : tentativas);
   } catch (error) {
     console.error('Erro ao listar tentativas:', error);
     res.status(500).json({ error: 'Erro ao listar tentativas' });
