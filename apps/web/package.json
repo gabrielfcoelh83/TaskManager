@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test:lib": "node scripts/testes-lib.js",
     "test:e2e": "playwright test",
     "test:api": "node tests/api.test.js",
     "test:all": "npm run test:e2e && npm run test:api",

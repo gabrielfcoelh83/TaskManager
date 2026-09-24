@@ -25,6 +25,12 @@ jobs:
       - name: Lint code
         run: npm run lint
 
+      # Testes de lib/: puros, rodam no node sem backend nem navegador. Ficam
+      # neste job leve porque o test-e2e depende dele — erro de lógica reprova
+      # em segundos, antes de subir a plataforma inteira para o e2e.
+      - name: Testes de lib
+        run: npm run test:lib
+
   # Job 2: E2E + API Tests
   test-e2e:
     runs-on: ubuntu-latest
