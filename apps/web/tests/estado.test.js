@@ -375,7 +375,10 @@ const t = (correta, data = '2026-08-10T10:00:00Z', tempo = null) => ({ correta, 
     removeItem: (k) => { delete guardado[k]; },
   };
 
-  const { loadState, saveState, limparEstado } = await import('../src/lib/storage.js');
+  const {
+    loadState, saveState, limparEstado, carregarDadosDaConta, salvarDadosDaConta, estadoDaConta,
+    dadosNaAbertura,
+  } = await import('../src/lib/storage.js');
 
   const padroes = { theme: 'rosa', configuracoes: { meta: 20, dataProva: null }, favoritos: [] };
 
@@ -401,6 +404,185 @@ const t = (correta, data = '2026-08-10T10:00:00Z', tempo = null) => ({ correta, 
   // JSON corrompido não pode derrubar o app na abertura.
   guardado['ma-questoes-state-v1'] = '{quebrado';
   exigir(loadState(padroes).theme === 'rosa', 'JSON inválido deveria cair no padrão');
+
+  // -------------------------------------------------------------------------
+  // Dados da conta: "Sair" apagava favoritos e anotações de vez
+  // -------------------------------------------------------------------------
+  //
+  // O logout zerava o localStorage inteiro para a próxima pessoa não ver o que
+  // era da anterior — e com isso a própria pessoa perdia tudo o que tinha
+  // escrito. Os dois lados precisam valer ao mesmo tempo: quem volta encontra
+  // o que deixou, quem chega depois não encontra nada.
+
+  const padroesApp = {
+    __usuario: null,
+    theme: 'rosa',
+    screen: 'dashboard',
+    favoritos: [],
+    anotacoes: { folder: 'Todas', activeId: null, itens: [] },
+    resultados_historico: [],
+  };
+  const nota = { id: 'nota-1', titulo: 'Controle de constitucionalidade', conteudo: 'difuso x concentrado' };
+  const simulado = { id: 'sim-1', quantidade: 10, acertos: 7, nota_final: 70, data_conclusao: '2026-09-20T15:00:00Z' };
+
+  // A Ana usa o app; o efeito de gravação do App mantém a chave dela em dia.
+  const daAna = {
+    ...padroesApp,
+    __usuario: 7,
+    theme: 'azul',
+    screen: 'anotacoes',
+    favoritos: ['101'],
+    anotacoes: { folder: 'Todas', activeId: 'nota-1', itens: [nota] },
+    resultados_historico: [simulado],
+  };
+  saveState(daAna);
+  salvarDadosDaConta(7, daAna);
+
+  // Ela sai: o estado da interface vai embora, como antes...
+  limparEstado();
+  exigir('ma-questoes-conta-v1:7' in guardado, 'limparEstado não pode apagar os dados da conta');
+  const deslogado = { ...padroesApp, theme: 'azul' };
+
+  // ...e ao entrar de novo, os favoritos e as anotações voltam.
+  const volta = estadoDaConta(deslogado, 7, padroesApp, carregarDadosDaConta(7));
+  exigir(volta.favoritos.length === 1 && volta.favoritos[0] === '101', 'o favorito sumiu no logout');
+  exigir(volta.anotacoes.itens[0]?.conteudo === nota.conteudo, 'a anotação sumiu no logout');
+  // A nota selecionada é da tela, não da conta: volta sem seleção, e a tela
+  // de Anotações abre a primeira quando nenhuma está selecionada.
+  exigir(volta.anotacoes.activeId === null, 'a seleção de nota é da tela e não deveria vir da chave da conta');
+  exigir(!('activeId' in carregarDadosDaConta(7).anotacoes), 'a nota selecionada foi parar na chave da conta');
+  // O histórico de simulado entra na meta do dia e na sequência: sumir com ele
+  // mudava números da tela para quem só saiu e entrou de novo.
+  exigir(
+    volta.resultados_historico.length === 1 && volta.resultados_historico[0].nota_final === 70,
+    'o histórico de simulado sumiu no logout'
+  );
+  exigir(volta.__usuario === 7, 'o estado recuperado precisa dizer de quem é');
+  exigir(volta.theme === 'azul', 'o tema é do aparelho e não muda com a conta');
+  exigir(volta.screen === 'dashboard', 'a tela recomeça do padrão, só os dados da conta voltam');
+
+  // O Bruno entra no mesmo navegador depois dela e não vê nada da Ana...
+  const doBruno = estadoDaConta(volta, 8, padroesApp, carregarDadosDaConta(8));
+  exigir(doBruno.favoritos.length === 0, 'o Bruno viu os favoritos da Ana');
+  exigir(doBruno.anotacoes.itens.length === 0, 'o Bruno viu as anotações da Ana');
+  exigir(doBruno.resultados_historico.length === 0, 'o Bruno herdou o histórico de simulado da Ana');
+  exigir(doBruno.__usuario === 8, 'o estado do Bruno tem de ser marcado como dele');
+
+  // ...e a passagem dele não apaga o que é dela.
+  salvarDadosDaConta(8, doBruno);
+  exigir(carregarDadosDaConta(7).anotacoes?.itens.length === 1, 'a entrada do Bruno apagou as anotações da Ana');
+  exigir(carregarDadosDaConta(7).resultados_historico?.length === 1, 'a entrada do Bruno apagou o histórico da Ana');
+
+  // Mesma conta, sem dados novos da chave (é o que o efeito de perfil passa):
+  // não recomeça, senão cada abertura zeraria a tela. O id do token é
+  // número, o do perfil pode vir como texto — os dois são a mesma pessoa.
+  exigir(estadoDaConta(volta, '7', padroesApp, {}) === volta, 'a mesma conta (id como texto) recomeçou do zero');
+
+  // Fatia gravada por uma versão anterior, sem campo novo: merge de um nível,
+  // o mesmo cuidado do `loadState`.
+  guardado['ma-questoes-conta-v1:9'] = JSON.stringify({ anotacoes: { itens: [nota] } });
+  const antigo = estadoDaConta(deslogado, 9, padroesApp, carregarDadosDaConta(9));
+  exigir(antigo.anotacoes.folder === 'Todas', 'campo novo da fatia sumiu nos dados da conta');
+  exigir(antigo.anotacoes.itens.length === 1, 'as notas gravadas por versão anterior se perderam');
+
+  // A chave da conta só entrega as fatias da conta: uma chave adulterada não
+  // pode trocar o dono do estado nem o tema de quem entrar.
+  guardado['ma-questoes-conta-v1:10'] = JSON.stringify({ favoritos: ['1'], theme: 'verde', __usuario: 99 });
+  const adulterado = carregarDadosDaConta(10);
+  exigir(!('theme' in adulterado) && !('__usuario' in adulterado), 'a chave da conta vazou campos que não são dela');
+  exigir(estadoDaConta(deslogado, 10, padroesApp, adulterado).__usuario === 10, 'o dono do estado veio da chave, não do token');
+
+  // Nada disso pode derrubar a tela nem gravar sem dono.
+  guardado['ma-questoes-conta-v1:11'] = '{quebrado';
+  exigir(Object.keys(carregarDadosDaConta(11)).length === 0, 'JSON inválido na chave da conta deveria virar vazio');
+  exigir(Object.keys(carregarDadosDaConta(null)).length === 0, 'sem conta não há o que carregar');
+  salvarDadosDaConta(null, daAna);
+  exigir(
+    !Object.keys(guardado).some((k) => k.startsWith('ma-questoes-conta-v1:null') || k.startsWith('ma-questoes-conta-v1:undefined')),
+    'gravou dados de conta sem conta — o estado depois do logout sobrescreveria alguém'
+  );
+
+  // Primeira abertura depois da atualização, para quem tinha estado SEM dono:
+  // a versão anterior só marcava o dono quando o perfil carregava, e conta sem
+  // perfil no servidor nunca era marcada. A chave dela ainda não existe — se o
+  // estado sem dono fosse tratado como alheio, as notas iam embora ali.
+  const semDono = {
+    ...padroesApp,
+    __usuario: null,
+    favoritos: ['55'],
+    anotacoes: { folder: 'Todas', activeId: null, itens: [nota] },
+    resultados_historico: [simulado],
+  };
+  const naAbertura = estadoDaConta(semDono, 12, padroesApp, dadosNaAbertura(semDono, carregarDadosDaConta(12)));
+  exigir(naAbertura.anotacoes.itens.length === 1, 'estado sem dono perdeu as anotações na primeira abertura depois da atualização');
+  exigir(naAbertura.favoritos[0] === '55', 'estado sem dono perdeu os favoritos na primeira abertura');
+  exigir(naAbertura.resultados_historico.length === 1, 'estado sem dono perdeu o histórico de simulado na primeira abertura');
+  exigir(naAbertura.__usuario === 12, 'o estado adotado precisa ficar marcado com o dono do token');
+
+  // Sem `dadosNaAbertura`, o estado sem dono não é adotado. É por isso que o
+  // `entrar` do App não a usa: no login, o estado sem dono pode ser de quem
+  // saiu antes. (Este teste cobre a função; que o `entrar` não a chame, só a
+  // leitura do App garante.)
+  const noLogin = estadoDaConta(semDono, 14, padroesApp, carregarDadosDaConta(14));
+  exigir(noLogin.anotacoes.itens.length === 0 && noLogin.favoritos.length === 0, 'sem dadosNaAbertura, o estado sem dono foi adotado');
+
+  // Chave gravada antes de `CAMPOS_DA_TELA`, com pasta e seleção dentro:
+  // a leitura as descarta, e a aba segue com as dela.
+  guardado['ma-questoes-conta-v1:17'] = JSON.stringify({ anotacoes: { folder: 'Penal', activeId: 'zz', itens: [nota] } });
+  const lidaAntiga = carregarDadosDaConta(17);
+  exigir(!('folder' in lidaAntiga.anotacoes) && !('activeId' in lidaAntiga.anotacoes), 'a leitura da chave deixou passar pasta ou seleção');
+
+  // Se a conta já tem chave, ela vence: o estado sem dono pode ser velho.
+  exigir(
+    dadosNaAbertura(semDono, carregarDadosDaConta(7)).anotacoes?.itens[0]?.id === 'nota-1'
+      && dadosNaAbertura(semDono, carregarDadosDaConta(7)).favoritos[0] === '101',
+    'com a chave da conta existindo, o estado sem dono não pode passar por cima dela'
+  );
+  // E estado com dono nunca é adotado por outra conta.
+  exigir(
+    Object.keys(dadosNaAbertura({ ...semDono, __usuario: 7 }, {})).length === 0,
+    'estado de outra conta foi adotado na abertura'
+  );
+
+  // Duas abas da mesma conta: a desatualizada não pode sobrescrever a nota
+  // nova da outra só porque alguém trocou de tela nela (o efeito do App grava
+  // a cada mudança de estado, e trocar de tela é uma).
+  const daAba = { ...padroesApp, __usuario: 13, favoritos: ['1'] };
+  salvarDadosDaConta(13, daAba);
+  const daOutraAba = JSON.stringify({ favoritos: ['1', '2'], anotacoes: { itens: [nota] } });
+  guardado['ma-questoes-conta-v1:13'] = daOutraAba;
+  salvarDadosDaConta(13, { ...daAba, screen: 'questoes' });
+  exigir(guardado['ma-questoes-conta-v1:13'] === daOutraAba, 'trocar de tela na aba desatualizada apagou a nota da outra aba');
+  // Mudar os dados da conta nesta aba, esse sim, grava.
+  salvarDadosDaConta(13, { ...daAba, favoritos: ['1', '3'] });
+  exigir(carregarDadosDaConta(13).favoritos.includes('3'), 'mudança de dado da conta deixou de ser gravada');
+
+  // O caso comum das duas abas, que o teste de cima não cobre: a aba
+  // desatualizada troca de tela (e com isso regrava o estado da interface com
+  // a versão velha das notas) e depois a página é recarregada. Na abertura, a
+  // chave da conta tem de valer para os dados dela — senão a versão velha
+  // volta e, com a aba nova sem memória do que gravou, vai parar na chave.
+  const n2 = { id: 'nota-2', titulo: 'Nota da outra aba', conteudo: 'nova' };
+  const abaVelha = {
+    ...padroesApp,
+    __usuario: 15,
+    screen: 'questoes',
+    anotacoes: { folder: 'Direito Penal', activeId: 'nota-1', itens: [nota] },
+  };
+  guardado['ma-questoes-conta-v1:15'] = JSON.stringify({ favoritos: [], anotacoes: { itens: [n2, nota] } });
+  const recarregada = estadoDaConta(abaVelha, 15, padroesApp, carregarDadosDaConta(15));
+  exigir(recarregada.anotacoes.itens.length === 2, 'recarregar a aba desatualizada trouxe de volta a versão velha das notas');
+  exigir(recarregada.anotacoes.folder === 'Direito Penal', 'a pasta aberta é da tela e não pode mudar ao recarregar');
+  exigir(recarregada.screen === 'questoes', 'mesma conta: a tela segue onde estava');
+
+  // Abrir outra nota ou trocar de pasta na aba desatualizada também não grava:
+  // seleção e pasta são da tela.
+  const abaQueSoClica = { ...padroesApp, __usuario: 16, anotacoes: { folder: 'Todas', activeId: 'nota-1', itens: [nota] } };
+  salvarDadosDaConta(16, abaQueSoClica);
+  const daOutra = JSON.stringify({ favoritos: [], anotacoes: { itens: [n2, nota] }, resultados_historico: [] });
+  guardado['ma-questoes-conta-v1:16'] = daOutra;
+  salvarDadosDaConta(16, { ...abaQueSoClica, anotacoes: { folder: 'Direito Penal', activeId: 'nota-x', itens: [nota] } });
+  exigir(guardado['ma-questoes-conta-v1:16'] === daOutra, 'abrir outra nota na aba desatualizada apagou a nota da outra aba');
 }
 
 if (falhas.length > 0) {

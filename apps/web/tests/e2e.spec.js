@@ -803,4 +803,38 @@ test.describe('Todas as telas', () => {
     await page.click('[data-testid="apagar-anotacao"]');
     await expect(page.locator('text=Crie uma com o botão')).toBeVisible();
   });
+
+  // "Sair" apagava favoritos e anotações de vez: eles só existem neste
+  // navegador, e o logout zerava o localStorage para a próxima pessoa não os
+  // encontrar. Os dois lados têm de valer juntos — quem volta encontra o que
+  // deixou, quem chega depois no mesmo navegador não encontra nada.
+  test('sair não apaga as anotações, e outra conta não as vê', async ({ page }) => {
+    const texto = `Anotação que sobrevive ao logout ${Date.now()}`;
+    await entrar(page);
+
+    await page.click('[data-testid="nav-anotacoes"]');
+    await page.click('[data-testid="nova-anotacao"]');
+    await page.locator('textarea').fill(texto);
+
+    await page.click('[data-testid="sair"]');
+    await expect(page.locator('button[type="submit"]')).toBeVisible();
+
+    await page.fill('input[type="email"]', EMAIL);
+    await page.fill('input[type="password"]', SENHA);
+    await page.click('button[type="submit"]');
+    await page.click('[data-testid="nav-anotacoes"]');
+    await expect(page.locator('textarea')).toHaveValue(texto);
+
+    // Outra conta, no mesmo navegador, logo em seguida: caderno vazio.
+    await page.click('[data-testid="sair"]');
+    await page.click('[data-testid="trocar-modo"]');
+    await page.fill('[data-testid="campo-nome"]', 'Outra Pessoa');
+    await page.fill('input[type="email"]', `e2e-${Date.now()}@exemplo.test`);
+    await page.fill('#campo-senha', 'senha-de-teste-123');
+    await page.fill('[data-testid="campo-confirmacao"]', 'senha-de-teste-123');
+    await page.click('button[type="submit"]');
+    await page.click('[data-testid="nav-anotacoes"]');
+    await expect(page.locator('text=Crie uma com o botão')).toBeVisible();
+    await expect(page.locator(`text=${texto}`)).toHaveCount(0);
+  });
 });

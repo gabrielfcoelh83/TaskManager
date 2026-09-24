@@ -106,8 +106,9 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
           })}
         </div>
         <div style={{ fontSize: 10.5, color: '#8b8391', marginTop: 14, lineHeight: 1.5 }}>
-          As anotações ficam guardadas neste navegador. Limpar os dados do site
-          apaga todas.
+          As anotações ficam guardadas neste navegador, separadas por conta, e
+          continuam aqui depois de sair. Limpar os dados do site apaga todas —
+          em computador compartilhado, é o jeito de não deixá-las para trás.
         </div>
       </div>
 
