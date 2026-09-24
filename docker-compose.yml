@@ -100,8 +100,8 @@ services:
       sh -c 'trap exit TERM;
       while :; do
         certbot renew --webroot -w /var/www/certbot --quiet;
-        cp /etc/letsencrypt/live/163-176-30-179.sslip.io/fullchain.pem /certs/fullchain.pem 2>/dev/null || true;
-        cp /etc/letsencrypt/live/163-176-30-179.sslip.io/privkey.pem /certs/privkey.pem 2>/dev/null || true;
+        cp /etc/letsencrypt/live/api.mlkoab.tech/fullchain.pem /certs/fullchain.pem 2>/dev/null || true;
+        cp /etc/letsencrypt/live/api.mlkoab.tech/privkey.pem /certs/privkey.pem 2>/dev/null || true;
         chmod 644 /certs/fullchain.pem 2>/dev/null || true;
         chmod 600 /certs/privkey.pem 2>/dev/null || true;
         sleep 12h & wait $${!};
