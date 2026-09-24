@@ -2,7 +2,7 @@ import { paraQuestaoDeTela } from '../questions/acervo.js';
 
 // Cliente da API da plataforma (gateway :3000 atrás do nginx).
 //
-// O front é servido pela Vercel e a API roda na Oracle: origens diferentes,
+// O front é servido pela Vercel e a API num servidor próprio: origens diferentes,
 // então toda chamada é cross-origin e depende do CORS configurado no nginx.
 // O token vai no header Authorization — cookie exigiria SameSite=None e
 // configuração extra sem ganho nenhum aqui.
