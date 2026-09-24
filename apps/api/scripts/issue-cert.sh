@@ -3,8 +3,8 @@
 #
 # Requer a porta 80 alcançável pela internet: o desafio HTTP-01 faz o
 # Let's Encrypt buscar um arquivo em http://$DOMINIO/.well-known/...
-# Se a Security List da VCN bloquear a 80, isto falha — e essa é a causa
-# mais comum, não erro de configuração.
+# Se um firewall (o do servidor ou o do provedor) bloquear a 80, isto
+# falha — e essa é a causa mais comum, não erro de configuração.
 #
 #   ./scripts/issue-cert.sh                 # emite de verdade
 #   STAGING=1 ./scripts/issue-cert.sh       # ambiente de teste, sem gastar cota
