@@ -8,6 +8,7 @@ import { montarDisciplinas } from './lib/disciplinas';
 import { planoDaSemana } from './lib/agenda';
 import { embaralhar } from './lib/questions/acervo';
 import { classificarRevisao } from './lib/revisao';
+import { mesclarTentativas } from './lib/historico';
 import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
 import {
   getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
@@ -124,8 +125,16 @@ export default function App() {
     // é esta carga que faz a tentativa sobreviver ao localStorage limpo.
     let cancelado = false;
 
+    // Recomeça vazio: o que estiver aqui é de antes desta carga — de outra
+    // conta, se a sessão anterior terminou por token vencido (401), que não
+    // passa pelo `sair`. Daqui em diante só entra o que `registrar` gravar
+    // nesta sessão, e é isso que a mesclagem abaixo preserva.
+    setUsuarioTentativas({});
+
     listarTentativas()
-      .then((tentativas) => { if (!cancelado) setUsuarioTentativas(tentativas); })
+      .then((tentativas) => {
+        if (!cancelado) setUsuarioTentativas((recentes) => mesclarTentativas(tentativas, recentes));
+      })
       .catch((err) => {
         if (cancelado) return;
         if (err.status === 401) { setSessao('ausente'); return; }

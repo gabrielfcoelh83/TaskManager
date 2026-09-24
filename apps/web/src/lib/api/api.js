@@ -1,4 +1,5 @@
 import { paraQuestaoDeTela } from '../questions/acervo.js';
+import { paraPagina, percorrerPaginas } from './paginas.js';
 
 // Cliente da API da plataforma (gateway :3000 atrás do nginx).
 //
@@ -210,11 +211,46 @@ export function agruparPorQuestao(linhas) {
   return porQuestao;
 }
 
+// Uma página do histórico. Mesmo desenho de `buscarPaginaDeQuestoes`: o
+// envelope é opt-in (`paginado=1`), e `paraPagina` aceita também o array de
+// um serviço anterior a ele.
+async function buscarPaginaDeTentativas({ limite = 1000, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limite: String(limite), paginado: '1' });
+  if (offset) params.set('offset', String(offset));
+
+  return paraPagina(await req(`/api/tentativas?${params}`), 'tentativas');
+}
+
+// O serviço entrega no máximo 1000 por pedido, e pedir uma vez só cortava o
+// histórico de quem passasse disso — sem erro, só com meta, sequência e
+// revisão calculadas sobre as 1000 mais recentes. Agora as páginas são
+// percorridas até o `total`.
+//
+// O teto de páginas segue o raciocínio de `MAX_PAGINAS` do acervo: só existe
+// para um serviço que devolva sempre a mesma página não prender o laço.
+// 50 páginas de 1000 são anos de uso diário.
+const MAX_PAGINAS_DE_TENTATIVAS = 50;
+
 export async function listarTentativas() {
-  // O teto do serviço é 1000. Com um usuário isso cobre muito tempo de uso;
-  // quando não cobrir, o que falta é paginação, não um limite maior.
-  const linhas = await req('/api/tentativas?limite=1000');
-  return agruparPorQuestao(linhas || []);
+  const { itens, completo } = await percorrerPaginas(
+    (offset) => buscarPaginaDeTentativas({ offset }),
+    {
+      maxPaginas: MAX_PAGINAS_DE_TENTATIVAS,
+      // Uma resposta gravada enquanto as páginas são lidas entra no topo e
+      // empurra o resto uma posição: a última linha de uma página volta como
+      // a primeira da seguinte. Descartar pelo id resolve, e nada se perde —
+      // o serviço grava sempre com `NOW()`, então linha nova só entra no topo.
+      chaveDe: (linha) => linha.id,
+    },
+  );
+
+  if (!completo) {
+    console.warn(
+      `listarTentativas parou em ${MAX_PAGINAS_DE_TENTATIVAS} páginas com ${itens.length} tentativas — o histórico pode estar incompleto.`,
+    );
+  }
+
+  return agruparPorQuestao(itens);
 }
 
 // ---------------------------------------------------------------------------
