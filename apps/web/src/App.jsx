@@ -20,6 +20,8 @@ import {
 } from './lib/api/api';
 import SeletorDeFase from './components/ui/SeletorDeFase';
 import { mesmoRascunho } from './lib/discursivas';
+import { fichaConcluida, montarFicha, respostasIniciais, opcoesDeDificuldade } from './lib/ficha';
+import { criarFilaDePreferencias, configuracoesDoPerfil } from './lib/preferencias';
 
 import Login from './screens/Login';
 import Dashboard from './screens/Dashboard';
@@ -34,6 +36,7 @@ import Anotacoes from './screens/Anotacoes';
 import Favoritos from './screens/Favoritos';
 import Configuracoes from './screens/Configuracoes';
 import SegundaFase from './screens/SegundaFase';
+import FichaDeBoasVindas from './screens/FichaDeBoasVindas';
 
 // O que é da INTERFACE começa aqui. O que é da PESSOA — nome, e-mail, meta,
 // data da prova — vem do servidor: até esta versão, `configuracoes` trazia
@@ -73,6 +76,25 @@ const DEFAULT_STATE = {
 
 const TELA_ESTREITA = '(max-width: 760px)';
 
+// Novas tentativas de buscar o perfil depois de uma falha (ms). Conta recém
+// criada ainda não tem perfil no user-service — ele nasce do evento
+// `user.registered`, um instante depois do cadastro — e a primeira busca
+// volta 404. Sem repetir, a ficha de boas-vindas só apareceria no próximo
+// acesso. As duas primeiras esperas acontecem com a tela de "carregando";
+// daí em diante o app abre como antes (nome vazio) e a busca segue por trás:
+// quando o perfil vier, a ficha aparece se ainda não foi feita.
+const ESPERAS_DO_PERFIL = [1000, 2000, 5000, 10000, 20000, 30000];
+const TENTATIVAS_COM_TELA_DE_ESPERA = 2;
+
+const PERFIL_VAZIO = { estado: 'carregando', id: null, name: null, email: null, preferencias: null };
+
+// O PUT de `profile_data` (ver `lib/preferencias.js`): só as chaves que
+// mudaram, que o user-service mescla. `extra.nome` vai junto quando é a ficha
+// que grava.
+const novaFilaDePreferencias = () => criarFilaDePreferencias(
+  (preferencias, extra) => salvarPerfil(extra.id, { nome: extra.nome, preferencias }),
+);
+
 // A conta dona do estado sai do token, que está aqui na hora; o perfil só a
 // confirma depois, pela rede. Esperar por ele deixava quem entrava ver, por um
 // instante, os favoritos de quem tinha saído por token vencido — e, com os
@@ -110,7 +132,18 @@ export default function App() {
   // carga que saiu antes dela.
   const [salvasNaSessao, setSalvasNaSessao] = useState({});
   const [usuarioTentativas, setUsuarioTentativas] = useState({});
-  const [perfil, setPerfil] = useState({ estado: 'carregando', id: null, name: null, email: null });
+  const [perfil, setPerfil] = useState(PERFIL_VAZIO);
+  // A ficha continua na tela depois de gravada, para mostrar "Tudo pronto"
+  // até a pessoa clicar em "Começar a estudar". Sem isto, o perfil voltando
+  // com `concluidaEm` a tiraria da tela no mesmo instante.
+  const [fichaAberta, setFichaAberta] = useState(false);
+  // O perfil que chega tarde — depois de uma falha, com o app já aberto — não
+  // derruba a tela em uso: a ficha espera a próxima troca de tela (menu,
+  // aviso do sino, seletor de fase). Um simulado em andamento vive só na
+  // tela de Simulados, e sair dela já o descarta; trocar a tela no meio dele
+  // pela ficha perderia a prova sem a pessoa ter pedido nada.
+  const [fichaAdiada, setFichaAdiada] = useState(false);
+  const perfilEstado = useRef('carregando');
 
   // O acervo é do servidor, não do bundle. Guardar o estado do carregamento
   // junto com as questões — e não só a lista — é o que permite a tela
@@ -128,12 +161,16 @@ export default function App() {
   // `encerrarSessao`, que é por onde passam o "Sair" e o 401.
   const sessaoEpoch = useRef(0);
 
-  // As gravações de preferência entram numa fila de um só: quem edita a meta e
-  // logo em seguida a data da prova dispara dois PUT, e sem a fila eles correm
-  // soltos — se o primeiro chegar ao servidor depois do segundo, o valor mais
-  // novo é sobrescrito pelo mais velho e a tela mostra uma coisa que o banco
-  // não tem. Foi assim que o teste de e2e ficou intermitente.
-  const gravacaoDePreferencias = useRef(Promise.resolve());
+  // As gravações de `profile_data` (meta, data da prova, ficha) entram numa
+  // fila de um só: quem edita a meta e logo em seguida a data da prova
+  // dispara dois PUT, e sem a fila eles correm soltos — se o primeiro chegar
+  // ao servidor depois do segundo, o valor mais novo é sobrescrito pelo mais
+  // velho e a tela mostra uma coisa que o banco não tem. Foi assim que o
+  // teste de e2e ficou intermitente. Cada PUT leva só as chaves que mudaram
+  // (o user-service mescla), e a resposta — o `profile_data` inteiro — é o
+  // que a tela passa a mostrar. Uma fila por sessão (`encerrarSessao` troca).
+  const filaDePreferencias = useRef(null);
+  if (filaDePreferencias.current == null) filaDePreferencias.current = novaFilaDePreferencias();
 
   // Quantas respostas de simulado ainda estão na fila (`registrarRespostas`).
   // Elas só existem na memória desta aba: fechar ou recarregar antes de a fila
@@ -153,9 +190,13 @@ export default function App() {
   // estado no login. Limpar a tela é coisa do `sair`.
   const encerrarSessao = useCallback(() => {
     sessaoEpoch.current += 1;
+    filaDePreferencias.current = novaFilaDePreferencias();
     setUsuarioTentativas({});
     setSalvasNaSessao({});
-    setPerfil({ estado: 'carregando', id: null, name: null, email: null });
+    setPerfil(PERFIL_VAZIO);
+    perfilEstado.current = 'carregando';
+    setFichaAberta(false);
+    setFichaAdiada(false);
     setErroSync(null);
     setSessao('ausente');
   }, []);
@@ -245,11 +286,16 @@ export default function App() {
     if (!payload) { encerrarSessao(); return undefined; }
 
     let cancelado = false;
+    let espera = null;
 
-    buscarPerfil(payload.id)
+    const tentar = (tentativa) => buscarPerfil(payload.id)
       .then((p) => {
         if (cancelado) return;
-        setPerfil({ estado: 'pronto', id: p.id, name: p.name, email: p.email || payload.email });
+        // O app já estava aberto (o perfil tinha falhado): a ficha, se
+        // faltar, espera a próxima troca de tela.
+        if (perfilEstado.current === 'erro') setFichaAdiada(true);
+        perfilEstado.current = 'pronto';
+        setPerfil({ estado: 'pronto', id: p.id, name: p.name, email: p.email || payload.email, preferencias: p.preferencias || {} });
 
         const dadosDaConta = carregarDadosDaConta(p.id);
         setState((st) => {
@@ -262,18 +308,12 @@ export default function App() {
           // certo enquanto toda edição for gravada antes desta resposta chegar.
           const mesmaConta = String(st.__usuario) === String(p.id);
           const base = estadoDaConta(st, p.id, DEFAULT_STATE, mesmaConta ? {} : dadosDaConta);
-          const prefs = p.preferencias || {};
-
           return {
             ...base,
             __usuario: p.id,
-            configuracoes: {
-              ...base.configuracoes,
-              // O servidor manda em meta e data da prova: são as preferências
-              // que precisam seguir a pessoa de um aparelho para o outro.
-              ...(prefs.meta != null ? { meta: prefs.meta } : {}),
-              ...(prefs.dataProva !== undefined ? { dataProva: prefs.dataProva } : {}),
-            },
+            // O servidor manda em meta e data da prova: são as preferências
+            // que precisam seguir a pessoa de um aparelho para o outro.
+            configuracoes: { ...base.configuracoes, ...configuracoesDoPerfil(p.preferencias, base.configuracoes) },
           };
         });
       })
@@ -281,11 +321,22 @@ export default function App() {
         if (cancelado) return;
         if (err.status === 401) { encerrarSessao(); return; }
         // Perfil é o nome no canto da tela: sem ele o app funciona inteiro.
-        // Cair aqui não pode virar tela de erro — vira nome vazio.
-        setPerfil({ estado: 'erro', id: payload.id, name: null, email: payload.email });
+        // Cair aqui não pode virar tela de erro — vira nome vazio. Só a ficha
+        // espera por ele (ver ESPERAS_DO_PERFIL).
+        if (tentativa >= TENTATIVAS_COM_TELA_DE_ESPERA || tentativa >= ESPERAS_DO_PERFIL.length) {
+          if (perfilEstado.current !== 'pronto') perfilEstado.current = 'erro';
+          setPerfil((atual) => (atual.estado === 'erro'
+            ? atual
+            : { estado: 'erro', id: payload.id, name: null, email: payload.email, preferencias: null }));
+        }
+        if (tentativa < ESPERAS_DO_PERFIL.length) {
+          espera = setTimeout(() => { if (!cancelado) tentar(tentativa + 1); }, ESPERAS_DO_PERFIL[tentativa]);
+        }
       });
 
-    return () => { cancelado = true; };
+    tentar(0);
+
+    return () => { cancelado = true; clearTimeout(espera); };
   }, [sessao, encerrarSessao]);
 
   // ---- Histórico de tentativas ----
@@ -357,7 +408,10 @@ export default function App() {
     [acervo.questoes, disciplinas]
   );
 
-  const goTo = (screen) => setState((st) => ({ ...st, screen }));
+  const goTo = (screen) => {
+    setFichaAdiada(false);
+    setState((st) => ({ ...st, screen }));
+  };
   const updateSlice = (key, partial) =>
     setState((st) => ({ ...st, [key]: typeof partial === 'function' ? partial(st[key]) : { ...st[key], ...partial } }));
 
@@ -374,23 +428,32 @@ export default function App() {
   // Meta e data da prova vão para o servidor (coluna profile_data); o estado
   // local muda na hora para a tela não ficar esperando a rede.
   const atualizarConfig = (partial) => {
-    const configuracoes = { ...state.configuracoes, ...partial };
+    // Vai ao servidor só o que mudou: o user-service mescla o profile_data, e
+    // mandar a meta local junto com uma data nova sobrescreveria a meta gravada
+    // de lá quando o perfil ainda não carregou (aparelho novo, perfil fora do ar).
+    const mudou = {};
+    if ('meta' in partial) mudou.meta = partial.meta;
+    if ('dataProva' in partial) mudou.dataProva = partial.dataProva;
 
     // O `setState` fica com a função pura. Disparar a rede de dentro dele
     // seria efeito colateral num updater — o React pode reexecutá-lo (e em
     // StrictMode reexecuta sempre), o que dobrava cada gravação.
     setState((st) => ({ ...st, configuracoes: { ...st.configuracoes, ...partial } }));
 
-    if (perfil.id == null) return;
+    if (perfil.id == null || Object.keys(mudou).length === 0) return;
 
     const epoch = sessaoEpoch.current;
     const id = perfil.id;
-    gravacaoDePreferencias.current = gravacaoDePreferencias.current
-      // A fila pode andar depois do fim da sessão: um PUT que ainda esperava a
-      // vez sairia com o token de quem entrou em seguida. Não sai.
-      .then(() => {
-        if (sessaoEpoch.current !== epoch) return undefined;
-        return salvarPerfil(id, { preferencias: { meta: configuracoes.meta, dataProva: configuracoes.dataProva } });
+    // A fila pode andar depois do fim da sessão: um PUT que ainda esperava a
+    // vez sairia com o token de quem entrou em seguida. Não sai.
+    filaDePreferencias.current
+      .gravar(
+        mudou,
+        { continuar: () => sessaoEpoch.current === epoch, extra: { id } },
+      )
+      .then((resposta) => {
+        if (!resposta || sessaoEpoch.current !== epoch) return;
+        setPerfil((atual) => ({ ...atual, preferencias: resposta.preferencias }));
       })
       .catch((err) => {
         if (sessaoEpoch.current !== epoch) return;
@@ -399,6 +462,62 @@ export default function App() {
         if (err.status === 401) { encerrarSessao(); return; }
         setErroSync(`Preferência não salva no servidor: ${err.message}`);
       });
+  };
+
+  // A ficha de boas-vindas (e a edição dela em Configurações). Vai pela mesma
+  // fila da meta, com o nome no mesmo PUT. Devolve o que foi salvo, `null` se
+  // a sessão acabou com o PUT no ar, e deixa o erro subir para a tela da
+  // ficha, que o mostra sem perder as respostas — a faixa do topo nem existe
+  // enquanto a ficha está na tela.
+  //
+  // Só a primeira conclusão escolhe a fase: editar pelas Configurações não
+  // tira a pessoa da tela em que está (a fase se troca no seletor do menu).
+  const salvarFicha = async (respostas) => {
+    if (perfil.id == null) throw new Error('seu perfil ainda não carregou');
+    const epoch = sessaoEpoch.current;
+    const edicao = fichaConcluida(perfil.preferencias);
+    const { nome: nomeNovo, preferencias } = montarFicha(respostas, {
+      anterior: edicao ? perfil.preferencias.ficha : null,
+    });
+    if (!edicao) setFichaAberta(true);
+
+    try {
+      // Outra aba (ou aparelho) pode ter concluído a ficha enquanto esta a
+      // mostrava. Aí vale a de lá: esta entra no app sem sobrescrever. Se a
+      // consulta falhar, grava do mesmo jeito — é ela que é opcional.
+      if (!edicao) {
+        const atual = await buscarPerfil(perfil.id).catch((err) => {
+          if (err.status === 401) throw err;
+          return null;
+        });
+        if (sessaoEpoch.current !== epoch) return null;
+        if (atual && fichaConcluida(atual.preferencias)) {
+          setPerfil((p) => ({ ...p, name: atual.name ?? p.name, preferencias: atual.preferencias }));
+          setState((st) => ({ ...st, configuracoes: { ...st.configuracoes, ...configuracoesDoPerfil(atual.preferencias, st.configuracoes) } }));
+          setFichaAberta(false);
+          return null;
+        }
+      }
+
+      const resposta = await filaDePreferencias.current.gravar(preferencias, {
+        continuar: () => sessaoEpoch.current === epoch,
+        extra: { id: perfil.id, nome: nomeNovo },
+      });
+      if (!resposta || sessaoEpoch.current !== epoch) return null;
+
+      setPerfil((atual) => ({ ...atual, name: resposta.name ?? atual.name, preferencias: resposta.preferencias }));
+      setState((st) => ({
+        ...st,
+        ...(edicao ? {} : { fase: faseValida(respostas.fase).chave, screen: 'dashboard' }),
+        configuracoes: { ...st.configuracoes, meta: preferencias.meta, dataProva: preferencias.dataProva },
+      }));
+      return { nome: resposta.name ?? nomeNovo, preferencias: resposta.preferencias };
+    } catch (err) {
+      if (sessaoEpoch.current !== epoch) return null;
+      if (!edicao) setFichaAberta(false);
+      if (err.status === 401) { encerrarSessao(); return null; }
+      throw err;
+    }
   };
 
   // Resposta discursiva: mesma regra das outras gravações. Devolve a linha
@@ -433,6 +552,7 @@ export default function App() {
 
   const trocarFase = (chave) => {
     setNotifOpen(false);
+    setFichaAdiada(false);
     setState((st) => ({ ...st, fase: faseValida(chave).chave }));
   };
 
@@ -602,6 +722,49 @@ export default function App() {
     return <Login theme={theme} s={s} onEntrar={entrar} />;
   }
 
+  // A ficha de boas-vindas é obrigatória: enquanto o perfil não disser que
+  // ela foi concluída, ela fica no lugar das telas. Só com o perfil carregado
+  // — até lá não dá para saber, e mostrar o Dashboard para trocá-lo pela
+  // ficha um segundo depois seria pior que esperar. Se o perfil falhar, o app
+  // abre como sempre abriu e a ficha aparece quando ele vier.
+  if (perfil.estado === 'carregando') {
+    return (
+      <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}>
+        <div role="status" data-testid="carregando-perfil" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#8b8391', fontSize: 13 }}>
+          <div className="esqueleto" style={{ ...s.logoMark, width: 40, height: 40, borderRadius: 12 }} aria-hidden="true">
+            <Icon name="scale" color="#fff" size={20} />
+          </div>
+          Carregando seu perfil…
+          {/* Rede ruim pode deixar esta tela alguns segundos (cada busca tem
+              10 s de prazo, e ela é repetida). Sair é a saída que não depende
+              do servidor. */}
+          <button type="button" data-testid="sair" onClick={sair} style={{ ...s.btnOutline, marginTop: 6 }}>Sair</button>
+        </div>
+      </div>
+    );
+  }
+
+  const fichaPendente = perfil.estado === 'pronto' && !fichaConcluida(perfil.preferencias);
+  if (fichaAberta || (fichaPendente && !fichaAdiada)) {
+    return (
+      <FichaDeBoasVindas
+        theme={theme}
+        s={s}
+        email={perfil.email}
+        iniciais={respostasIniciais({
+          nome: perfil.name, configuracoes: state.configuracoes, fase: state.fase, preferencias: perfil.preferencias,
+        })}
+        opcoesDeDificuldade={(marcadas) => opcoesDeDificuldade(acervo.questoes, marcadas)}
+        acervoCarregando={acervo.estado === 'carregando'}
+        onSalvar={salvarFicha}
+        onEntrar={() => setFichaAberta(false)}
+        onSair={sair}
+      />
+    );
+  }
+
+  const dificuldades = perfil.preferencias?.ficha?.dificuldades || [];
+
   const nome = nomeDeExibicao(perfil, perfil.email);
   const fase = faseValida(state.fase);
 
@@ -733,6 +896,14 @@ export default function App() {
       acao: { rotulo: 'Praticar', ir: 'questoes' },
     });
   }
+  if (fichaPendente) {
+    notificacoes.push({
+      icone: 'clipboard-list', cor: '#8B5CF6',
+      titulo: 'Preencha sua ficha de boas-vindas',
+      texto: 'Ela abre na próxima troca de tela.',
+      acao: { rotulo: 'Preencher agora', ir: state.screen },
+    });
+  }
   if (revisao.resumo.erros > 0) {
     notificacoes.push({
       icone: 'repeat', cor: '#EF4444',
@@ -777,6 +948,7 @@ export default function App() {
     disciplinas,
     tentativas: usuarioTentativas,
     meta: state.configuracoes.meta,
+    dificuldades,
   }).find((d) => d.hoje) || null;
 
   // O foco dizia "faltam 12 questões" sem dizer de quê, e não levava a lugar
@@ -812,7 +984,7 @@ export default function App() {
     usuarioTentativas, disciplinas, revisao,
     resultados_historico: state.resultados_historico,
     config: state.configuracoes,
-    revisarQuestoes, praticarDisciplina,
+    revisarQuestoes, praticarDisciplina, dificuldades,
   };
 
   return (
@@ -1013,6 +1185,10 @@ export default function App() {
               perfil={perfil}
               nome={nome}
               atualizarNome={atualizarNome}
+              salvarFicha={salvarFicha}
+              fase={state.fase}
+              opcoesDeDificuldade={(marcadas) => opcoesDeDificuldade(acervo.questoes, marcadas)}
+              acervoCarregando={acervo.estado === 'carregando'}
               atualizarConfig={atualizarConfig}
               themeKey={state.theme}
               setTheme={setTheme}

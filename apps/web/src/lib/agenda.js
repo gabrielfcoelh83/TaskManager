@@ -41,8 +41,8 @@ export function respondidasPorDia(tentativas = {}) {
  * naquele dia sobre a meta diária. Dias futuros não têm progresso, e a tela
  * mostra isso como "planejado" em vez de uma barra em zero.
  */
-export function planoDaSemana({ disciplinas = [], tentativas = {}, meta = 20, hoje = new Date() } = {}) {
-  const prioridade = prioridadeDeEstudo(disciplinas);
+export function planoDaSemana({ disciplinas = [], tentativas = {}, meta = 20, hoje = new Date(), dificuldades = [] } = {}) {
+  const prioridade = prioridadeDeEstudo(disciplinas, { dificuldades });
   const porDia = respondidasPorDia(tentativas);
   const hojeChave = dateKey(hoje);
 
@@ -73,6 +73,7 @@ export function planoDaSemana({ disciplinas = [], tentativas = {}, meta = 20, ho
 }
 
 function motivoDaSugestao(d) {
+  if (d.pontoFraco) return 'você marcou como ponto fraco na sua ficha';
   if (d.status === 'novo') return `${d.total} ${d.total === 1 ? 'questão' : 'questões'} que você ainda não respondeu`;
   if (d.status === 'necessita') return `sua taxa aqui é de ${d.pct}%`;
   if (d.status === 'em-desenvolvimento') return `${d.pct}% de acerto — dá para subir`;

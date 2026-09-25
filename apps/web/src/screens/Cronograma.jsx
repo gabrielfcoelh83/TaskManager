@@ -16,9 +16,9 @@ import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
 
 const SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
-export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, config, praticarDisciplina, go }) {
+export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, config, praticarDisciplina, go, dificuldades }) {
   const meta = Number(config?.meta) > 0 ? Number(config.meta) : 20;
-  const plano = planoDaSemana({ disciplinas, tentativas: usuarioTentativas, meta });
+  const plano = planoDaSemana({ disciplinas, tentativas: usuarioTentativas, meta, dificuldades });
   const calendario = diasDoMes(usuarioTentativas);
   const resumo = resumoDoPlano({ tentativas: usuarioTentativas, disciplinas });
   const faltam = diasAteProva(config);

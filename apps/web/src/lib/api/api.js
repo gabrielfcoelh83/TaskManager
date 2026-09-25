@@ -50,7 +50,7 @@ export function logout() {
   }
 }
 
-async function req(caminho, { method = 'GET', body, auth = true } = {}) {
+async function req(caminho, { method = 'GET', body, auth = true, tempoMaximoMs } = {}) {
   if (import.meta.env.PROD && !BASE) {
     // Sem isto, um build sem a variável mandaria /api/auth/login para a
     // própria Vercel e o erro visível seria um 404 sem explicação.
@@ -67,11 +67,26 @@ async function req(caminho, { method = 'GET', body, auth = true } = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const chamar = () => fetch(`${BASE}${caminho}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  // `tempoMaximoMs`: sem ele, um servidor que aceita a conexão e não
+  // responde prende a promessa para sempre — e quem espera por ela (a tela
+  // de "carregando seu perfil") junto. Cada tentativa tem o seu prazo.
+  const chamar = async () => {
+    const controle = tempoMaximoMs ? new AbortController() : null;
+    const prazo = controle ? setTimeout(() => controle.abort(), tempoMaximoMs) : null;
+    try {
+      return await fetch(`${BASE}${caminho}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controle?.signal,
+      });
+    } catch (err) {
+      if (controle?.signal.aborted) throw new ApiError('O servidor demorou demais para responder', 0);
+      throw err;
+    } finally {
+      clearTimeout(prazo);
+    }
+  };
 
   let res;
   try {
@@ -79,7 +94,8 @@ async function req(caminho, { method = 'GET', body, auth = true } = {}) {
     // espera — ver `retentativa.js`. Login e cadastro ficam de fora: lá o
     // limite existe justamente contra quem tenta senha atrás de senha.
     res = await (auth ? repetirEm429(chamar) : chamar());
-  } catch {
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
     // fetch só rejeita por falha de rede ou bloqueio de CORS. Distinguir os
     // dois no navegador é impossível de propósito, então a mensagem cobre
     // ambos em vez de mentir sobre a causa.
@@ -162,12 +178,17 @@ export async function entrarComGoogle(credential) {
 // um nome fixo no código para todo mundo.
 //
 // `profile_data` é uma coluna JSONB que o PUT já aceita, e é onde ficam as
-// preferências que precisam seguir a pessoa entre navegadores — meta diária e
-// data da prova. O tema de cores fica no localStorage: é preferência do
-// aparelho, não da conta.
+// preferências que precisam seguir a pessoa entre navegadores — meta diária,
+// data da prova e a ficha de boas-vindas. O PUT MESCLA no primeiro nível
+// (chave com null grava null): mande só as chaves que mudaram. O tema de
+// cores fica no localStorage: é preferência do aparelho, não da conta.
+
+// 10 s por tentativa: a ficha de boas-vindas espera pelo perfil antes de
+// abrir o app, e o App repete a busca quando ela falha.
+const TEMPO_MAXIMO_DO_PERFIL_MS = 10_000;
 
 export async function buscarPerfil(id) {
-  const perfil = await req(`/api/users/${id}`);
+  const perfil = await req(`/api/users/${id}`, { tempoMaximoMs: TEMPO_MAXIMO_DO_PERFIL_MS });
   return {
     id: perfil?.user_id ?? id,
     name: perfil?.name ?? null,
@@ -177,8 +198,8 @@ export async function buscarPerfil(id) {
 }
 
 export async function salvarPerfil(id, { nome, preferencias }) {
-  // O user-service usa COALESCE: mandar `undefined` (que some no JSON) preserva
-  // o valor de lá. Mandar string vazia apagaria o nome — daí o `|| undefined`.
+  // O nome usa COALESCE: mandar `undefined` (que some no JSON) preserva o
+  // valor de lá. `profile_data` é mesclado no primeiro nível. Mandar string vazia apagaria o nome — daí o `|| undefined`.
   const perfil = await req(`/api/users/${id}`, {
     method: 'PUT',
     body: {

@@ -32,7 +32,7 @@ function EmptyHint({ children }) {
   return <div style={{ fontSize: 12.5, color: '#8b8391', padding: '10px 0', lineHeight: 1.5 }}>{children}</div>;
 }
 
-export default function Dashboard({ theme, s, data, go, dash, setDash, config, usuarioTentativas, resultados_historico, disciplinas, praticarDisciplina, acervo }) {
+export default function Dashboard({ theme, s, data, go, dash, setDash, config, usuarioTentativas, resultados_historico, disciplinas, praticarDisciplina, acervo, dificuldades }) {
   const tentativas = usuarioTentativas || {};
   const resultados = resultados_historico || [];
   const questoes = data.QUESTOES || [];
@@ -48,7 +48,7 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
   const simResumo = resumoSimulados(resultadosPeriodo);
   const simPorTipo = desempenhoPorSimulado(resultadosPeriodo);
 
-  const prioridade = prioridadeDeEstudo(disciplinas || []);
+  const prioridade = prioridadeDeEstudo(disciplinas || [], { dificuldades });
   const proxima = prioridade[0] || null;
 
   const maisEstudadas = [...(disciplinas || [])]
@@ -128,7 +128,9 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
                 </div>
                 <div style={{ fontSize: 12.5, color: '#8b8391' }}>
                   {proxima
-                    ? proxima.pct != null
+                    ? proxima.pontoFraco
+                      ? 'Você marcou como ponto fraco na sua ficha'
+                      : proxima.pct != null
                       ? `${proxima.pct}% de acerto em ${proxima.tentativas} ${proxima.tentativas === 1 ? 'resposta' : 'respostas'}`
                       : `${proxima.total} ${proxima.total === 1 ? 'questão' : 'questões'} que você ainda não respondeu`
                     : acervo?.estado === 'carregando' ? 'carregando o acervo…' : 'o acervo ainda não tem questões classificadas'}

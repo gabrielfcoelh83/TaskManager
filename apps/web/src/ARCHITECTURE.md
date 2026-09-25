@@ -21,12 +21,14 @@ src/
 ├── main.jsx              # Entry point (StrictMode + App)
 ├── App.jsx               # Estado global, carga de dados, layout e navegação
 ├── index.css             # Estilos globais e animações
-├── screens/              # Uma tela por arquivo (13, contando o Login e a SegundaFase)
+├── screens/              # Uma tela por arquivo (14, contando o Login, a SegundaFase e a FichaDeBoasVindas)
 ├── components/ui/        # Componentes extraídos das telas
 │   ├── SeletorDeFase.jsx    # Topo da barra lateral: marca + <select> 1ª/2ª fase
 │   ├── ConfigSimulado.jsx   # "Vamos começar!": tipo, disciplina e quantidade do simulado
 │   ├── Cronometro.jsx       # Contagem regressiva hh:mm:ss da barra do simulado
 │   ├── BotaoGoogle.jsx      # "Fazer login com o Google" (Login)
+│   ├── PassosDaFicha.jsx    # Os 4 passos da ficha de boas-vindas e o resumo das respostas
+│   ├── MeuPerfilDeEstudo.jsx  # Configurações: ver e editar a ficha (usa PassosDaFicha)
 │   └── GeradorQuestoes.jsx  # Gerador por IA — NÃO está em uso (ver Pendências)
 └── lib/                  # Lógica sem tela; a maior parte roda no `node` (ver "Rodar e testar")
     ├── api/api.js        # Único cliente HTTP do gateway
@@ -42,6 +44,8 @@ src/
     ├── disciplinas.js    # Disciplinas derivadas do acervo, cores, prioridade
     ├── agenda.js         # Plano da semana e calendário do Cronograma
     ├── perfil.js         # Payload do JWT, nome de exibição, saudação
+    ├── ficha.js          # Ficha de boas-vindas: opções, validação dos passos, meta sugerida, montagem
+    ├── preferencias.js   # Fila dos PUT de profile_data (só as chaves que mudaram) e leitura de meta/data
     ├── navegacao.js      # Menu, fases (FASES), título/subtítulo das telas, ícones, tags
     ├── fundamentos.js    # 2ª fase: extrai citações legais e compara resposta × padrão da FGV
     ├── discursivas.js    # 2ª fase: agrupar por exame, "0,60", itens preenchidos
@@ -182,7 +186,8 @@ recarregar a página volta para ela — mas não há URL por tela.
 | `favoritos` | `Favoritos.jsx` | Questões marcadas com estrela | `toggleFavorito` (recebe `favoritos` mas não usa; lê de `revisao`) |
 | `disciplinas` | `Disciplinas.jsx` | Aproveitamento por matéria e tema | `disc`, `setDisc`, `simularDisciplina` |
 | `anotacoes` | `Anotacoes.jsx` | Notas com pastas e tags | `notas`, `setNotas` |
-| `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme` |
+| `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, "Meu perfil de estudo", tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme`, `salvarFicha`, `fase`, `opcoesDeDificuldade`, `acervoCarregando` |
+| — (perfil sem ficha) | `FichaDeBoasVindas.jsx` | Ficha obrigatória antes do app (ver "Ficha de boas-vindas") | não recebe as comuns: `theme`, `s`, `email`, `iniciais`, `opcoesDeDificuldade`, `acervoCarregando`, `onSalvar`, `onEntrar`, `onSair` |
 | — (`state.fase`) | `SegundaFase.jsx` | 2ª fase: questões discursivas (ver "Fases") | não recebe as comuns: `theme`, `s`, `fase`, `estado`/`setEstado` (`state.segundaFase`), `gravarResposta`, `sessaoExpirou` |
 
 ### Simulados (layout "estilo LEGJUR")
@@ -228,7 +233,72 @@ A origem de cada questão ("45º Exame de Ordem · questão 7 · FGV") vem de
 Props comuns (`screenProps`): `theme`, `s` (estilos de `buildStyles`), `data`
 (`{ QUESTOES, DISCIPLINAS }`), `go`, `usuarioTentativas`, `disciplinas`,
 `revisao`, `resultados_historico`, `config`, `revisarQuestoes`,
-`praticarDisciplina`.
+`praticarDisciplina`, `dificuldades` (as matérias marcadas na ficha).
+
+### Ficha de boas-vindas
+
+Toda conta preenche um perfil de estudo curto antes de usar o app — conta
+nova e conta antiga (esta no próximo acesso, com nome, meta e data da prova
+já preenchidos). Quatro passos, um por tela, com barra de progresso,
+Voltar/Continuar e sem "pular"; depois, "Tudo pronto" com o resumo e o app.
+Não há tour nem checklist de primeiros passos.
+
+1. **Você** — nome (do perfil: cadastro ou Google) e a fase: 1ª (objetiva) ou
+   2ª fase de Direito Civil, a única área da 2ª fase que o app tem (o texto
+   diz isso, sem listar áreas "em breve"). Na primeira conclusão, vira
+   `state.fase`.
+2. **A prova** — data (ou "Ainda não sei", que grava `dataProva: null`; data
+   passada não vale) e se já fez o Exame (não / 1 vez / mais de uma).
+3. **Sua rotina** — dias da semana (ao menos um) e tempo por dia (30 min,
+   1 h, 2 h, 3 h ou mais). A meta sugerida é `minutos ÷ 3` (~3 min por
+   questão objetiva, a conta aparece na tela), editável, e vira a `meta`.
+4. **Pontos fracos** — matérias do acervo carregado; sem acervo, as 18 da 1ª
+   fase de `ICONE_POR_DISCIPLINA`. "Ainda não sei" é resposta.
+
+**Onde fica.** Em `profile_data`, no servidor: `meta` e `dataProva` são as de
+sempre (sem cópia), e `ficha = { versao: 1, concluidaEm, fase, jaFez,
+diasDaSemana, minutosPorDia, dificuldades }` (mais `atualizadaEm` quando
+editada). `diasDaSemana` usa o `getDay()` (0 = domingo). O PUT leva só
+`{ meta, dataProva, ficha }` e o nome; o user-service mescla com o resto.
+
+**Obrigatória.** O `App` decide antes de qualquer tela, nas duas fases:
+perfil carregando → "Carregando seu perfil…" (com "Sair"); perfil pronto sem
+`ficha.concluidaEm` → a ficha. Cada busca do perfil tem 10 s de prazo
+(`tempoMaximoMs` do `req`, com `AbortController`) — sem ele, um servidor que
+aceita a conexão e não responde prendia a tela de espera. Perfil que falha
+não bloqueia: depois de duas tentativas com a tela de espera o app abre como
+sempre abriu (nome vazio), e a busca continua por trás (`ESPERAS_DO_PERFIL`,
+até ~1 min). É o que cobre a conta recém-criada, cujo perfil nasce do evento
+`user.registered` um instante depois do cadastro e voltava 404 na primeira
+busca. 401 volta ao login, como o resto.
+
+**Perfil que chega tarde** (depois de falhar, com o app já aberto) não troca a
+tela em uso pela ficha: ela fica adiada (`fichaAdiada`) até a próxima troca de
+tela — menu, aviso do sino ("Preencha sua ficha de boas-vindas") ou seletor de
+fase. Escolhido assim porque o simulado em andamento vive só no estado local
+de `Simulados.jsx`: sair da tela já o descarta (Pendência 15), então a troca
+de tela é o ponto em que não se perde nada que a pessoa não tenha largado.
+
+**Outra aba concluiu.** Antes de gravar a primeira conclusão, a ficha relê o
+perfil: se o servidor já tem `ficha.concluidaEm` (outra aba ou aparelho), a
+aba entra no app com a ficha de lá, sem sobrescrever. Não há sinal entre abas
+para o perfil (ele não fica no localStorage), então a aba só descobre ao
+concluir.
+
+Gravação que falha deixa a ficha no último passo com o erro e "Tentar de
+novo", sem perder as respostas; `fichaAberta` segura a ficha na tela depois
+de gravada, para mostrar "Tudo pronto" até o clique em "Começar a estudar".
+A ficha tem "Sair".
+
+**Editar.** Configurações › "Meu perfil de estudo" mostra o resumo e reabre
+os quatro passos juntos (os mesmos componentes). Editar não troca a fase da
+tela — isso é do seletor do menu — nem a data da primeira conclusão.
+
+**Pontos fracos no plano.** `prioridadeDeEstudo(disciplinas, { dificuldades })`:
+matéria marcada com menos de `TENTATIVAS_PARA_CONFIAR` (5) respostas vem
+antes de todas, com `pontoFraco: true` ("você marcou como ponto fraco na sua
+ficha" no Cronograma e no "Próximo passo"). Com 5 respostas ou mais, o
+desempenho manda. Vale para o Cronograma, o "Foco de hoje" e o Dashboard.
 
 ---
 
@@ -248,7 +318,10 @@ tipos é o que fazia uma gravação que falhou divergir em silêncio do servidor
 Meta diária e data da prova são o caso misto: ficam em
 `state.configuracoes` para a tela responder na hora, mas o servidor
 (`profile_data` do perfil) é a fonte da verdade: ao carregar o perfil, cada
-uma sobrescreve o valor local quando o perfil a traz.
+uma sobrescreve o valor local quando o perfil a traz. O `profile_data`
+inteiro fica em `perfil.preferencias` (a ficha é lida dali), atualizado pela
+resposta de cada PUT. `dataProva: null` gravado é "sem data"; chave ausente
+(nunca gravada) mantém o valor local (`configuracoesDoPerfil`).
 
 ```javascript
 const DEFAULT_STATE = {
@@ -336,13 +409,21 @@ grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
   que chega atrasada não aparecer para a próxima pessoa. As três cargas
   (perfil, tentativas, acervo) fazem o mesmo com o `let cancelado` do efeito,
   que vira `true` quando `sessao` muda.
-- `gravacaoDePreferencias` — fila de uma só para os PUT de meta e data da prova
-  (`atualizarConfig`): dois PUT soltos podem chegar fora de ordem e o mais
-  velho sobrescrever o mais novo. Um PUT que ainda esperava a vez quando a
-  sessão acabou não sai. O PUT do nome (`atualizarNome`) corre fora da fila.
+- `filaDePreferencias` — fila de uma só para os PUT de `profile_data` (meta e
+  data da prova juntas em `atualizarConfig`, a ficha em `salvarFicha`;
+  `lib/preferencias.js`): dois PUT soltos podem chegar fora de ordem e o mais
+  velho sobrescrever o mais novo. O user-service **mescla** o `profile_data`
+  no primeiro nível (`profile_data || $3`; null grava null; 400 se o total
+  passar de 20000 bytes), então cada PUT leva só as chaves que mudaram —
+  nunca o objeto reconstruído pela aba, que numa aba desatualizada desfaria a
+  edição feita em outra (a ficha concluída lá). A resposta, com o
+  `profile_data` inteiro, atualiza `perfil.preferencias`. Um PUT que ainda
+  esperava a vez quando a sessão acabou não sai, e cada sessão tem a sua
+  fila. O PUT do nome pelas Configurações (`atualizarNome`) corre fora da
+  fila e não manda `profile_data`.
 
 `encerrarSessao` é o fim de uma sessão — por "Sair", por 401 ou por token
-sem payload legível: sobe o `sessaoEpoch`, limpa o
+sem payload legível: sobe o `sessaoEpoch`, troca a fila de preferências, limpa o
 histórico em memória, o perfil e a faixa de erro, e volta ao Login. No 401 a
 tela fica — quem entra de novo com a mesma conta volta ao que estava
 fazendo; `sair` é que também zera a tela.
@@ -400,7 +481,7 @@ erro do acervo aparece na própria tela de Questões, com botão de recarregar.
 |---|---|---|
 | `login`, `criarConta` | `POST /api/auth/login`, `/register` | o register já devolve token |
 | `entrarComGoogle` | `POST /api/auth/google` | manda o ID token do Google; o auth-service confere e devolve o JWT da plataforma, criando a conta na primeira vez |
-| `buscarPerfil`, `salvarPerfil` | `GET`/`PUT /api/users/:id` | nome e `profile_data` |
+| `buscarPerfil`, `salvarPerfil` | `GET`/`PUT /api/users/:id` | nome e `profile_data` (o PUT mescla no 1º nível: mande só as chaves que mudaram, pela fila de preferências); o GET tem 10 s de prazo |
 | `listarTentativas` → `buscarPaginaDeTentativas` | `GET /api/tentativas?limite=1000&paginado=1[&offset=N]` | percorre as páginas até somar `total` (`percorrerPaginas`, teto de 50 páginas; passando dele, a lista vem cortada e o aviso vai só para o console), descarta repetidas pelo id, aceita o formato antigo (array) e agrupa por questão, em ordem cronológica. No `App`, a carga é mesclada com o que foi respondido enquanto ela corria (`mesclarTentativas`) |
 | `registrarTentativa` | `POST /api/tentativas` | |
 | `listarDiscursivas(area)` | `GET /api/discursivas?area=civil` | `[{id, exame, numero, area, resumo}]`; 404 (gateway sem a rota) vira acervo vazio na tela |
@@ -464,6 +545,12 @@ npm run dev
 | `npm run test:estado`, `test:questoes`, `test:paginas` | um arquivo de `test:lib` só, para rodar à mão — no fuso da máquina, sem a segunda rodada em São Paulo | via `test:lib` |
 | `npm run test:all` | test:e2e + test:api | nenhum workflow chama |
 | `npm run ci` | lint + test:lib + build — a verificação local, o mesmo que a CI roda sem backend | nenhum workflow chama |
+
+A ficha de boas-vindas é obrigatória. No e2e, `entrar` a conclui pela API
+para o usuário semeado (`concluirFichaPelaApi`, PUT só de `{ ficha }`, uma vez
+por execução). Conta criada pela tela passa por ela pela tela, na mesma aba e
+sem recarregar (`passarDaFicha`): testes como a troca de conta e o nome que
+chega com atraso medem justamente o que acontece sem reload.
 
 O `e2e-backend.sh` semeia também `tests/e2e-discursivas.sql` (exame 99,
 textos reais do 43º e 44º Exame) — mas só se a tabela
@@ -541,6 +628,14 @@ mostrou um dia a menos no Brasil com a CI verde.
     estado local de `Simulados.jsx`; clicar noutro item do menu (ou
     recarregar) descarta as respostas marcadas sem perguntar e sem enviar
     nada ao servidor.
+16. **Parte da ficha ainda não é usada** — `diasDaSemana`, `jaFez` e
+    `minutosPorDia` só aparecem no resumo; a meta diária vale igual para
+    todos os dias (o plano da semana não pula os dias sem estudo).
+17. **O servidor não valida a ficha** — `profile_data` é JSON livre no
+    user-service; o formato é garantido só pelo front (`montarFicha`).
+18. **Aba parada na ficha não sabe que outra a concluiu** — o perfil não
+    passa entre abas; ela só descobre ao concluir (e aí entra sem
+    sobrescrever).
 
 ### Limpeza
 

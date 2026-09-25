@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { THEMES, THEME_NAMES } from '../lib/theme';
 import { diasAteProva } from '../lib/metrics';
+import MeuPerfilDeEstudo from '../components/ui/MeuPerfilDeEstudo';
 
 // Esta tela editava um nome e um e-mail que só existiam no localStorage —
 // "Maria Laís / maria.lais@email.com" — e três interruptores de notificação
@@ -12,7 +13,10 @@ import { diasAteProva } from '../lib/metrics';
 // dashboard e o cronograma, a data alimenta a contagem do topo), e o que não
 // existe deixou de ser oferecido.
 
-export default function Configuracoes({ s, config, atualizarConfig, perfil, nome, atualizarNome, themeKey, setTheme }) {
+export default function Configuracoes({
+  theme, s, config, atualizarConfig, perfil, nome, atualizarNome, themeKey, setTheme,
+  salvarFicha, fase, opcoesDeDificuldade, acervoCarregando,
+}) {
   const [nomeLocal, setNomeLocal] = useState(nome || '');
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState(false);
@@ -122,6 +126,17 @@ export default function Configuracoes({ s, config, atualizarConfig, perfil, nome
           Meta e data ficam salvas na sua conta, então seguem você em qualquer aparelho.
         </div>
       </div>
+
+      <MeuPerfilDeEstudo
+        theme={theme}
+        s={s}
+        perfil={perfil}
+        config={config}
+        fase={fase}
+        salvarFicha={salvarFicha}
+        opcoesDeDificuldade={opcoesDeDificuldade}
+        acervoCarregando={acervoCarregando}
+      />
 
       <div style={s.card}>
         <div style={s.sectionTitle}>Aparência</div>

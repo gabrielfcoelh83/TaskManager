@@ -26,6 +26,8 @@ export default [
         URLSearchParams: 'readonly',
         // Decodifica o payload do JWT para descobrir de quem é a sessão.
         atob: 'readonly',
+        // Prazo das requisições (`tempoMaximoMs` em lib/api/api.js).
+        AbortController: 'readonly',
       },
     },
     plugins: {

@@ -140,21 +140,38 @@ export function temasDaDisciplina(questoes = [], tentativas = {}, disciplina) {
     .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
 }
 
+// Quantas respostas numa matéria bastam para o desempenho falar por ela.
+// Abaixo disso, uma matéria que a pessoa marcou como difícil na ficha de
+// boas-vindas vale mais que um 0% de uma resposta só.
+export const TENTATIVAS_PARA_CONFIAR = 5;
+
 /**
  * A ordem em que vale a pena estudar: primeiro o que se erra, depois o que
  * nunca foi tocado, e por último o que já se domina. É daqui que saem tanto a
  * sugestão do cronograma quanto o "próximo passo" do dashboard — as duas
  * telas davam conselhos diferentes porque cada uma tinha o seu critério.
+ *
+ * `dificuldades` são as matérias marcadas como pontos fracos na ficha. Sem
+ * histórico, todas as matérias são "novo" e a ordem seria só "a que tem mais
+ * questões" — a conta nova começaria por uma matéria qualquer. Então a
+ * matéria declarada difícil, enquanto tiver menos de
+ * `TENTATIVAS_PARA_CONFIAR` respostas, vem antes de todas (e sai marcada com
+ * `pontoFraco`, para o motivo dizer de onde veio). Com respostas suficientes,
+ * o desempenho manda: ela volta a ser ordenada pelo status como as outras.
  */
-export function prioridadeDeEstudo(disciplinas = []) {
+export function prioridadeDeEstudo(disciplinas = [], { dificuldades = [] } = {}) {
   const peso = { necessita: 0, 'em-desenvolvimento': 1, novo: 2, domina: 3 };
+  const declaradas = new Set(dificuldades || []);
+  const semDados = (d) => declaradas.has(d.nome) && (d.tentativas || 0) < TENTATIVAS_PARA_CONFIAR;
 
   return [...disciplinas]
     .filter((d) => d.classificada !== false && d.total > 0)
+    .map((d) => (semDados(d) ? { ...d, pontoFraco: true } : d))
     .sort((a, b) => {
-      const dif = peso[a.status] - peso[b.status];
-      if (dif !== 0) return dif;
-      if (a.status === 'novo') return b.total - a.total;      // mais questões primeiro
-      return (a.pct ?? 100) - (b.pct ?? 100);                 // pior taxa primeiro
+      const pa = a.pontoFraco ? -1 : peso[a.status];
+      const pb = b.pontoFraco ? -1 : peso[b.status];
+      if (pa !== pb) return pa - pb;
+      if (a.pontoFraco || a.status === 'novo') return b.total - a.total;  // mais questões primeiro
+      return (a.pct ?? 100) - (b.pct ?? 100);                             // pior taxa primeiro
     });
 }
