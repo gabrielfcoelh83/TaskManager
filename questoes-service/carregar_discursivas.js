@@ -34,8 +34,9 @@ function validarDiscursivas(questoes) {
       throw new Error(`${rot}: numero deve ser 1..4`);
     }
     if (!naoVazio(q.enunciado)) throw new Error(`${rot}: enunciado vazio`);
-    if (!Array.isArray(q.itens) || q.itens.length < 2 || q.itens.length > 5) {
-      throw new Error(`${rot}: precisa de 2 a 5 itens`);
+    if (!Array.isArray(q.itens) || q.itens.length < 1 || q.itens.length > 5) {
+      // Mesma faixa da constraint discursiva_itens_validos (migration 003).
+      throw new Error(`${rot}: precisa de 1 a 5 itens`);
     }
     q.itens.forEach((item, j) => {
       const esperada = 'ABCDE'[j];

@@ -97,8 +97,12 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 ## ✍️ Discursivas da 2ª fase
 
 Questões discursivas da prova prático-profissional (só as 4 questões; a peça
-fica de fora), com o padrão de resposta oficial da FGV. Primeira área
-carregada: Direito Civil, exames 36 a 45.
+fica de fora), com o padrão de resposta oficial da FGV. Primeira área:
+Direito Civil, exames 36 a 45.
+
+A migration só cria a tabela: os dados **não sobem com o deploy**. Até a
+carga manual abaixo, `GET /api/discursivas?area=civil` devolve `[]`. Os JSON
+não são versionados, e a pasta `importador/` fica fora da imagem.
 
 **Tabelas**
 - `questoes_db.questoes_discursivas` — `id`, `exame`, `area`, `numero` (1..4),
@@ -128,7 +132,9 @@ No gateway, `/respostas` é declarada antes de `/:id`.
    "Distribuição dos Pontos". Quando o enunciado é imagem no padrão (38º,
    40º–43º), `--prova` com o caderno da 2ª fase preenche o texto.
 2. `node carregar_discursivas.js civil*.json` — upsert idempotente por
-   (exame, area, numero), uma transação por exame.
+   (exame, area, numero), uma transação por exame. Em produção, copiar os
+   JSON para dentro do container do questoes-service (`docker cp`) e rodar o
+   comando lá com `docker exec`.
 
 ---
 
