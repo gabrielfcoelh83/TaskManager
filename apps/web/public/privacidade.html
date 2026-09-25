@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Política de Privacidade · ma. questões</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%238B5CF6'/%3E%3Cg fill='none' stroke='white' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' transform='translate(2.9 2.9) scale(0.76)'%3E%3Cpath d='m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z'/%3E%3Cpath d='m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z'/%3E%3Cpath d='M7 21h10'/%3E%3Cpath d='M12 3v18'/%3E%3Cpath d='M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2'/%3E%3C/g%3E%3C/svg%3E" />
+  <style>
+    :root { --fundo: #faf9fc; --texto: #2a2530; --suave: #6b6472; --roxo: #7c4ddb; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fundo: #17151b; --texto: #ece8f1; --suave: #a59dae; --roxo: #b196f5; }
+    }
+    body { margin: 0; background: var(--fundo); color: var(--texto);
+      font: 16px/1.65 Roboto, system-ui, sans-serif; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { font-size: 28px; margin: 0 0 4px; }
+    h2 { font-size: 19px; margin: 32px 0 8px; }
+    .data { color: var(--suave); font-size: 14px; margin: 0 0 24px; }
+    a { color: var(--roxo); }
+    ul { padding-left: 22px; }
+  </style>
+</head>
+<body>
+<main>
+  <p><a href="/">← ma. questões</a></p>
+  <h1>Política de Privacidade</h1>
+  <p class="data">Atualizada em 25 de setembro de 2026</p>
+
+  <p>O <strong>ma. questões</strong> é um app de estudo com questões de Direito. Esta
+  página explica quais dados pessoais o app guarda, para quê, e o que você pode
+  fazer com eles, nos termos da Lei Geral de Proteção de Dados (Lei 13.709/2018).</p>
+
+  <h2>Dados que guardamos</h2>
+  <ul>
+    <li><strong>Conta:</strong> seu e-mail e seu nome. Se você cria a conta com senha,
+      guardamos só um resumo criptográfico dela (hash), nunca a senha em si.</li>
+    <li><strong>Login com o Google:</strong> quando você entra pelo Google, recebemos
+      seu nome, seu e-mail e um identificador da sua conta Google. Não recebemos sua
+      senha do Google nem acesso a nenhum outro dado da sua conta Google.</li>
+    <li><strong>Estudo:</strong> as questões que você responde, a alternativa marcada,
+      se acertou e o tempo gasto. Em respostas antigas, também como você disse ter
+      chegado à resposta e o grau de certeza. E a meta de estudo e a data da prova, se
+      você as definir.</li>
+    <li><strong>No seu navegador:</strong> favoritos, anotações, histórico de simulados e
+      preferências de tela ficam guardados apenas no seu navegador (localStorage), e
+      não são enviados aos nossos servidores. O navegador também guarda o token da
+      sua sessão, que vai junto em cada pedido ao servidor para identificar você.</li>
+    <li><strong>Registros técnicos:</strong> como em qualquer serviço na internet, os
+      servidores registram pedidos recebidos (endereço IP, horário, o endereço
+      acessado) e alguns eventos, como o e-mail de uma conta nova no momento do
+      cadastro. Servem para diagnosticar falhas e abusos.</li>
+  </ul>
+
+  <h2>Para que usamos</h2>
+  <p>Só para o app funcionar: identificar você no login, mostrar seu histórico, suas
+  estatísticas, sua meta e as questões para revisar. Não vendemos, não alugamos e não
+  compartilhamos seus dados para publicidade, e o app não usa ferramentas de
+  análise de audiência nem rastreadores.</p>
+
+  <h2>Com quem os dados passam</h2>
+  <ul>
+    <li><strong>Hospedagem:</strong> o site e as funções de geração de questões rodam
+      na Vercel, que processa esses pedidos e mantém registros deles (como IP e o
+      tema pedido). A API e o banco de dados rodam num servidor contratado por
+      nós.</li>
+    <li><strong>Google:</strong> as fontes do site vêm do Google Fonts, e a tela de login
+      carrega o botão do Google. Nos dois casos o Google recebe dados técnicos da
+      visita, como o IP. Se você escolher entrar com o Google, ele também confirma
+      sua identidade para nós.</li>
+    <li><strong>Geração de questões por IA:</strong> quando você pede questões novas
+      sobre um tema, o tema e a disciplina são enviados a um serviço de modelos de
+      linguagem (OpenRouter), e o tema também é usado numa busca de jurisprudência na
+      API pública do DataJud, do Conselho Nacional de Justiça. Nenhum dado da sua
+      conta vai junto: evite escrever dados pessoais no tema.</li>
+  </ul>
+
+  <h2>Por quanto tempo</h2>
+  <p>Os dados da conta e do estudo, enquanto a conta existir. As cópias de segurança
+  do banco são apagadas automaticamente depois de cerca de uma semana. Os registros
+  técnicos do servidor são rotativos: os mais antigos são sobrescritos pelos novos
+  conforme o volume.</p>
+
+  <h2>Seus direitos</h2>
+  <p>Você pode pedir a qualquer momento acesso aos seus dados, correção ou a exclusão
+  da sua conta e de tudo o que está ligado a ela. Basta escrever para o contato abaixo;
+  respondemos em até 15 dias. Os dados que ficam só no seu navegador você apaga
+  limpando os dados do site nas configurações do navegador.</p>
+
+  <h2>Segurança</h2>
+  <p>A comunicação com o app é sempre criptografada (HTTPS), as senhas são guardadas
+  apenas como hash, e cada pessoa só consegue ler os próprios dados. O acesso aos
+  dados de todas as contas fica restrito à administração do serviço, para operá-lo e
+  atender pedidos como os descritos acima.</p>
+
+  <h2>Contato</h2>
+  <p>Dúvidas ou pedidos sobre seus dados: <a href="mailto:gabrielfcoelh83@gmail.com">gabrielfcoelh83@gmail.com</a>.</p>
+
+  <p>Se esta política mudar, a data no topo da página muda junto.</p>
+</main>
+</body>
+</html>
