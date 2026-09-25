@@ -360,7 +360,7 @@ mostrou um dia a menos no Brasil com a CI verde.
 9. **Respostas do simulado na fila se perdem se a aba for descartada** — o
     aviso de sair cobre fechar e recarregar, mas não a aba que o sistema
     descarta (comum no celular) nem o navegador que fecha sem perguntar.
-12. **E-mail cadastrado por outra pessoa bloqueia o Google** — como o
+10. **E-mail cadastrado por outra pessoa bloqueia o Google** — como o
     cadastro por senha não confirma o e-mail, quem cadastrou o e-mail de
     outra pessoa impede o dono de entrar pelo Google (409), e não existe
     "esqueci a senha". O dono não é invadido, mas fica sem acesso.
