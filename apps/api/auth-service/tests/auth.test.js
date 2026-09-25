@@ -1,6 +1,6 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
-const { app, pool, redis } = require('../app');
+const { app, pool, redis, definirVerificadorGoogle } = require('../app');
 const { migrate } = require('../migrate');
 
 // Estes testes falam com um Postgres de verdade — é o ponto de serem de
@@ -129,5 +129,159 @@ describe('POST /verify', () => {
 
   it('recusa requisição sem token', async () => {
     expect((await request(app).post('/verify')).status).toBe(401);
+  });
+});
+
+describe('e-mail sem distinção de maiúsculas', () => {
+  it('cadastro com maiúsculas entra pelo login em minúsculas', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e.toUpperCase(), password: 'senha-forte-123' });
+    const res = await request(app).post('/login').send({ email: e, password: 'senha-forte-123' });
+    expect(res.status).toBe(200);
+  });
+
+  it('não deixa cadastrar o mesmo e-mail em outra caixa de letras', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    const res = await request(app).post('/register').send({ email: e.toUpperCase(), password: 'outra-senha-123' });
+    expect(res.status).toBe(409);
+  });
+});
+
+describe('POST /google', () => {
+  // O Google de mentira: devolve o payload que um ID token verdadeiro teria.
+  // A conferência de assinatura e de `aud` é da biblioteca do Google; aqui se
+  // testa o que o serviço faz com o resultado dela.
+  const sub = () => `google-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let payload;
+  let audienciaPedida;
+
+  beforeAll(() => {
+    process.env.GOOGLE_CLIENT_ID = 'client-id-de-teste.apps.googleusercontent.com';
+    definirVerificadorGoogle(async (credential, clientId) => {
+      audienciaPedida = clientId;
+      if (credential === 'token-invalido') throw new Error('assinatura inválida');
+      return payload;
+    });
+  });
+
+  afterAll(() => {
+    delete process.env.GOOGLE_CLIENT_ID;
+  });
+
+  it('cria a conta na primeira vez, sem senha, e devolve token', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true, name: 'Pessoa do Google' };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.novo).toBe(true);
+    expect(jwt.verify(res.body.token, process.env.JWT_SECRET || 'seu_jwt_secret').email).toBe(e);
+    // A audiência conferida é a do nosso app — é o que barra token de outro site.
+    expect(audienciaPedida).toBe('client-id-de-teste.apps.googleusercontent.com');
+
+    const { rows } = await pool.query('SELECT password_hash, google_sub FROM users WHERE email = $1', [e]);
+    expect(rows[0].password_hash).toBeNull();
+    expect(rows[0].google_sub).toBe(payload.sub);
+  });
+
+  it('na segunda vez entra na mesma conta, sem criar outra', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    const primeira = await request(app).post('/google').send({ credential: 'ok' });
+    const segunda = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(segunda.status).toBe(200);
+    expect(segunda.body.novo).toBe(false);
+    expect(segunda.body.user.id).toBe(primeira.body.user.id);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM users WHERE email = $1', [e]);
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('não liga a conta do Google a um cadastro por senha — responde 409 e a senha segue valendo', async () => {
+    // Cadastro por senha não confirma e-mail: ligar entregaria a conta a quem
+    // cadastrou o e-mail de outra pessoa (pré-sequestro).
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    payload = { sub: sub(), email: e.toUpperCase(), email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/senha/);
+    const { rows } = await pool.query('SELECT google_sub FROM users WHERE lower(email) = $1', [e]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].google_sub).toBeNull();
+    const login = await request(app).post('/login').send({ email: e, password: 'senha-forte-123' });
+    expect(login.status).toBe(200);
+  });
+
+  it('cadastro por senha depois do Google, com o mesmo e-mail, é recusado', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    const res = await request(app).post('/register').send({ email: e.toUpperCase(), password: 'senha-do-atacante' });
+    expect(res.status).toBe(409);
+  });
+
+  it('e-mail ligado a outra conta do Google, com outra caixa de letras, não vira segunda conta', async () => {
+    // Linha antiga gravada com maiúsculas, já ligada a um Google A. O mesmo
+    // e-mail em minúsculas chega por um Google B: o UNIQUE de `email` não
+    // pegaria (caixas diferentes) — é a busca por lower(email) que recusa.
+    const e = email();
+    await pool.query('INSERT INTO users (email, password_hash, google_sub) VALUES ($1, NULL, $2)', [e.toUpperCase(), sub()]);
+    payload = { sub: sub(), email: e, email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(409);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM users WHERE lower(email) = $1', [e]);
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('recusa e-mail não verificado pelo Google — senão entraria na conta de outra pessoa', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    payload = { sub: sub(), email: e, email_verified: false };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(401);
+    const { rows } = await pool.query('SELECT google_sub FROM users WHERE email = $1', [e]);
+    expect(rows[0].google_sub).toBeNull();
+  });
+
+  it('não troca a conta do Google já ligada a um e-mail por outra', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    payload = { sub: sub(), email: e, email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('recusa token que o Google não confirma', async () => {
+    const res = await request(app).post('/google').send({ credential: 'token-invalido' });
+    expect(res.status).toBe(401);
+  });
+
+  it('exige o credential', async () => {
+    expect((await request(app).post('/google').send({})).status).toBe(400);
+  });
+
+  it('conta sem senha não entra pelo login de senha, e responde 401 em vez de 500', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    const res = await request(app).post('/login').send({ email: e, password: 'qualquer-coisa' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('sem GOOGLE_CLIENT_ID responde 503, e não aceita token nenhum', async () => {
+    const antes = process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_ID;
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+    process.env.GOOGLE_CLIENT_ID = antes;
+
+    expect(res.status).toBe(503);
   });
 });
