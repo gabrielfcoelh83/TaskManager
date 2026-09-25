@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { embaralhar, montarFontes } from '../lib/questions/acervo';
+import { origemDaQuestao } from '../lib/simulado';
 
 const DIFICULDADE_COR = { 'Fácil': '#10B981', 'Média': '#F59E0B', 'Difícil': '#EF4444' };
 
@@ -282,10 +283,8 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
                 {/* Procedência real, vinda do acervo. O rótulo antigo era um
                     texto montado ("PROVA-FGV-BR/2023") que parecia um código
                     oficial sem ser um. */}
-                <span style={{ fontSize: 11.5, color: '#8b93a1', fontWeight: 600 }}>
-                  {current.exame ? `${current.exame}º Exame de Ordem` : 'Exame de Ordem'}
-                  {current.numero ? ` · questão ${current.numero}` : ''}
-                  {current.banca ? ` · ${current.banca}` : ''}
+                <span data-testid="origem-da-questao" style={{ fontSize: 11.5, color: '#8b93a1', fontWeight: 600, letterSpacing: '.3px', textTransform: 'uppercase' }}>
+                  {origemDaQuestao(current)}
                 </span>
                 {current.disciplina && (
                   <span data-testid="disciplina-da-questao" style={s.pill(theme.primarySoft, theme.primaryDark)}>{current.disciplina}</span>
@@ -305,6 +304,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
                     onClick={() => pickAlt(alt.i)}
                   >
                     <div style={alt.radioStyle} />
+                    <b style={{ fontSize: 13.5, color: '#8b8391', flex: 'none' }}>{String.fromCharCode(65 + alt.i)})</b>
                     <div style={{ flex: 1, fontSize: 13.5 }}>{alt.texto}</div>
                     {alt.showIcon && alt.icon}
                   </div>

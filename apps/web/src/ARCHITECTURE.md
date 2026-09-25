@@ -24,8 +24,8 @@ src/
 ├── screens/              # Uma tela por arquivo (13, contando o Login e a SegundaFase)
 ├── components/ui/        # Componentes extraídos das telas
 │   ├── SeletorDeFase.jsx    # Topo da barra lateral: marca + <select> 1ª/2ª fase
-│   ├── ConfigSimulado.jsx   # Formulário de configuração do simulado (Simulados)
-│   ├── Cronometro.jsx       # Timer do simulado (Simulados)
+│   ├── ConfigSimulado.jsx   # "Vamos começar!": tipo, disciplina e quantidade do simulado
+│   ├── Cronometro.jsx       # Contagem regressiva hh:mm:ss da barra do simulado
 │   ├── BotaoGoogle.jsx      # "Fazer login com o Google" (Login)
 │   └── GeradorQuestoes.jsx  # Gerador por IA — NÃO está em uso (ver Pendências)
 └── lib/                  # Lógica sem tela; a maior parte roda no `node` (ver "Rodar e testar")
@@ -33,6 +33,7 @@ src/
     ├── api/paginas.js    # Laço de páginas e tradução array/envelope (puro, testado)
     ├── api/retentativa.js  # Repete pedido recusado com 429 pelo nginx (puro, testado)
     ├── questions/acervo.js  # Tradução acervo → tela, embaralhar, fontes do quiz
+    ├── simulado.js       # Sorteio, correção e origem da questão (simulado e quiz)
     ├── historico.js      # Mescla a carga do histórico com o que foi respondido durante ela
     ├── fila.js           # Envio um a um, que para quando a sessão acaba (respostas do simulado)
     ├── storage.js        # localStorage: estado da interface e dados por conta
@@ -174,15 +175,55 @@ recarregar a página volta para ela — mas não há URL por tela.
 | `dashboard` | `Dashboard.jsx` | Resumo do dia, próximo passo, evolução | `dash`, `setDash`, `acervo` |
 | `cronograma` | `Cronograma.jsx` | Sugestão de semana e calendário do mês | — |
 | `questoes` | `Questoes.jsx` | Escolha de fonte e quiz | `quest`, `setQuest`, `registrar`, `acervo`, `recarregarAcervo` |
-| `simulados` | `Simulados.jsx` | Configurar, cronometrar e corrigir simulado | `sim`, `setSim`, `setResultadosHistorico`, `registrarRespostas` |
+| `simulados` | `Simulados.jsx` | Hub, formulário, prova e resultado do simulado (ver "Simulados") | `sim`, `setSim`, `setResultadosHistorico`, `registrarRespostas`, `acervo`, `recarregarAcervo` |
 | `revisoes` | `Revisoes.jsx` | Erradas, favoritas, menor desempenho | `rev`, `setRev`, `favoritos`, `toggleFavorito` |
 | `desempenho` | `Desempenho.jsx` | Evolução ao longo do tempo | `perf`, `setPerf` |
 | `estatisticas` | `Estatisticas.jsx` | Números por período e disciplina | `filtros`, `setFiltros` |
 | `favoritos` | `Favoritos.jsx` | Questões marcadas com estrela | `toggleFavorito` (recebe `favoritos` mas não usa; lê de `revisao`) |
-| `disciplinas` | `Disciplinas.jsx` | Aproveitamento por matéria e tema | `disc`, `setDisc` |
+| `disciplinas` | `Disciplinas.jsx` | Aproveitamento por matéria e tema | `disc`, `setDisc`, `simularDisciplina` |
 | `anotacoes` | `Anotacoes.jsx` | Notas com pastas e tags | `notas`, `setNotas` |
 | `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme` |
 | — (`state.fase`) | `SegundaFase.jsx` | 2ª fase: questões discursivas (ver "Fases") | não recebe as comuns: `theme`, `s`, `fase`, `estado`/`setEstado` (`state.segundaFase`), `gravarResposta`, `sessaoExpirou` |
+
+### Simulados (layout "estilo LEGJUR")
+
+Quatro etapas num `useState` local da tela (`etapa`), nenhuma com URL:
+
+1. **Hub** — cartão "Simulado Geral — OAB 1ª Fase" e a grade "Treino por
+   Matéria", um card por disciplina do acervo com questões (contagem real,
+   `montarDisciplinas`). Questão sem disciplina não forma card: só entra no
+   geral. "Praticar" leva ao quiz da matéria (`praticarDisciplina`) — mesmo
+   nome e destino do botão de Disciplinas. Lista vazia distingue acervo
+   carregando (esqueleto), com erro (aviso com "Tentar de novo", que chama
+   `recarregarAcervo`) e vazio de fato.
+2. **"Vamos começar!"** (`ConfigSimulado`) — geral ou por disciplina e
+   dropdown de quantidade. Pedindo mais do que o acervo tem, avisa e a prova
+   sai com o que existe. Com o botão desabilitado, diz o motivo (ex.: matéria
+   pré-selecionada que ficou sem questões).
+3. **Prova** — todas as questões numa página, alternativas em rádio, sem
+   correção até finalizar. Barra fixa embaixo: `Cronometro` (tempo esgotado
+   finaliza sozinho), "X/N respondidas" e Finalizar.
+4. **Resultado** — nota, acertos/erros/em branco, e revisão questão a
+   questão com gabarito, a resposta dada e a explicação (com a etiqueta "não
+   revisada" do quiz). Filtro "Erradas e em branco".
+
+Finalizar manda as respostas pela fila (`registrarRespostas`, ver "429") e
+grava o resumo em `resultados_historico` (dado da conta). O resumo guarda
+`errados` como "não acertou" (inclui em branco), que é o que `metrics.js`
+lê, e `em_branco` à parte.
+
+Os cards de Disciplinas têm "Iniciar Simulado" (principal), "Praticar" (o
+quiz, a um clique) e "Ver temas" (ou o clique no nome).
+
+Disciplinas → "Iniciar Simulado": `simularDisciplina` (prop montada no
+`App`) grava `simulados.preDisciplina` e troca a tela; o Simulados abre no
+formulário com a matéria escolhida e zera a pré-seleção na montagem, para ela
+valer uma vez só.
+
+A origem de cada questão ("45º Exame de Ordem · questão 7 · FGV") vem de
+`origemDaQuestao`, a mesma no quiz e no simulado. O layout original escrevia
+"PROVA-FGV-BR/ANO", código que não existe e que virava
+"PROVA-FGV-BR/undefined" com questão sem ano.
 
 Props comuns (`screenProps`): `theme`, `s` (estilos de `buildStyles`), `data`
 (`{ QUESTOES, DISCIPLINAS }`), `go`, `usuarioTentativas`, `disciplinas`,
@@ -496,6 +537,10 @@ mostrou um dia a menos no Brasil com a CI verde.
     fica sem lei, e então qualquer "art. 6º" o atende. Na resposta, artigo
     sem lei atende com aviso. A peça prático-profissional ainda não entra, e
     a correção por IA é etapa futura.
+15. **Simulado em andamento some ao trocar de tela** — a prova vive no
+    estado local de `Simulados.jsx`; clicar noutro item do menu (ou
+    recarregar) descarta as respostas marcadas sem perguntar e sem enviar
+    nada ao servidor.
 
 ### Limpeza
 
@@ -504,8 +549,7 @@ mostrou um dia a menos no Brasil com a CI verde.
 - O e2e "Gerar questões com IA (API)" não tem asserção: acha o botão "Gerar
   quiz", clica e espera 3 s. Passa sempre.
 - `simulados.running` e `simulados.resultados_historico` não são lidos (o
-  histórico usado é o `resultados_historico` da raiz); `sim.preDisciplina` é
-  lido em `Simulados.jsx`, mas nada grava nele um valor diferente de `null`.
+  histórico usado é o `resultados_historico` da raiz).
 - `Favoritos.jsx` recebe `favoritos` do `App` e não usa.
 - `server/dev-api.js` tem 3000 como porta padrão (e o comentário do topo diz
   "Porta 3000"), a mesma do gateway.

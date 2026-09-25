@@ -974,6 +974,8 @@ export default function App() {
               setSim={(p) => updateSlice('simulados', p)}
               setResultadosHistorico={(p) => updateSlice('resultados_historico', p)}
               registrarRespostas={registrarRespostas}
+              acervo={acervo}
+              recarregarAcervo={() => setRecarga((n) => n + 1)}
             />
           )}
           {state.screen === 'revisoes' && (
@@ -996,6 +998,7 @@ export default function App() {
               {...screenProps}
               disc={state.disciplinas}
               setDisc={(p) => updateSlice('disciplinas', p)}
+              simularDisciplina={(nome) => setState((st) => ({ ...st, screen: 'simulados', simulados: { ...st.simulados, preDisciplina: nome } }))}
             />
           )}
           {state.screen === 'anotacoes' && (
