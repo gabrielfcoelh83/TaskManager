@@ -280,5 +280,139 @@ app.patch('/tentativas/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
+// Respostas às discursivas da 2ª fase
+// ═══════════════════════════════════════════════════════════════
+//
+// Mesmo desenho de /tentativas: user_id vem do token, a lista é do próprio
+// usuário, e não existe caminho para ler ou gravar em nome de outra pessoa.
+
+// Texto de um item. A folha de resposta da FGV tem 30 linhas por questão;
+// 6000 caracteres cobre isso com folga e barra quem cola um livro.
+const RESPOSTA_MAX = 6000;
+const FUNDAMENTOS_MAX = 1000;
+const LISTA_MAX = 200;
+// questoes_discursivas.id é BIGSERIAL, mas o questoes-service devolve o id
+// como int. Aceitar além disso gravaria um id que nenhuma questão pode ter.
+const QUESTAO_ID_MAX = 2147483647;
+
+const ehObjeto = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+// Número inteiro, ou texto só de dígitos (o id chega como texto quando vem
+// de uma URL). Devolve null se não for um id válido.
+function lerQuestaoId(v) {
+  let n = null;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string' && /^\d{1,10}$/.test(v)) n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > QUESTAO_ID_MAX) return null;
+  return n;
+}
+
+const COLUNAS_RESPOSTA =
+  'id::int AS id, questao_id::int AS questao_id, respostas, fundamentos, criada_em';
+
+// ───────────────────────────────────────────────────────────────
+// POST /discursivas/respostas
+// ───────────────────────────────────────────────────────────────
+app.post('/discursivas/respostas', verifyToken, async (req, res) => {
+  const corpo = req.body || {};
+
+  const questaoId = lerQuestaoId(corpo.questao_id);
+  if (questaoId === null) {
+    return res.status(400).json({ error: 'questao_id deve ser um inteiro positivo' });
+  }
+
+  const { respostas } = corpo;
+  if (!ehObjeto(respostas)) {
+    return res.status(400).json({ error: 'respostas deve ser um objeto {"A": "texto", ...}' });
+  }
+  const letras = Object.keys(respostas);
+  if (letras.length === 0) {
+    return res.status(400).json({ error: 'respostas está vazio' });
+  }
+  for (const letra of letras) {
+    if (!/^[A-E]$/.test(letra)) {
+      return res.status(400).json({ error: `item "${letra}" inválido: use letras de A a E` });
+    }
+    if (typeof respostas[letra] !== 'string') {
+      return res.status(400).json({ error: `resposta do item ${letra} deve ser texto` });
+    }
+    if (respostas[letra].length > RESPOSTA_MAX) {
+      return res.status(400).json({
+        error: `resposta do item ${letra} passa de ${RESPOSTA_MAX} caracteres`,
+      });
+    }
+  }
+  // Tudo em branco não é resposta: gravar criaria uma "tentativa" que o
+  // histórico mostraria como se a pessoa tivesse feito a questão.
+  if (letras.every((l) => respostas[l].trim() === '')) {
+    return res.status(400).json({ error: 'responda ao menos um item' });
+  }
+
+  let fundamentos = null;
+  if (corpo.fundamentos !== undefined && corpo.fundamentos !== null) {
+    const f = corpo.fundamentos;
+    const inteiroValido = (n) => Number.isInteger(n) && n >= 0 && n <= FUNDAMENTOS_MAX;
+    if (!ehObjeto(f) || !inteiroValido(f.citados) || !inteiroValido(f.esperados) ||
+        Object.keys(f).length !== 2) {
+      return res.status(400).json({
+        error: `fundamentos deve ser {citados, esperados}, inteiros de 0 a ${FUNDAMENTOS_MAX}`,
+      });
+    }
+    // Só os dois campos conhecidos são gravados.
+    fundamentos = { citados: f.citados, esperados: f.esperados };
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO respostas_discursivas (user_id, questao_id, respostas, fundamentos)
+       VALUES ($1, $2, $3, $4)
+       RETURNING ${COLUNAS_RESPOSTA}`,
+      [
+        req.user.id,
+        questaoId,
+        JSON.stringify(respostas),
+        fundamentos === null ? null : JSON.stringify(fundamentos),
+      ]
+    );
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    console.error('Erro ao salvar resposta discursiva:', error);
+    res.status(500).json({ error: 'Erro ao salvar resposta' });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────
+// GET /discursivas/respostas?questao_id=N — histórico do próprio usuário
+// ───────────────────────────────────────────────────────────────
+app.get('/discursivas/respostas', verifyToken, async (req, res) => {
+  let questaoId = null;
+  if (req.query.questao_id !== undefined && req.query.questao_id !== '') {
+    questaoId = lerQuestaoId(req.query.questao_id);
+    if (questaoId === null) {
+      return res.status(400).json({ error: 'questao_id deve ser um inteiro positivo' });
+    }
+  }
+
+  try {
+    // `id DESC` desempata respostas gravadas no mesmo instante, como em
+    // /tentativas. O teto existe para não devolver a base inteira num
+    // descuido; 200 respostas discursivas são meses de estudo.
+    const { rows } = await pool.query(
+      `SELECT ${COLUNAS_RESPOSTA}
+         FROM respostas_discursivas
+        WHERE user_id = $1
+          AND ($2::bigint IS NULL OR questao_id = $2)
+        ORDER BY criada_em DESC, id DESC
+        LIMIT ${LISTA_MAX}`,
+      [req.user.id, questaoId]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Erro ao listar respostas discursivas:', error);
+    res.status(500).json({ error: 'Erro ao listar respostas' });
+  }
+});
+
 // Exportado sem listen(): o supertest exercita as rotas sem ocupar porta.
 module.exports = { app, pool };
