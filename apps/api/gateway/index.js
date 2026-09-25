@@ -211,6 +211,70 @@ app.get('/api/questoes/:id', async (req, res) => {
   }
 });
 
+// ===== DISCURSIVAS DA 2ª FASE =====
+//
+// Duas origens sob o mesmo prefixo: as QUESTÕES (enunciado e padrão de
+// resposta da FGV) vêm do questoes-service; as RESPOSTAS de cada pessoa vêm
+// do estudo-service, como as tentativas das objetivas.
+//
+// As rotas de /respostas vêm ANTES de /api/discursivas/:id — o Express casa
+// na ordem, e invertido "respostas" cairia no :id e iria parar no serviço
+// errado, que devolveria 400 de id inválido.
+app.post('/api/discursivas/respostas', async (req, res) => {
+  try {
+    const response = await axios.post(`${services.estudo}/discursivas/respostas`, req.body, {
+      headers: { authorization: req.headers.authorization },
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao salvar resposta',
+    });
+  }
+});
+
+app.get('/api/discursivas/respostas', async (req, res) => {
+  try {
+    const response = await axios.get(`${services.estudo}/discursivas/respostas`, {
+      headers: { authorization: req.headers.authorization },
+      params: req.query, // questao_id
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar respostas',
+    });
+  }
+});
+
+app.get('/api/discursivas', async (req, res) => {
+  try {
+    const response = await axios.get(`${services.questoes}/discursivas`, {
+      headers: { authorization: req.headers.authorization },
+      params: req.query, // area
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar questões discursivas',
+    });
+  }
+});
+
+app.get('/api/discursivas/:id', async (req, res) => {
+  try {
+    const response = await axios.get(
+      `${services.questoes}/discursivas/${encodeURIComponent(req.params.id)}`,
+      { headers: { authorization: req.headers.authorization } }
+    );
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao buscar questão discursiva',
+    });
+  }
+});
+
 // Health Check de Serviços
 app.get('/health/services', async (req, res) => {
   const health = {};

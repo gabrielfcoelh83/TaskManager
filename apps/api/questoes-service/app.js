@@ -228,4 +228,98 @@ app.get('/questoes/:id', verifyToken, async (req, res) => {
   }
 });
 
-module.exports = { app, pool };
+// ═══════════════════════════════════════════════════════════════
+// Discursivas da 2ª fase
+// ═══════════════════════════════════════════════════════════════
+//
+// Tabela separada (ver migrations/003). O padrão de resposta vai junto com a
+// questão pelo mesmo motivo do `gabarito` das objetivas: a tela mostra a
+// resposta modelo depois que a pessoa escreve a dela, sem outra ida ao
+// servidor. Aqui a troca é ainda mais tranquila — o padrão de resposta é
+// publicado pela própria FGV.
+
+// Mesma lista do CHECK da migration 003. Validar aqui devolve 400 com
+// mensagem útil em vez de uma lista vazia que parece "não há questões".
+const AREAS_DISCURSIVAS = [
+  'civil', 'penal', 'trabalho', 'administrativo',
+  'constitucional', 'empresarial', 'tributario',
+];
+
+const RESUMO_MAX = 160;
+
+// Corta no último espaço antes do limite para não partir palavra ao meio.
+function resumir(texto) {
+  const plano = texto.replace(/\s+/g, ' ').trim();
+  if (plano.length <= RESUMO_MAX) return plano;
+  const corte = plano.slice(0, RESUMO_MAX);
+  const espaco = corte.lastIndexOf(' ');
+  return `${(espaco > RESUMO_MAX / 2 ? corte.slice(0, espaco) : corte).replace(/[\s,.;:]+$/, '')}…`;
+}
+
+// ───────────────────────────────────────────────────────────────
+// GET /discursivas?area=civil — lista leve para a tela de escolha
+// ───────────────────────────────────────────────────────────────
+app.get('/discursivas', verifyToken, async (req, res) => {
+  const { area } = req.query;
+
+  if (!area) {
+    return res.status(400).json({ error: 'area é obrigatória' });
+  }
+  if (typeof area !== 'string' || !AREAS_DISCURSIVAS.includes(area)) {
+    return res.status(400).json({
+      error: `area inválida; use uma de: ${AREAS_DISCURSIVAS.join(', ')}`,
+    });
+  }
+
+  try {
+    // Só o começo do enunciado sai do banco: a lista não mostra mais que
+    // isso, e o texto inteiro de centenas de questões seria peso à toa.
+    // `id::int` porque o pg devolve BIGINT como string, e o front usa este
+    // id como número no POST de respostas. Um int cobre dois bilhões de
+    // questões.
+    const { rows } = await pool.query(
+      `SELECT id::int AS id, exame, numero, area, LEFT(enunciado, $2) AS inicio
+         FROM questoes_discursivas
+        WHERE area = $1
+        ORDER BY exame DESC, numero ASC`,
+      [area, RESUMO_MAX * 2]
+    );
+
+    res.json(rows.map(({ inicio, ...q }) => ({ ...q, resumo: resumir(inicio) })));
+  } catch (error) {
+    console.error('Erro ao listar discursivas:', error);
+    res.status(500).json({ error: 'Erro ao buscar questões discursivas' });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────
+// GET /discursivas/:id — questão completa, com o padrão de resposta
+// ───────────────────────────────────────────────────────────────
+app.get('/discursivas/:id', verifyToken, async (req, res) => {
+  // Mesma guarda de /questoes/:id, mais o teto de dígitos do estudo-service:
+  // "só inteiro" não barra 99999999999999999999, que estoura o bigint no
+  // Postgres e sairia como 500.
+  if (!/^[1-9]\d{0,17}$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'id inválido' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id::int AS id, exame, numero, area, enunciado, itens, fonte
+         FROM questoes_discursivas
+        WHERE id = $1`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Questão não encontrada' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Erro ao buscar discursiva:', error);
+    res.status(500).json({ error: 'Erro ao buscar questão discursiva' });
+  }
+});
+
+module.exports = { app, pool, AREAS_DISCURSIVAS };

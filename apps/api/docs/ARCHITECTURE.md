@@ -15,8 +15,8 @@ Plataforma de microserviços para educação jurídica (preparação OAB/Magistr
 | **API Gateway** | 3000 | - | Roteamento único (Express) |
 | **Auth Service** | 3001 | `auth_db` | Registro, login, JWT |
 | **User Service** | 3002 | `user_db` | Perfis de usuário |
-| **Estudo Service** | 3004 | `estudo_db` | Registro de tentativas de questões |
-| **Questões Service** | 3005 | `questoes_db` | Banco de questões do Exame de Ordem |
+| **Estudo Service** | 3004 | `estudo_db` | Tentativas de questões e respostas às discursivas |
+| **Questões Service** | 3005 | `questoes_db` | Questões do Exame de Ordem (objetivas e discursivas da 2ª fase) |
 
 ---
 
@@ -87,10 +87,54 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 
 - `auth_db` - usuários, tokens
 - `user_db` - perfis, preferências
-- `estudo_db` - tentativas de questões
-- `questoes_db` - banco de questões
+- `estudo_db` - tentativas de questões (`tentativas`), respostas às discursivas (`respostas_discursivas`)
+- `questoes_db` - objetivas (`questoes`), discursivas da 2ª fase (`questoes_discursivas`)
 
 **Benefício:** Escalabilidade independente, sem acoplamento de dados
+
+---
+
+## ✍️ Discursivas da 2ª fase
+
+Questões discursivas da prova prático-profissional (só as 4 questões; a peça
+fica de fora), com o padrão de resposta oficial da FGV. Primeira área:
+Direito Civil, exames 36 a 45.
+
+A migration só cria a tabela: os dados **não sobem com o deploy**. Até a
+carga manual abaixo, `GET /api/discursivas?area=civil` devolve `[]`. Os JSON
+não são versionados, e a pasta `importador/` fica fora da imagem.
+
+**Tabelas**
+- `questoes_db.questoes_discursivas` — `id`, `exame`, `area`, `numero` (1..4),
+  `enunciado`, `itens` (JSONB `[{letra, pergunta, valor, gabarito,
+  distribuicao?}]`), `fonte`, `criada_em`, `atualizada_em`.
+  `UNIQUE (exame, area, numero)`. Tudo é fato da FGV (migration 003).
+- `estudo_db.respostas_discursivas` — `id`, `user_id` (do JWT), `questao_id`
+  (sem FK: outro banco), `respostas` (JSONB `{"A": "...", "B": "..."}`),
+  `fundamentos` (JSONB `{citados, esperados}`, opcional), `criada_em`.
+  Uma linha por envio; índice `(user_id, questao_id, criada_em DESC)`.
+
+**Rotas (todas exigem JWT)**
+
+| Gateway | Serviço | Retorno |
+|---------|---------|---------|
+| `GET /api/discursivas?area=civil` | questoes | `[{id, exame, numero, area, resumo}]`, exame DESC, numero ASC. `area` obrigatória: civil, penal, trabalho, administrativo, constitucional, empresarial, tributario |
+| `GET /api/discursivas/:id` | questoes | `{id, exame, numero, area, enunciado, itens, fonte}`; 404 se não existe |
+| `POST /api/discursivas/respostas` | estudo | corpo `{questao_id, respostas, fundamentos?}` → 201 com a linha |
+| `GET /api/discursivas/respostas?questao_id=N` | estudo | respostas do próprio usuário, mais recente primeiro, teto 200 |
+
+No gateway, `/respostas` é declarada antes de `/:id`.
+
+**Carga do acervo** (fora do serviço, como as objetivas)
+1. `questoes-service/importador/importar_discursivas.py --exame N --area civil
+   --pdf <padrão definitivo> [--prova <caderno>] --saida civilN.json` —
+   gera JSON validado; não toca no banco. O padrão definitivo é o que traz
+   "Distribuição dos Pontos". Quando o enunciado é imagem no padrão (38º,
+   40º–43º), `--prova` com o caderno da 2ª fase preenche o texto.
+2. `node carregar_discursivas.js civil*.json` — upsert idempotente por
+   (exame, area, numero), uma transação por exame. Em produção, copiar os
+   JSON para dentro do container do questoes-service (`docker cp`) e rodar o
+   comando lá com `docker exec`.
 
 ---
 
