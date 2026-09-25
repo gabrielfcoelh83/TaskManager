@@ -54,6 +54,20 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Login com o Google: o navegador manda o ID token que recebeu do Google, e
+// o auth-service confere e devolve o JWT da plataforma, como no login.
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const response = await axios.post(`${services.auth}/google`, req.body);
+    // 201 quando a conta acabou de ser criada, 200 quando já existia.
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro na autenticação',
+    });
+  }
+});
+
 // Exposta para consumidores fora da rede interna (as rotas de IA do
 // MlDireito, na Vercel) validarem um token antes de chamar serviço pago —
 // o auth-service já tinha /verify, só não era alcançável de fora.
