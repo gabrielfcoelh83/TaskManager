@@ -212,7 +212,10 @@ describe('carga (carregar_discursivas.js)', () => {
     expect(() => validarDiscursivas([])).toThrow(/vazio/);
     expect(() => validarDiscursivas([questao({ area: 'Civil' })])).toThrow(/area/);
     expect(() => validarDiscursivas([questao({ numero: 5 })])).toThrow(/numero/);
-    expect(() => validarDiscursivas([questao({ itens: [item('A')] })])).toThrow(/itens/);
+    expect(() => validarDiscursivas([questao({ itens: [] })])).toThrow(/itens/);
+    expect(() => validarDiscursivas([questao({ itens: 'ABCDEF'.split('').map((l) => item(l)) })])).toThrow(/itens/);
+    // Um item só é válido: a mesma faixa (1 a 5) da constraint da migration 003.
+    expect(() => validarDiscursivas([questao({ itens: [item('A')] })])).not.toThrow();
     expect(() => validarDiscursivas([questao({ itens: [item('A'), item('C')] })])).toThrow(/deveria ser B/);
     expect(() => validarDiscursivas([questao({ itens: [item('A'), item('B', { gabarito: ' ' })] })]))
       .toThrow(/sem gabarito/);
