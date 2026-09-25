@@ -114,7 +114,20 @@ function recorteDaConta(estado) {
 export function carregarDadosDaConta(id) {
   if (id == null) return {};
   try {
-    const parsed = JSON.parse(localStorage.getItem(chaveDaConta(id)) || '{}');
+    return lerDadosDaConta(localStorage.getItem(chaveDaConta(id)));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Os dados da conta a partir do texto gravado na chave — o que
+ * `carregarDadosDaConta` lê do localStorage, e o que chega no `newValue` do
+ * evento `storage` quando outra aba grava.
+ */
+export function lerDadosDaConta(texto) {
+  try {
+    const parsed = JSON.parse(texto || '{}');
     if (!ehObjetoSimples(parsed)) return {};
 
     // Só as fatias da conta, e sem os campos da tela: uma chave adulterada (ou
@@ -126,15 +139,22 @@ export function carregarDadosDaConta(id) {
   }
 }
 
+/** O id da conta dona de uma chave do localStorage, ou `null` se não for chave de conta. */
+export function contaDaChave(chave) {
+  if (typeof chave !== 'string' || !chave.startsWith(PREFIXO_CONTA)) return null;
+  return chave.slice(PREFIXO_CONTA.length) || null;
+}
+
 // O que esta aba gravou por último em cada conta.
 //
 // O App grava a cada mudança de estado — trocar de tela inclusive. Com duas
 // abas da mesma conta abertas, a desatualizada sobrescrevia a nota que a outra
 // acabou de criar só porque alguém clicou no menu dela. Pular a gravação
 // quando os dados da conta não mudaram desde a última vez DESTA aba resolve
-// isso — junto com `CAMPOS_DA_TELA` e com a chave valendo na abertura (ver
-// `estadoDaConta`). Editar dados da conta na aba desatualizada ainda
-// sobrescreve, como já acontecia com o estado da interface.
+// isso — junto com `CAMPOS_DA_TELA`, com a chave valendo na abertura (ver
+// `estadoDaConta`) e com as abas se atualizando pelo evento `storage` (ver
+// `registrarRecebido`). Duas abas editando quase no mesmo instante, antes de
+// uma receber o evento da outra, ainda terminam com a gravação da última.
 const ultimaGravacao = new Map();
 
 export function salvarDadosDaConta(id, estado) {
@@ -149,6 +169,20 @@ export function salvarDadosDaConta(id, estado) {
   } catch {
     // modo privado ou quota: o que está na tela continua valendo nesta aba
   }
+}
+
+/**
+ * Marca como já gravado o que chegou de outra aba pelo evento `storage`.
+ *
+ * Sem isto, a aba que recebe aplicava os dados, e o efeito de gravação —
+ * que compara com a última gravação DESTA aba, não com o que está na chave —
+ * regravava a mesma versão. Com a pessoa digitando na outra aba, esse eco
+ * chegava atrasado e sobrescrevia o que ela já tinha digitado depois: o
+ * texto voltava atrás. Chamar antes de aplicar os dados faz o efeito pular.
+ */
+export function registrarRecebido(id, texto) {
+  if (id == null) return;
+  ultimaGravacao.set(chaveDaConta(id), JSON.stringify(lerDadosDaConta(texto)));
 }
 
 /**

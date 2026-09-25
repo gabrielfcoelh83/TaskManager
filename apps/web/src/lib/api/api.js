@@ -16,7 +16,7 @@ const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 // Chave separada do estado da interface: apagar `ma-questoes-state-v1` não
 // pode derrubar a sessão, e limpar a sessão não pode apagar o tema.
-const TOKEN_KEY = 'ma-questoes-token-v1';
+export const TOKEN_KEY = 'ma-questoes-token-v1';
 
 export class ApiError extends Error {
   constructor(message, status) {

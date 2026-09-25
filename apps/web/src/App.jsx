@@ -4,7 +4,7 @@ import { Icon } from './lib/icons';
 import { NAV, PAGE_META } from './lib/navegacao';
 import {
   loadState, saveState, limparEstado, carregarDadosDaConta, salvarDadosDaConta, estadoDaConta,
-  dadosNaAbertura,
+  dadosNaAbertura, lerDadosDaConta, contaDaChave, registrarRecebido,
 } from './lib/storage';
 import { diasAteProva, metaDiaria, sequenciaAtual } from './lib/metrics';
 import { montarDisciplinas } from './lib/disciplinas';
@@ -15,7 +15,7 @@ import { mesclarTentativas } from './lib/historico';
 import { enviarEmFila } from './lib/fila';
 import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
 import {
-  getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
+  TOKEN_KEY, getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
   anotarFeedbackTentativa, buscarPerfil, salvarPerfil,
 } from './lib/api/api';
 
@@ -151,6 +151,62 @@ export default function App() {
     window.addEventListener('beforeunload', avisar);
     return () => window.removeEventListener('beforeunload', avisar);
   }, []);
+
+  // Quem esta aba mostra e se ela está logada, para o ouvinte de `storage`
+  // abaixo, que é registrado uma vez só e não enxerga o render atual.
+  const dono = useRef(state.__usuario);
+  dono.current = state.__usuario;
+  const sessaoAtual = useRef(sessao);
+  sessaoAtual.current = sessao;
+
+  // Outra aba mexeu no localStorage — o navegador avisa as demais pelo evento
+  // `storage`. Sem ouvi-lo, cada aba seguia com o que leu ao abrir:
+  //
+  // - Mesma conta: a aba desatualizada regravava a chave da conta com a versão
+  //   velha na primeira edição, e a nota criada na outra aba sumia. Agora os
+  //   dados que a outra aba gravou entram nesta na hora.
+  // - Conta diferente: o token é um só para o navegador. Se, noutra aba, a
+  //   pessoa saía e entrava com outra conta, esta seguia mostrando a anterior
+  //   e gravando com o token da nova — resposta de uma conta na outra. Agora
+  //   esta aba recarrega já na conta nova; se o token some, volta ao login.
+  useEffect(() => {
+    const aoMudar = (evento) => {
+      if (evento.storageArea !== localStorage) return;
+
+      // `key` nula é um `localStorage.clear()` noutra aba: o token foi junto.
+      if (evento.key === TOKEN_KEY || evento.key === null) {
+        const novo = evento.key === null ? null : evento.newValue;
+        if (!novo) {
+          if (sessaoAtual.current === 'ativa') encerrarSessao();
+          return;
+        }
+        const id = payloadDoToken(novo)?.id;
+        if (sessaoAtual.current !== 'ativa' || String(id) !== String(dono.current)) {
+          // O que esta aba ainda tinha na fila é da sessão anterior e já parou
+          // (a fila confere o token); o aviso de sair só atrapalharia aqui.
+          respostasNaFila.current = 0;
+          window.location.reload();
+        }
+        return;
+      }
+
+      const id = contaDaChave(evento.key);
+      if (id == null || String(id) !== String(dono.current)) return;
+      const dados = lerDadosDaConta(evento.newValue);
+      if (Object.keys(dados).length === 0) return;
+      // Antes de aplicar: senão esta aba devolveria à chave, atrasada, a
+      // versão que acabou de receber (ver `registrarRecebido`).
+      registrarRecebido(id, evento.newValue);
+      // Confere de novo no updater: um "Sair" na fila entre o evento e aqui
+      // deixaria o estado sem dono, e os dados da conta entrariam nele.
+      setState((st) => (String(st.__usuario) === String(id)
+        ? estadoDaConta(st, st.__usuario, DEFAULT_STATE, dados)
+        : st));
+    };
+
+    window.addEventListener('storage', aoMudar);
+    return () => window.removeEventListener('storage', aoMudar);
+  }, [encerrarSessao]);
 
   useEffect(() => {
     saveState(state);

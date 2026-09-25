@@ -64,18 +64,24 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
       atualizadaEm: agora(),
       conteudo: '',
     };
-    setNotas({ itens: [nota, ...itens], activeId: id });
+    // Sempre a partir do estado mais novo (`n`), não da lista deste render:
+    // uma nota que outra aba acabou de criar pode ter chegado entre o render
+    // e o clique, e montar a lista com `itens` a apagaria.
+    setNotas((n) => ({ ...n, itens: [nota, ...(n.itens || [])], activeId: id }));
   };
 
   const editar = (id, campo, valor) => {
-    setNotas({
-      itens: itens.map((n) => (n.id === id ? { ...n, [campo]: valor, atualizadaEm: agora() } : n)),
-    });
+    setNotas((atual) => ({
+      ...atual,
+      itens: (atual.itens || []).map((n) => (n.id === id ? { ...n, [campo]: valor, atualizadaEm: agora() } : n)),
+    }));
   };
 
   const apagar = (id) => {
-    const restantes = itens.filter((n) => n.id !== id);
-    setNotas({ itens: restantes, activeId: restantes[0]?.id ?? null });
+    setNotas((atual) => {
+      const restantes = (atual.itens || []).filter((n) => n.id !== id);
+      return { ...atual, itens: restantes, activeId: restantes[0]?.id ?? null };
+    });
   };
 
   const campoInvisivel = { border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit' };

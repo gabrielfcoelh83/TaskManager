@@ -846,6 +846,44 @@ test.describe('Todas as telas', () => {
     await expect(page.locator('text=Crie uma com o botão')).toBeVisible();
   });
 
+  // Duas abas da mesma conta: a nota criada numa aparece na outra sem
+  // recarregar, e a outra — que não sabia dela — não a apaga ao editar.
+  // Antes, cada aba seguia com o que leu ao abrir, e a primeira edição na
+  // desatualizada regravava a chave da conta sem a nota nova.
+  test('duas abas da mesma conta veem as anotações uma da outra', async ({ page, context }) => {
+    await entrar(page);
+    const outra = await context.newPage();
+    await outra.goto('/');
+    await expect(outra.locator('[data-testid="nav-questoes"]')).toBeVisible();
+    await outra.click('[data-testid="nav-anotacoes"]');
+
+    // Tecla por tecla: cada uma é uma gravação, e é aí que um eco atrasado
+    // da outra aba faria o texto voltar atrás.
+    const texto = `Nota da primeira aba ${Date.now()}`;
+    await page.click('[data-testid="nav-anotacoes"]');
+    await page.click('[data-testid="nova-anotacao"]');
+    await page.locator('textarea').pressSequentially(texto, { delay: 15 });
+    await expect(page.locator('textarea')).toHaveValue(texto);
+
+    // A outra aba recebe pelo evento `storage`, sem recarregar.
+    await expect(outra.locator('textarea')).toHaveValue(texto, { timeout: 10000 });
+
+    // E editar nela não apaga o que veio da primeira.
+    await outra.click('[data-testid="nova-anotacao"]');
+    await outra.locator('textarea').fill('Nota da segunda aba');
+    await expect(outra.locator('textarea')).toHaveValue('Nota da segunda aba');
+    await page.reload();
+    await page.click('[data-testid="nav-anotacoes"]');
+    await expect(page.locator(`text=Minhas anotações (2)`)).toBeVisible({ timeout: 10000 });
+    // As duas estão inteiras na chave da conta, sem eco que tenha cortado o
+    // texto digitado tecla por tecla. (Qual nota abre selecionada depende de
+    // qual aba gravou a tela por último — não é o que este teste mede.)
+    await expect.poll(() => page.evaluate(() => {
+      const chave = Object.keys(localStorage).find((k) => k.startsWith('ma-questoes-conta-v1:'));
+      return JSON.parse(localStorage.getItem(chave)).anotacoes.itens.map((n) => n.conteudo);
+    }), { timeout: 10000 }).toEqual(['Nota da segunda aba', texto]);
+  });
+
   // "Sair" apagava favoritos e anotações de vez: eles só existem neste
   // navegador, e o logout zerava o localStorage para a próxima pessoa não os
   // encontrar. Os dois lados têm de valer juntos — quem volta encontra o que

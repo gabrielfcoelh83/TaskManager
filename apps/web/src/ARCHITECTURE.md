@@ -164,6 +164,16 @@ grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
   (`ultimaGravacao`), então é ela que tem a versão mais nova.
 - **Pasta aberta e nota selecionada não vão para a chave** (`CAMPOS_DA_TELA`):
   são da tela, mudam só de clicar, e fariam uma aba sobrescrever a outra.
+- **Abas abertas ao mesmo tempo** se acompanham pelo evento `storage`, que
+  o navegador dispara nas outras abas quando uma grava no localStorage. Os
+  dados da conta gravados por uma aba entram nas outras da mesma conta na
+  hora, sem recarregar. Se o token muda noutra aba (saiu e entrou outra
+  conta), esta recarrega já na conta nova; se o token some, volta ao login.
+  Uma aba parada no Login também recarrega quando outra entra — e passa a
+  mostrar a conta que entrou. Sem isso, uma aba desatualizada apagava a nota
+  nova da outra ao editar, e uma aba seguia mostrando uma conta e gravando
+  com o token de outra. Duas abas editando no mesmo instante, antes de uma
+  receber o evento da outra, ainda terminam com a gravação da última.
 - **Estado sem dono na abertura** (gravado antes da chave existir, por conta
   sem perfil no servidor) é adotado pela conta do token (`dadosNaAbertura`).
   No login não: lá, um estado sem dono pode ser de quem saiu antes.
@@ -343,21 +353,11 @@ mostrou um dia a menos no Brasil com a CI verde.
    antes de atualizar perde esses dados ao entrar de novo. É estreito, e não
    se repete: a versão atual sempre marca o dono.
 7. **A CI usa Node 20**, que saiu do suporte em 30/04/2026.
-8. **Duas abas da mesma conta, editando** — trocar de tela na aba
-   desatualizada não sobrescreve mais a outra, mas editar dados da conta nela
-   (marcar um favorito, por exemplo) regrava a chave inteira com a versão
-   velha, e a nota criada na outra aba se perde. Não há ouvinte de `storage`
-   para as abas se atualizarem.
-9. **Duas abas com contas diferentes** — o token é um só para o navegador.
-   Se, na aba B, a pessoa sai e entra com a conta Y, a aba A continua
-   mostrando a conta X, mas as gravações dela saem com o token de Y: uma
-   resposta dada na tela de X é gravada na conta Y. Já acontecia antes da
-   chave por conta; a mesma falta de ouvinte de `storage` está na origem.
-10. **Edição que recebe 401 some sem aviso** — a tela muda antes do PUT (meta,
+8. **Edição que recebe 401 some sem aviso** — a tela muda antes do PUT (meta,
     data da prova) e, com o 401, volta ao login sem dizer que a última
     alteração não foi salva. Ao entrar de novo, a tela pode mostrar um valor
     que o servidor não tem. O Login não tem onde mostrar esse aviso hoje.
-11. **Respostas do simulado na fila se perdem se a aba for descartada** — o
+9. **Respostas do simulado na fila se perdem se a aba for descartada** — o
     aviso de sair cobre fechar e recarregar, mas não a aba que o sistema
     descarta (comum no celular) nem o navegador que fecha sem perguntar.
 12. **E-mail cadastrado por outra pessoa bloqueia o Google** — como o
