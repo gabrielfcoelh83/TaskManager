@@ -115,6 +115,28 @@ describe('PUT /users/:id — profile_data é mesclado, não substituído', () =>
     expect(res.body.profile_data).toEqual({ meta: 10 });
   });
 
+  it('chave com null grava null, não some', async () => {
+    await put({ profile_data: { meta: 20, dataProva: '2026-11-01' } });
+    const res = await put({ profile_data: { dataProva: null } });
+    expect(res.body.profile_data).toEqual({ meta: 20, dataProva: null });
+    expect(Object.prototype.hasOwnProperty.call(res.body.profile_data, 'dataProva')).toBe(true);
+  });
+
+  it('o total depois da mescla também tem teto', async () => {
+    expect((await put({ profile_data: { a: 'x'.repeat(12000) } })).status).toBe(200);
+    const res = await put({ profile_data: { b: 'y'.repeat(12000) } });
+    expect(res.status).toBe(400);
+    // Recusado inteiro: nada da segunda gravação entrou.
+    const { rows } = await pool.query('SELECT profile_data FROM users WHERE user_id = $1', [DONO]);
+    expect(rows[0].profile_data.b).toBeUndefined();
+  });
+
+  it('perfil inexistente continua 404', async () => {
+    const res = await request(app).put('/users/1003').set('Authorization', como(1003))
+      .send({ profile_data: { meta: 1 } });
+    expect(res.status).toBe(404);
+  });
+
   it('recusa profile_data que não é objeto, e o grande demais', async () => {
     for (const ruim of [[1, 2], 'texto', 42]) {
       expect((await put({ profile_data: ruim })).status).toBe(400);

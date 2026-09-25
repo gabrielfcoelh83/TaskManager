@@ -192,8 +192,10 @@ app.post('/users', verifyToken, async (req, res) => {
   }
 });
 
-// Teto do profile_data gravado de uma vez: preferências e a ficha cabem com
-// folga em poucos kB; o teto só impede usar o perfil como depósito.
+// Teto do profile_data: preferências e a ficha cabem com folga em poucos kB;
+// o teto só impede usar o perfil como depósito. Vale para o que chega e para
+// o total depois da mescla — senão PUTs com chaves diferentes o fariam
+// crescer sem limite.
 const PROFILE_DATA_MAX = 20000;
 
 // Atualizar perfil de usuário
@@ -204,8 +206,9 @@ app.put('/users/:id', verifyToken, requireOwnership, async (req, res) => {
   // coluna inteira era trocada pelo que chegava: uma aba antiga (ou o bundle
   // anterior, aberto antes de um deploy) que mandasse só `{ meta, dataProva }`
   // apagava tudo o que outra tela tivesse gravado ali — a ficha de boas-vindas,
-  // por exemplo. Agora cada chave enviada substitui só a si mesma; para
-  // apagar uma chave, mande-a com `null`.
+  // por exemplo. Agora cada chave enviada substitui só a si mesma. Mandar
+  // uma chave com `null` grava `null` nela (não a remove) — o front lê
+  // `dataProva: null` como "sem data".
   if (profile_data !== undefined && profile_data !== null &&
       (typeof profile_data !== 'object' || Array.isArray(profile_data))) {
     return res.status(400).json({ error: 'profile_data deve ser um objeto' });
@@ -228,9 +231,19 @@ app.put('/users/:id', verifyToken, requireOwnership, async (req, res) => {
               END,
               updated_at = NOW()
         WHERE user_id = $4
+          AND ($3::jsonb IS NULL
+               OR octet_length(((CASE WHEN jsonb_typeof(profile_data) = 'object' THEN profile_data ELSE '{}'::jsonb END) || $3::jsonb)::text) <= $5)
         RETURNING *`,
-      [name, email, perfilJson, req.params.id]
+      [name, email, perfilJson, req.params.id, PROFILE_DATA_MAX]
     );
+
+    // Nenhuma linha: ou o perfil não existe, ou a mescla passaria do teto.
+    if (result.rows.length === 0 && perfilJson) {
+      const existe = await pool.query('SELECT 1 FROM users WHERE user_id = $1', [req.params.id]);
+      if (existe.rows.length > 0) {
+        return res.status(400).json({ error: `profile_data passaria de ${PROFILE_DATA_MAX} bytes` });
+      }
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
