@@ -195,14 +195,14 @@ const opcoes = { maxPaginas: 50, chaveDe: (l) => l.id };
   exigir(junto.q9?.tentativas.length === 1, 'questão respondida só durante a carga sumiu da tela');
   exigir(junto.q2.tentativas.length === 1, 'questão que só veio da carga se perdeu na mesclagem');
 
-  // O feedback aplicado na tela depois que a página foi lida vence a versão
-  // do servidor, que ainda não o tinha.
+  // O mesmo id vindo como número e como texto é uma tentativa só, e a versão
+  // local vence a da carga.
   const comFeedback = mesclarTentativas(
     { q1: { tentativas: [t('10'), t('20')] } },
     { q1: { tentativas: [t(20, { tipo: 'chute', certeza: 30 })] } }
   );
   exigir(comFeedback.q1.tentativas.length === 2, 'a mesma tentativa, com id número e texto, virou duas');
-  exigir(comFeedback.q1.tentativas[1].tipo === 'chute', 'o feedback dado durante a carga foi sobrescrito pela carga');
+  exigir(comFeedback.q1.tentativas[1].tipo === 'chute', 'a versão local da tentativa foi sobrescrita pela carga');
 
   // Nada registrado durante a carga: o resultado é a carga, sem mexer nela.
   const soCarga = mesclarTentativas(carregadas, {});

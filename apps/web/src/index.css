@@ -116,43 +116,6 @@ button:not(:disabled):active {
   }
 }
 
-/* --- Modal de feedback -------------------------------------------------- */
-
-/* Modal mantém `transform-origin` no centro: ele não está ancorado a nenhum
-   gatilho da tela, aparece no meio do viewport. Popover seria o oposto — esse
-   precisa crescer de onde foi aberto.
-
-   E nunca de `scale(0)`: nada no mundo real aparece a partir do nada. 0.96
-   com opacidade já basta para a entrada parecer física. */
-@keyframes modal-entra {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-}
-
-.modal-fundo {
-  animation: so-opacidade 160ms var(--ease-out) both;
-}
-
-.modal-caixa {
-  animation: modal-entra 200ms var(--ease-out) both;
-}
-
-.opcao-feedback {
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms var(--ease-out);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .opcao-feedback:hover {
-    background: var(--cor-foco-suave);
-    border-color: var(--cor-foco);
-  }
-}
-
 /* --- Esqueleto de carregamento ------------------------------------------ */
 
 /* Esqueleto e não spinner: o formato do que está chegando já aparece, então
@@ -181,8 +144,7 @@ button:not(:disabled):active {
    é o que causa enjoo em quem pediu esta preferência. */
 @media (prefers-reduced-motion: reduce) {
   .entra,
-  .alternativa,
-  .modal-caixa {
+  .alternativa {
     animation-name: so-opacidade;
   }
 

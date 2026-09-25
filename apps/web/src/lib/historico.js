@@ -12,9 +12,9 @@
  * sessão enquanto a carga corria.
  *
  * Nos ids que aparecem nos dois, vence `recentes`: é a versão mais nova que o
- * front conhece — pode trazer um feedback ("foi chute") que o servidor ainda
- * não tinha quando a página foi lida. As que só existem em `recentes` vão para
- * o fim do array, que é cronológico: são as respostas mais novas.
+ * front conhece, e é ela que a tela já está mostrando. As que só existem em
+ * `recentes` vão para o fim do array, que é cronológico: são as respostas mais
+ * novas.
  */
 export function mesclarTentativas(carregadas = {}, recentes = {}) {
   const resultado = { ...carregadas };

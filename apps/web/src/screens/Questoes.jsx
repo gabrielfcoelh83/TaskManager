@@ -40,9 +40,8 @@ function Aviso({ s, icone, cor, titulo, texto, acao }) {
   );
 }
 
-export default function Questoes({ theme, s, data, quest, setQuest, registrar, anotarFeedback, acervo, recarregarAcervo }) {
+export default function Questoes({ theme, s, data, quest, setQuest, registrar, acervo, recarregarAcervo }) {
   const [tempoInicio, setTempoInicio] = useState(null);
-  const [feedbackAberto, setFeedbackAberto] = useState(null);
 
   const all = data.QUESTOES || [];
   const estado = acervo?.estado || 'pronto';
@@ -78,7 +77,6 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
   const exitQuiz = () => {
     setQuest({ quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false });
     setTempoInicio(null);
-    setFeedbackAberto(null);
   };
 
   const pickAlt = (i) => {
@@ -94,20 +92,8 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
     // servidor responder faria o quiz parecer quebrado numa rede ruim. O
     // registro vai junto e, se falhar, o App avisa em vez de fingir que salvou.
     setQuest({ selectedAlt: i, certas: quest.certas + (correct ? 1 : 0), erradas: quest.erradas + (correct ? 0 : 1) });
-    setFeedbackAberto(q.id);
 
     registrar({ questaoId: q.id, correta: correct, alternativa: i, tempoSeg: tempoGasto });
-  };
-
-  const avancarProxima = (tipo, certeza) => {
-    const q = quest.quiz[quest.idx];
-    // `anotarFeedback` é assíncrona e trata os próprios erros; o `.catch`
-    // aqui não é redundância, é contrato: sem ele, qualquer erro futuro que
-    // escape do try interno vira unhandledrejection silencioso — sem log,
-    // sem aviso na tela e sem teste que perceba.
-    anotarFeedback(q.id, tipo, certeza).catch(() => {});
-    setFeedbackAberto(null);
-    nextQuestion();
   };
 
   const nextQuestion = () => {
@@ -326,6 +312,19 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
               </div>
             </div>
 
+            {/* O veredito que antes vinha num pop-up por cima da tela. Aqui ele
+                não trava nada: a próxima questão fica a um clique. */}
+            {quest.selectedAlt !== null && (
+              <div
+                data-testid="veredito"
+                className="entra"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18, fontSize: 15, fontWeight: 700, color: quest.selectedAlt === current.correta ? '#059669' : '#DC2626' }}
+              >
+                <Icon name={quest.selectedAlt === current.correta ? 'circle-check' : 'circle-x'} color={quest.selectedAlt === current.correta ? '#10B981' : '#EF4444'} size={20} />
+                {quest.selectedAlt === current.correta ? 'Acertou!' : 'Errou'}
+              </div>
+            )}
+
             {/* A explicação só existe depois de a pessoa responder — mostrar
                 antes entregaria a resposta. E ela vem com a etiqueta de quem
                 escreveu: enquanto o texto não passou por revisão humana, quem
@@ -351,6 +350,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
               <div style={{ fontSize: 12.5, color: '#8b8391' }}>Acertos: <b style={{ color: '#10B981' }}>{quest.certas}</b> · Erros: <b style={{ color: '#EF4444' }}>{quest.erradas}</b></div>
               <button
+                data-testid="proxima-questao"
                 style={{ ...s.btnPrimary, opacity: quest.selectedAlt === null ? 0.4 : 1 }}
                 onClick={nextQuestion}
                 disabled={quest.selectedAlt === null}
@@ -375,60 +375,6 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
           </div>
         )}
       </div>
-
-      {feedbackAberto && current && (
-        <div
-          className="modal-fundo"
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-        >
-          <div
-            className="modal-caixa"
-            style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, textAlign: 'center' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>
-              <Icon
-                name={quest.selectedAlt === current.correta ? 'circle-check' : 'circle-x'}
-                color={quest.selectedAlt === current.correta ? '#10B981' : '#EF4444'}
-                size={24}
-              />
-              {quest.selectedAlt === current.correta ? 'Acertou!' : 'Errou'}
-            </div>
-
-            <div style={{ fontSize: 14, color: '#5c5462', marginBottom: 20 }}>
-              Como você chegou nessa resposta?
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                { label: 'Tinha certeza absoluta', tipo: 'acerto-conceitual', certeza: 95 },
-                { label: 'Tive uma boa intuição', tipo: 'acerto-conceitual', certeza: 70 },
-                { label: 'Eliminei as erradas', tipo: 'acerto-chute', certeza: 50 },
-                { label: 'Foi chute', tipo: 'chute', certeza: 30 }
-              ].map(opt => (
-                <button
-                  key={opt.label}
-                  className="opcao-feedback"
-                  onClick={() => avancarProxima(opt.tipo, opt.certeza)}
-                  style={{
-                    '--cor-foco': theme.primary,
-                    '--cor-foco-suave': theme.primarySoft,
-                    padding: 10,
-                    border: '1px solid rgba(0,0,0,.1)',
-                    borderRadius: 8,
-                    background: '#faf9fb',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontSize: 13,
-                    fontWeight: 500,
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

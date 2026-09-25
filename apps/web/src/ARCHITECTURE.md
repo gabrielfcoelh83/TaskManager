@@ -76,7 +76,7 @@ recarregar a página volta para ela — mas não há URL por tela.
 | — | `Login.jsx` | Entrar e criar conta | só `theme`, `s` e `onEntrar` — não recebe as comuns |
 | `dashboard` | `Dashboard.jsx` | Resumo do dia, próximo passo, evolução | `dash`, `setDash`, `acervo` |
 | `cronograma` | `Cronograma.jsx` | Sugestão de semana e calendário do mês | — |
-| `questoes` | `Questoes.jsx` | Escolha de fonte e quiz | `quest`, `setQuest`, `registrar`, `anotarFeedback`, `acervo`, `recarregarAcervo` |
+| `questoes` | `Questoes.jsx` | Escolha de fonte e quiz | `quest`, `setQuest`, `registrar`, `acervo`, `recarregarAcervo` |
 | `simulados` | `Simulados.jsx` | Configurar, cronometrar e corrigir simulado | `sim`, `setSim`, `setResultadosHistorico`, `registrarRespostas` |
 | `revisoes` | `Revisoes.jsx` | Erradas, favoritas, menor desempenho | `rev`, `setRev`, `favoritos`, `toggleFavorito` |
 | `desempenho` | `Desempenho.jsx` | Evolução ao longo do tempo | `perf`, `setPerf` |
@@ -180,11 +180,8 @@ grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
 
 ### Refs de gravação assíncrona
 
-- `registroPendente` — `Map` de questão → promessa do POST da tentativa. O
-  quiz não espera a rede; o feedback ("foi chute", "eliminei") espera essa
-  promessa porque precisa do `id` que o POST devolve.
 - `sessaoEpoch` — contador de sessão. Toda gravação (`registrar`,
-  `registrarRespostas`, `anotarFeedback`, `atualizarNome`, `atualizarConfig`)
+  `registrarRespostas`, `atualizarNome`, `atualizarConfig`)
   confere, depois do `await`, se a sessão ainda é a mesma, para uma resposta
   que chega atrasada não aparecer para a próxima pessoa. As três cargas
   (perfil, tentativas, acervo) fazem o mesmo com o `let cancelado` do efeito,
@@ -195,7 +192,7 @@ grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
   sessão acabou não sai. O PUT do nome (`atualizarNome`) corre fora da fila.
 
 `encerrarSessao` é o fim de uma sessão — por "Sair", por 401 ou por token
-sem payload legível: sobe o `sessaoEpoch`, limpa `registroPendente`, o
+sem payload legível: sobe o `sessaoEpoch`, limpa o
 histórico em memória, o perfil e a faixa de erro, e volta ao Login. No 401 a
 tela fica — quem entra de novo com a mesma conta volta ao que estava
 fazendo; `sair` é que também zera a tela.
@@ -256,7 +253,6 @@ erro do acervo aparece na própria tela de Questões, com botão de recarregar.
 | `buscarPerfil`, `salvarPerfil` | `GET`/`PUT /api/users/:id` | nome e `profile_data` |
 | `listarTentativas` → `buscarPaginaDeTentativas` | `GET /api/tentativas?limite=1000&paginado=1[&offset=N]` | percorre as páginas até somar `total` (`percorrerPaginas`, teto de 50 páginas; passando dele, a lista vem cortada e o aviso vai só para o console), descarta repetidas pelo id, aceita o formato antigo (array) e agrupa por questão, em ordem cronológica. No `App`, a carga é mesclada com o que foi respondido enquanto ela corria (`mesclarTentativas`) |
 | `registrarTentativa` | `POST /api/tentativas` | |
-| `anotarFeedbackTentativa` | `PATCH /api/tentativas/:id` | tipo e certeza da resposta |
 | `listarQuestoes` → `buscarPaginaDeQuestoes` | `GET /api/questoes?limite=200&paginado=1[&offset=N]` | percorre as páginas até somar `total`, com teto de 60 páginas (passando dele, a lista vem cortada e o aviso vai só para o console); com `aleatorio`, uma página só; aceita também o formato antigo (array) |
 
 ### Rotas serverless
@@ -364,6 +360,10 @@ mostrou um dia a menos no Brasil com a CI verde.
     cadastro por senha não confirma o e-mail, quem cadastrou o e-mail de
     outra pessoa impede o dono de entrar pelo Google (409), e não existe
     "esqueci a senha". O dono não é invadido, mas fica sem acesso.
+11. **`PATCH /api/tentativas/:id` sem uso** — o pop-up "como você chegou
+    nessa resposta?" saiu do quiz e era o único a gravar `tipo` e `certeza`.
+    A rota continua no estudo-service; as tentativas antigas mantêm os
+    valores, e nada na tela os lê.
 
 ### Limpeza
 
@@ -377,8 +377,6 @@ mostrou um dia a menos no Brasil com a CI verde.
 - `Favoritos.jsx` recebe `favoritos` do `App` e não usa.
 - `server/dev-api.js` tem 3000 como porta padrão (e o comentário do topo diz
   "Porta 3000"), a mesma do gateway.
-- `App.jsx` e o e2e citam uma "ADR-001" que não existe no repositório — o
-  raciocínio dela está na seção *Refs de gravação assíncrona* acima.
 - `lib/api/index.js` e `lib/questions/index.js` sem uso.
 
 ### Refatoração planejada

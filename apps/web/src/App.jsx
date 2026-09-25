@@ -16,7 +16,7 @@ import { enviarEmFila } from './lib/fila';
 import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
 import {
   TOKEN_KEY, getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
-  anotarFeedbackTentativa, buscarPerfil, salvarPerfil,
+  buscarPerfil, salvarPerfil,
 } from './lib/api/api';
 
 import Login from './screens/Login';
@@ -89,14 +89,6 @@ export default function App() {
   const [acervo, setAcervo] = useState({ estado: 'carregando', questoes: [], erro: null });
   const [recarga, setRecarga] = useState(0);
 
-  // A gravação em curso de cada questão, guardada pela promessa e não pelo
-  // resultado. A tela de feedback abre no mesmo instante em que o POST sai
-  // (`Questoes.jsx` não espera, de propósito, para o quiz não travar em rede
-  // ruim), então quando a pessoa clica "Foi chute" o `id` da tentativa pode
-  // ainda não ter voltado. Segurar a promessa deixa o feedback esperar por
-  // ela em vez de ler um estado que talvez não esteja preenchido. Ver ADR-001.
-  const registroPendente = useRef(new Map());
-
   // Contador de sessão. Toda escrita de estado que acontece *depois* de um
   // await compara este número com o que valia quando a operação começou —
   // é o mesmo cuidado do `let cancelado` no efeito de carga, e existe porque
@@ -123,14 +115,13 @@ export default function App() {
   // O 401 só trocava a tela para o login. Nada do que estava no ar era
   // invalidado: um POST da conta anterior que voltasse depois de outra pessoa
   // entrar caía no histórico dela, e um PUT de preferência ainda na fila saía
-  // com o token de quem entrou. Por isso o epoch sobe e as gravações pendentes
-  // saem daqui, nos dois caminhos.
+  // com o token de quem entrou. Por isso o epoch sobe aqui, nos dois
+  // caminhos.
   //
   // A tela (`state`) fica: no 401, quem entra de novo com a mesma conta volta
   // ao que estava fazendo, e se entrar outra conta `estadoDaConta` troca o
   // estado no login. Limpar a tela é coisa do `sair`.
   const encerrarSessao = useCallback(() => {
-    registroPendente.current.clear();
     sessaoEpoch.current += 1;
     setUsuarioTentativas({});
     setPerfil({ estado: 'carregando', id: null, name: null, email: null });
@@ -436,10 +427,6 @@ export default function App() {
       }
     })();
 
-    // Só o quiz tem "como você chegou". A fila do simulado gravando aqui
-    // sobrescrevia a promessa de uma questão respondida no quiz ao mesmo
-    // tempo, e o feedback dela ia parar na tentativa do simulado.
-    if (!emLote) registroPendente.current.set(questaoId, pendente);
     return pendente;
   };
 
@@ -480,56 +467,6 @@ export default function App() {
       }
     } finally {
       respostasNaFila.current -= respostas.length;
-    }
-  };
-
-  // "Como você chegou nessa resposta?" — chute, intuição, eliminação. É o que
-  // separa acertar sabendo de acertar por sorte, e desde a migration 002 tem
-  // coluna própria em vez de morrer junto com a sessão.
-  const anotarFeedback = async (questaoId, tipo, certeza) => {
-    const epoch = sessaoEpoch.current;
-
-    // Espera a gravação que a alternativa disparou: sem o `id` não há o que
-    // atualizar no servidor.
-    const tentativa = await registroPendente.current.get(questaoId);
-    registroPendente.current.delete(questaoId);
-
-    // Mesmo motivo do `registrar`: este await pode ter atravessado um logout.
-    if (sessaoEpoch.current !== epoch) return;
-
-    // Atualização otimista. O quiz já avançou para a próxima questão quando
-    // esta linha roda — devolver a tela ao estado anterior por causa de um
-    // PATCH que falhou seria mais confuso que o erro.
-    const aplicarLocal = (patch) =>
-      setUsuarioTentativas((atual) => {
-        const registro = atual[questaoId];
-        if (!registro || registro.tentativas.length === 0) return atual;
-
-        const tentativas = registro.tentativas.slice();
-        // Por id quando ele existe: numa questão respondida mais de uma vez,
-        // "a última do array" e "a que acabou de ser gravada" só coincidem
-        // enquanto nada chega fora de ordem.
-        const alvo = tentativa?.id
-          ? tentativas.findIndex((t) => t.id === tentativa.id)
-          : tentativas.length - 1;
-        if (alvo < 0) return atual;
-
-        tentativas[alvo] = { ...tentativas[alvo], ...patch };
-        return { ...atual, [questaoId]: { ...registro, tentativas } };
-      });
-
-    aplicarLocal({ tipo, certeza });
-
-    // Sem id, a tentativa não chegou a ser gravada — o erro disso já foi dito
-    // ao registrar, e repetir aqui seria a segunda mensagem sobre a mesma falha.
-    if (!tentativa?.id) return;
-
-    try {
-      await anotarFeedbackTentativa(tentativa.id, tipo, certeza);
-    } catch (err) {
-      if (sessaoEpoch.current !== epoch) return;
-      if (err.status === 401) { encerrarSessao(); return; }
-      setErroSync(`A resposta foi salva, mas o "como você chegou" não: ${err.message}`);
     }
   };
 
@@ -879,7 +816,6 @@ export default function App() {
               quest={state.questoes}
               setQuest={(p) => updateSlice('questoes', p)}
               registrar={registrar}
-              anotarFeedback={anotarFeedback}
               acervo={acervo}
               recarregarAcervo={() => setRecarga((n) => n + 1)}
             />

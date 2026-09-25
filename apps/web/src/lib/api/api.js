@@ -210,8 +210,8 @@ function paraFormatoLocal(linha) {
     resposta: linha.alternativa,
     correta: linha.correta,
     tempo_gasto_segundos: linha.tempo_seg,
-    // Vêm nulos até a pessoa responder "como você chegou nessa resposta?" —
-    // a tentativa é gravada no clique da alternativa, o feedback vem depois.
+    // Só tentativas antigas trazem valor: o pop-up "como você chegou nessa
+    // resposta?" que os preenchia saiu do quiz, e as novas vêm nulas.
     // `?? null` porque uma linha gravada antes da migration 002 nem traz as
     // chaves, e `undefined` vazando para o estado quebraria o `JSON.stringify`
     // do localStorage de um jeito difícil de rastrear.
@@ -231,8 +231,8 @@ export function agruparPorQuestao(linhas) {
   }
 
   // A API ordena da mais recente para a mais antiga; o front assume ordem
-  // cronológica — `avancarProxima` escreve no último elemento do array,
-  // que precisa ser a tentativa recém-feita.
+  // cronológica — a mesclagem põe as respostas novas no fim do array, e a
+  // revisão lê a última como a mais recente.
   for (const registro of Object.values(porQuestao)) registro.tentativas.reverse();
 
   return porQuestao;
@@ -375,18 +375,6 @@ export async function registrarTentativa({ questaoId, correta, alternativa, temp
       alternativa: Number.isInteger(alternativa) ? alternativa : null,
       tempo_seg: Number.isInteger(tempoSeg) && tempoSeg >= 0 ? tempoSeg : null,
     },
-  });
-
-  return paraFormatoLocal(linha);
-}
-
-// O feedback chega depois da tentativa já gravada, então é PATCH sobre uma
-// linha existente. Precisa do `id` que o POST devolveu — quem chama tem de
-// garantir que ele já voltou do servidor (ver `registroPendente` no App).
-export async function anotarFeedbackTentativa(id, tipo, certeza) {
-  const linha = await req(`/api/tentativas/${id}`, {
-    method: 'PATCH',
-    body: { tipo, certeza },
   });
 
   return paraFormatoLocal(linha);
