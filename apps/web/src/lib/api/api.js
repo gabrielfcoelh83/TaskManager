@@ -379,3 +379,40 @@ export async function registrarTentativa({ questaoId, correta, alternativa, temp
 
   return paraFormatoLocal(linha);
 }
+
+// ---------------------------------------------------------------------------
+// 2ª fase: questões discursivas
+// ---------------------------------------------------------------------------
+//
+// Acervo à parte do da 1ª fase: enunciado, itens com a pergunta, o valor e o
+// gabarito comentado da FGV (padrão de resposta). A conferência dos
+// fundamentos roda no navegador (`lib/fundamentos.js`); o servidor só guarda
+// a resposta e o resumo da conferência.
+
+const lista = (dados) => (Array.isArray(dados) ? dados : []);
+
+export async function listarDiscursivas(area) {
+  const params = new URLSearchParams();
+  if (area) params.set('area', area);
+  return lista(await req(`/api/discursivas?${params}`));
+}
+
+export async function buscarDiscursiva(id) {
+  const q = await req(`/api/discursivas/${encodeURIComponent(id)}`);
+  // Um item sem letra não tem onde guardar a resposta; sem `itens`, a tela
+  // mostraria o enunciado sem nenhum campo para responder.
+  return { ...q, itens: lista(q?.itens).filter((i) => i && i.letra) };
+}
+
+export async function salvarRespostaDiscursiva({ questaoId, respostas, fundamentos }) {
+  return req('/api/discursivas/respostas', {
+    method: 'POST',
+    body: { questao_id: questaoId, respostas, fundamentos },
+  });
+}
+
+/** Respostas da própria conta a uma questão, da mais recente para a mais antiga. */
+export async function listarRespostasDiscursivas(questaoId) {
+  const params = new URLSearchParams({ questao_id: String(questaoId) });
+  return lista(await req(`/api/discursivas/respostas?${params}`));
+}

@@ -21,8 +21,9 @@ src/
 ├── main.jsx              # Entry point (StrictMode + App)
 ├── App.jsx               # Estado global, carga de dados, layout e navegação
 ├── index.css             # Estilos globais e animações
-├── screens/              # Uma tela por arquivo (12, contando o Login)
+├── screens/              # Uma tela por arquivo (13, contando o Login e a SegundaFase)
 ├── components/ui/        # Componentes extraídos das telas
+│   ├── SeletorDeFase.jsx    # Topo da barra lateral: marca + <select> 1ª/2ª fase
 │   ├── ConfigSimulado.jsx   # Formulário de configuração do simulado (Simulados)
 │   ├── Cronometro.jsx       # Timer do simulado (Simulados)
 │   ├── BotaoGoogle.jsx      # "Fazer login com o Google" (Login)
@@ -40,7 +41,9 @@ src/
     ├── disciplinas.js    # Disciplinas derivadas do acervo, cores, prioridade
     ├── agenda.js         # Plano da semana e calendário do Cronograma
     ├── perfil.js         # Payload do JWT, nome de exibição, saudação
-    ├── navegacao.js      # Menu, título/subtítulo das telas, ícones, tags
+    ├── navegacao.js      # Menu, fases (FASES), título/subtítulo das telas, ícones, tags
+    ├── fundamentos.js    # 2ª fase: extrai citações legais e compara resposta × padrão da FGV
+    ├── discursivas.js    # 2ª fase: agrupar por exame, "0,60", itens preenchidos
     ├── theme.js          # Temas (rosa, azul, verde) e buildStyles()
     ├── icons.jsx         # Ícones SVG (<Icon name=... />)
     └── charts.jsx        # Sparkline, MiniBars, AreaLine, LabeledBars
@@ -65,9 +68,103 @@ cartão "Foco de hoje". Não existem pastas `layout/`, `hooks/` nem `contexts/`.
 
 ---
 
+## Fases
+
+O topo da barra lateral é um `<select>` com `<optgroup>` (`SeletorDeFase`),
+no lugar do antigo logo "ma. questões" — a marca ficou, menor, em cima dele:
+
+```
+1ª FASE
+   Questões objetivas      ← o app de sempre: menu, dashboard, telas abaixo
+2ª FASE
+   Direito Civil           ← SegundaFase.jsx, página própria
+```
+
+A fase escolhida fica em `state.fase` (`'objetiva'` | `'discursiva-civil'`),
+e `FASES` em `lib/navegacao.js` lista as opções — área nova da 2ª fase entra
+ali, com a `area` que o servidor usa. `faseValida` devolve a padrão quando o
+valor salvo não existe mais. É `<select>` nativo de propósito: teclado, leitor
+de tela e a roda de opções do celular vêm do navegador.
+
+Na 2ª fase o `App` desenha outro layout: sem menu, dashboard, cartão de foco,
+contagem da prova nem sino — tudo isso mede a 1ª fase. Fica o seletor, a
+linha do perfil ("Ver perfil" volta à 1ª fase, nas Configurações) e a faixa
+de erro. Em tela estreita (`max-width: 760px`) a barra lateral vira uma
+faixa no topo. As cargas da 1ª fase (acervo, tentativas, perfil) continuam
+rodando por trás, para a troca de volta ser imediata.
+
+### SegundaFase.jsx
+
+Questões discursivas de uma área — só as 4 questões de cada exame; a peça
+não entra. Duas vistas:
+
+- **Lista**, agrupada por exame (mais recente primeiro). Acervo vazio — ou a
+  rota ainda ausente no gateway (404) — vira o aviso "As questões
+  discursivas estão chegando", não tela em branco. Erro de rede vira aviso
+  com "Tentar de novo". Questão com rascunho ganha a etiqueta "Rascunho".
+- **Questão aberta**: enunciado (`pre-line`: o texto vem com `\n` entre
+  parágrafos), cada item com "(Valor: 0,60)" e um campo de até 6000
+  caracteres (o limite do servidor), e o botão "Corrigir".
+
+"Corrigir" confere no navegador (`conferirQuestao`) e grava no servidor.
+Depois dela, por item: "Fundamentos: X de Y", o que faltou citar, o que a
+pessoa citou (e o que ela citou que não está no padrão), o padrão de
+resposta da FGV, a distribuição dos pontos quando a FGV publicou e o valor
+do item. Um aviso fixo diz que **não é nota**: só confere a citação dos
+fundamentos, e a banca também avalia a fundamentação. Correção por IA é
+etapa futura.
+
+Ao reabrir a questão aparece a última resposta salva
+(`GET /api/discursivas/respostas`), já conferida, com "Responder de novo".
+Vale a mais recente entre essa carga e a que o `App` gravou nesta sessão
+(`salvasNaSessao`, só em memória): reaberta com o POST no ar, a carga sai
+antes dele e viria vazia. Quando o rascunho some — salvo aqui ou noutra aba,
+que o apaga da chave da conta —, a questão aberta busca de novo a última
+resposta, sem esqueleto ("Descartar" não busca: nada foi salvo). As duas
+cargas se juntam por `maisRecente`, para a que voltar por último não trazer
+de volta uma resposta mais velha.
+Gravação recusada mostra o erro junto da resposta, com "Tentar de novo", e o
+rascunho continua salvo. Falha só na carga das respostas antigas não impede
+responder: um aviso diz que a última resposta não apareceu.
+
+### Conferência dos fundamentos (`lib/fundamentos.js`)
+
+Pura, testada em `tests/fundamentos.test.js` com trechos reais dos padrões
+de resposta do 36º ao 45º Exame.
+
+- `extrairCitacoes(texto)` reconhece artigos ("Art. 1.659, inciso I, do
+  CC", "arts. 186 e 927 do CC", "CC, art. 186", "Lei nº 8.078/90, art. 14",
+  "artigo 1.228 do Código Civil", "art. 186 do CC c/c art. 927 do mesmo
+  diploma") e súmulas ("Súmula 537 do STJ", "Súmula Vinculante 25"). 1.659 e
+  1659 são o mesmo artigo; lei pelo número vira a sigla quando existe (8.078
+  → CDC, 13.709 → LGPD). Encadeamentos: "art. 186 C/C 927 do CC", "artigo
+  496 do Código Civil e 179 do CC" e intervalos ("arts. 186 a 188", que
+  conta o 187; "arts. 186, 187 a 190"). Intervalo de parágrafos ou incisos
+  ("§ 1º a 3º", "incisos I a III") é detalhe do artigo, não artigo novo.
+  Depois de o diploma fechar o grupo, número sem "art." só continua se vier
+  seguido de fim de frase, detalhe, outro diploma ou outro artigo ("do CC e
+  2 dos réus" não cita art. 2) — ou de vírgula/parêntese, se o número tem
+  dois dígitos ou mais ("do CC e 927, o réu…" cita; "do CC e 3, conforme…"
+  não). Em "§ 1º e 1.229" o "1" é do art. 1.229, não um parágrafo. Número sem "art."/"artigo"/"Súmula" antes não é citação.
+  Siglas em maiúsculas, ou minúsculas logo depois de "do/da/no/na" ("do
+  cc"): solto no texto, "cf." não é Constituição.
+- Sem lookbehind nas expressões regulares nem `.at(-n)`: o primeiro é
+  SyntaxError no Safari antes do 16.4 (o módulo é importado pelo App — o app
+  inteiro não carregaria), o segundo não existe antes do 15.4. Um teste
+  varre `src/` e `api/`.
+- A comparação é por **diploma + artigo**; parágrafo, inciso e alínea são
+  detalhe exibido. Artigo citado sem a lei atende, com o aviso "diga de qual
+  lei é o artigo"; artigo de outra lei não atende.
+- No padrão, citações ligadas por "ou" são **um** fundamento com várias
+  opções. Uma linha "OU" sozinha separa **caminhos** de resposta inteiros
+  (43º Exame, questão 1, item B): cada caminho é conferido à parte e vale o
+  que a resposta mais atende.
+- `conferirQuestao(itens, respostas)` devolve o resultado por item e os
+  totais `{ citados, esperados }` — o `fundamentos` gravado no servidor.
+
 ## Telas
 
-`NAV` em `lib/navegacao.js` define o menu; `App.jsx` renderiza a tela cuja
+`NAV` em `lib/navegacao.js` define o menu da 1ª fase; `App.jsx` renderiza a tela cuja
 chave está em `state.screen`. Como a tela atual é salva no localStorage,
 recarregar a página volta para ela — mas não há URL por tela.
 
@@ -85,6 +182,7 @@ recarregar a página volta para ela — mas não há URL por tela.
 | `disciplinas` | `Disciplinas.jsx` | Aproveitamento por matéria e tema | `disc`, `setDisc` |
 | `anotacoes` | `Anotacoes.jsx` | Notas com pastas e tags | `notas`, `setNotas` |
 | `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme` |
+| — (`state.fase`) | `SegundaFase.jsx` | 2ª fase: questões discursivas (ver "Fases") | não recebe as comuns: `theme`, `s`, `fase`, `estado`/`setEstado` (`state.segundaFase`), `gravarResposta`, `sessaoExpirou` |
 
 Props comuns (`screenProps`): `theme`, `s` (estilos de `buildStyles`), `data`
 (`{ QUESTOES, DISCIPLINAS }`), `go`, `usuarioTentativas`, `disciplinas`,
@@ -100,9 +198,9 @@ tipos é o que fazia uma gravação que falhou divergir em silêncio do servidor
 
 | Tipo | Onde fica | Persistência | Conteúdo |
 |---|---|---|---|
-| Interface | `state` (`DEFAULT_STATE`) | localStorage (`ma-questoes-state-v1`) | tema, tela atual, filtros de cada tela, quiz em andamento, favoritos, anotações, histórico de simulado |
-| Conta | cópia de três fatias de `state` | localStorage (`ma-questoes-conta-v1:<id>`), uma chave por conta | favoritos, anotações (só as notas) e histórico de simulado — ver "Dados da conta" |
-| Servidor | `useState` próprios | nenhuma — recarregados a cada sessão | `acervo`, `usuarioTentativas`, `perfil` |
+| Interface | `state` (`DEFAULT_STATE`) | localStorage (`ma-questoes-state-v1`) | tema, fase, tela atual, filtros de cada tela, quiz em andamento, questão discursiva aberta, favoritos, anotações, histórico de simulado, rascunhos discursivos |
+| Conta | cópia de quatro fatias de `state` | localStorage (`ma-questoes-conta-v1:<id>`), uma chave por conta | favoritos, anotações (só as notas), histórico de simulado e rascunhos discursivos (`segundaFase` sem a questão aberta) — ver "Dados da conta" |
+| Servidor | `useState` próprios | nenhuma — recarregados a cada sessão | `acervo`, `usuarioTentativas`, `perfil`; na `SegundaFase`, a lista, a questão aberta e a última resposta, recarregadas a cada visita |
 | Sessão | `useState` próprio | deriva do token salvo (`ma-questoes-token-v1`) | `sessao` (`'ativa'` / `'ausente'`) |
 | Aviso | `useState` próprio | nenhuma | `erroSync`, a faixa de erro do topo |
 
@@ -115,6 +213,7 @@ uma sobrescreve o valor local quando o perfil a traz.
 const DEFAULT_STATE = {
   __usuario: null,         // de quem é o estado salvo neste navegador
   theme: 'rosa',
+  fase: 'objetiva',        // 'objetiva' | 'discursiva-civil' (ver "Fases")
   screen: 'dashboard',
   dashboard: { period: '7' },
   cronograma: {},
@@ -128,6 +227,7 @@ const DEFAULT_STATE = {
   favoritos: [],
   configuracoes: { meta: 20, dataProva: null },
   resultados_historico: [],  // histórico real dos simulados
+  segundaFase: { questaoId: null, rascunhos: {} },  // rascunhos: { [id]: { A: '…' } }
 };
 ```
 
@@ -144,12 +244,19 @@ Regras que o código já garante:
 - **Logout** (`sair`): apaga o token, encerra a sessão (ver abaixo) e zera o
   estado da interface — mas não os dados da conta, que voltam quando a mesma
   pessoa entrar de novo.
+- **A fase é da interface**, como `screen`: não passa entre abas, e o "Sair"
+  a zera. **Os rascunhos discursivos são da conta** (ver "Dados da
+  conta"). O rascunho sai quando a resposta é salva no servidor — por
+  `gravarRespostaDiscursiva` no `App`, que funciona mesmo se a pessoa já
+  saiu da questão, e só se o rascunho ainda for o texto enviado. Enquanto a
+  gravação falhar, ele fica.
 - **Fatias por tela**: cada tela recebe a sua fatia e um setter montado com
   `updateSlice(chave, parcial)`, que aceita objeto (merge) ou função.
 
 ### Dados da conta
 
-Favoritos, anotações e histórico de simulado não têm rota na API. Além de
+Favoritos, anotações, histórico de simulado e rascunhos discursivos
+(`segundaFase.rascunhos`, texto ainda não conferido) não têm rota na API. Além de
 viverem em `state`, ficam numa chave por conta, gravada pelo mesmo efeito que
 grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
 
@@ -162,8 +269,9 @@ grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
   duas abas abertas, a desatualizada regrava o estado da interface a cada
   troca de tela; a chave só é gravada quando os dados da conta mudam
   (`ultimaGravacao`), então é ela que tem a versão mais nova.
-- **Pasta aberta e nota selecionada não vão para a chave** (`CAMPOS_DA_TELA`):
-  são da tela, mudam só de clicar, e fariam uma aba sobrescrever a outra.
+- **Pasta aberta, nota selecionada e questão discursiva aberta não vão para
+  a chave** (`CAMPOS_DA_TELA`): são da tela, mudam só de clicar, e fariam uma
+  aba sobrescrever a outra.
 - **Abas abertas ao mesmo tempo** se acompanham pelo evento `storage`, que
   o navegador dispara nas outras abas quando uma grava no localStorage. Os
   dados da conta gravados por uma aba entram nas outras da mesma conta na
@@ -181,7 +289,8 @@ grava o estado da interface (`salvarDadosDaConta`, em `storage.js`):
 ### Refs de gravação assíncrona
 
 - `sessaoEpoch` — contador de sessão. Toda gravação (`registrar`,
-  `registrarRespostas`, `atualizarNome`, `atualizarConfig`)
+  `registrarRespostas`, `atualizarNome`, `atualizarConfig`,
+  `gravarRespostaDiscursiva`)
   confere, depois do `await`, se a sessão ainda é a mesma, para uma resposta
   que chega atrasada não aparecer para a próxima pessoa. As três cargas
   (perfil, tentativas, acervo) fazem o mesmo com o `let cancelado` do efeito,
@@ -253,6 +362,10 @@ erro do acervo aparece na própria tela de Questões, com botão de recarregar.
 | `buscarPerfil`, `salvarPerfil` | `GET`/`PUT /api/users/:id` | nome e `profile_data` |
 | `listarTentativas` → `buscarPaginaDeTentativas` | `GET /api/tentativas?limite=1000&paginado=1[&offset=N]` | percorre as páginas até somar `total` (`percorrerPaginas`, teto de 50 páginas; passando dele, a lista vem cortada e o aviso vai só para o console), descarta repetidas pelo id, aceita o formato antigo (array) e agrupa por questão, em ordem cronológica. No `App`, a carga é mesclada com o que foi respondido enquanto ela corria (`mesclarTentativas`) |
 | `registrarTentativa` | `POST /api/tentativas` | |
+| `listarDiscursivas(area)` | `GET /api/discursivas?area=civil` | `[{id, exame, numero, area, resumo}]`; 404 (gateway sem a rota) vira acervo vazio na tela |
+| `buscarDiscursiva(id)` | `GET /api/discursivas/:id` | enunciado, `fonte` e `itens: [{letra, pergunta, valor, gabarito, distribuicao?}]`; item sem letra é descartado |
+| `salvarRespostaDiscursiva` | `POST /api/discursivas/respostas` | `{questao_id, respostas: {A: '…'}, fundamentos: {citados, esperados}}`; até 6000 caracteres por item, e `fundamentos` só com esses dois inteiros |
+| `listarRespostasDiscursivas(id)` | `GET /api/discursivas/respostas?questao_id=N` | só as da própria conta, mais recente primeiro |
 | `listarQuestoes` → `buscarPaginaDeQuestoes` | `GET /api/questoes?limite=200&paginado=1[&offset=N]` | percorre as páginas até somar `total`, com teto de 60 páginas (passando dele, a lista vem cortada e o aviso vai só para o console); com `aleatorio`, uma página só; aceita também o formato antigo (array) |
 
 ### Rotas serverless
@@ -274,7 +387,8 @@ importa: ver "Rodar e testar".
   404 sem explicação.
 - **Dev:** `VITE_API_URL` fica vazia e o proxy do `vite.config.js` separa os
   dois backends que dividem o prefixo `/api`:
-  - `/api/auth`, `/api/tentativas`, `/api/questoes`, `/api/users` → gateway
+  - `/api/auth`, `/api/tentativas`, `/api/questoes`, `/api/users`,
+    `/api/discursivas` → gateway
     em `localhost:3000` (`GATEWAY_PORT`)
   - resto de `/api` → `server/dev-api.js` em `localhost:3100` (`DEV_API_PORT`)
 
@@ -309,6 +423,12 @@ npm run dev
 | `npm run test:estado`, `test:questoes`, `test:paginas` | um arquivo de `test:lib` só, para rodar à mão — no fuso da máquina, sem a segunda rodada em São Paulo | via `test:lib` |
 | `npm run test:all` | test:e2e + test:api | nenhum workflow chama |
 | `npm run ci` | lint + test:lib + build — a verificação local, o mesmo que a CI roda sem backend | nenhum workflow chama |
+
+O `e2e-backend.sh` semeia também `tests/e2e-discursivas.sql` (exame 99,
+textos reais do 43º e 44º Exame) — mas só se a tabela
+`questoes_discursivas` existir na imagem do questoes-service. Os e2e da 2ª
+fase simulam `/api/discursivas` no navegador, menos um, que usa o backend
+de verdade e se pula quando não há rota ou seed.
 
 `test:api` precisa de tudo no ar — backend na 3000, dev-api na 3100 com
 `VITE_API_URL` local — e de `OPENROUTER_API_KEY`. Rodado sem isso, falha com
@@ -364,6 +484,18 @@ mostrou um dia a menos no Brasil com a CI verde.
     nessa resposta?" saiu do quiz e era o único a gravar `tipo` e `certeza`.
     A rota continua no estudo-service; as tentativas antigas mantêm os
     valores, e nada na tela os lê.
+12. **A 1ª fase não tem layout de celular** — a barra lateral de 232px fica
+    sempre à vista e espreme o conteúdo. Só a página da 2ª fase se adapta a
+    tela estreita. O seletor de fase funciona nas duas (é `<select>` nativo).
+13. **Rascunho discursivo só neste navegador** — o texto ainda não conferido
+    fica na chave da conta: sobrevive ao "Sair" e passa entre abas, mas não
+    acompanha a pessoa para outro aparelho. O que foi conferido e salvo está
+    no servidor.
+14. **Conferência de fundamentos é leniente com artigo sem lei** — no padrão
+    de resposta, "no Art. 6º" sem o diploma (44º Exame, questão 4, item A)
+    fica sem lei, e então qualquer "art. 6º" o atende. Na resposta, artigo
+    sem lei atende com aviso. A peça prático-profissional ainda não entra, e
+    a correção por IA é etapa futura.
 
 ### Limpeza
 

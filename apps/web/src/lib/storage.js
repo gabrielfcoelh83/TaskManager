@@ -90,13 +90,18 @@ export function limparEstado() {
 // com rota na API.
 
 const PREFIXO_CONTA = 'ma-questoes-conta-v1:';
-export const FATIAS_DA_CONTA = ['favoritos', 'anotacoes', 'resultados_historico'];
+//
+// `segundaFase` entra pelos rascunhos das questões discursivas: texto ainda
+// não conferido, que no estado da interface sumia no "Sair" e, com duas abas
+// abertas, a desatualizada sobrescrevia. A resposta conferida vai para o
+// servidor; o rascunho, até lá, é da conta, como as anotações.
+export const FATIAS_DA_CONTA = ['favoritos', 'anotacoes', 'resultados_historico', 'segundaFase'];
 
 // Campos dessas fatias que são da tela, e não da conta: a pasta aberta e a
 // nota selecionada mudam só de clicar. Se fossem para a chave da conta, uma
 // aba desatualizada sobrescreveria a nota nova da outra só porque alguém
-// abriu outra nota nela.
-const CAMPOS_DA_TELA = { anotacoes: ['folder', 'activeId'] };
+// abriu outra nota nela. A questão discursiva aberta, pelo mesmo motivo.
+const CAMPOS_DA_TELA = { anotacoes: ['folder', 'activeId'], segundaFase: ['questaoId'] };
 
 const chaveDaConta = (id) => `${PREFIXO_CONTA}${id}`;
 

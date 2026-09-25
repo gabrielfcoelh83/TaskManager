@@ -8,7 +8,7 @@ import react from '@vitejs/plugin-react';
 //       → rotas serverless do próprio app (na Vercel em produção; aqui pelo
 //         `node server/dev-api.js`, que precisa subir com PORT=3100)
 //
-//   /api/auth/*, /api/tentativas
+//   /api/auth/*, /api/tentativas, /api/questoes, /api/users, /api/discursivas
 //       → gateway da plataforma de microserviços, na porta 3000
 //
 // Em produção não há ambiguidade: as primeiras são relativas à Vercel e as
@@ -35,6 +35,8 @@ export default defineConfig({
       // no DEV_API, que responde ECONNREFUSED, e a tela só deixa de mostrar o
       // nome. Foi assim que apareceu na primeira execução do e2e.
       '/api/users': GATEWAY,
+      // Questões discursivas da 2ª fase e as respostas a elas.
+      '/api/discursivas': GATEWAY,
       '/api': DEV_API,
     },
   },

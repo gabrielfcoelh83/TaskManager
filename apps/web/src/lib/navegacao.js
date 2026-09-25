@@ -18,6 +18,26 @@ export const NAV = [
   { key: 'configuracoes', icon: 'settings', label: 'Configurações' },
 ];
 
+// O seletor do topo da barra lateral. A 1ª fase é o app inteiro, com menu e
+// dashboard; cada área da 2ª fase é uma página só, de questões discursivas.
+// `grupo` é o rótulo do <optgroup>. Área nova da 2ª fase entra aqui, com a
+// `area` que o servidor usa em GET /api/discursivas?area=.
+export const FASES = [
+  { chave: 'objetiva', grupo: '1ª fase', rotulo: 'Questões objetivas' },
+  {
+    chave: 'discursiva-civil', grupo: '2ª fase', rotulo: 'Direito Civil', area: 'civil',
+    titulo: 'Direito Civil · 2ª fase',
+    sub: 'Questões discursivas com o padrão de resposta da FGV.',
+  },
+];
+
+export const FASE_PADRAO = 'objetiva';
+
+/** A fase salva, se ainda existir; senão a padrão (estado velho ou adulterado). */
+export function faseValida(chave) {
+  return FASES.find((f) => f.chave === chave) || FASES.find((f) => f.chave === FASE_PADRAO);
+}
+
 // O título do dashboard é o único que depende de quem entrou, e por isso é
 // montado em tempo de render (`saudacao`) em vez de ficar escrito aqui — era
 // "Olá, Maria!" para qualquer conta.

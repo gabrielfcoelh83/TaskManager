@@ -668,6 +668,27 @@ const t = (correta, data = '2026-08-10T10:00:00Z', tempo = null) => ({ correta, 
   registrarRecebido(43, x1);                    // e o evento de X1 chega agora
   salvarDadosDaConta(43, estadoDaConta(recebeu, 43, padroesApp, lerDadosDaConta(x1)));
   exigir(guardado['ma-questoes-conta-v1:43'] === x3, 'a aba que recebeu devolveu à chave uma versão velha (o texto voltaria atrás)');
+
+  // Rascunhos da 2ª fase: da conta, não da tela. Sobrevivem ao "Sair" e
+  // passam entre abas; a questão aberta não vai para a chave.
+  const comFase2 = { ...padroesApp, segundaFase: { questaoId: null, rascunhos: {} } };
+  const escrevendo = { ...comFase2, __usuario: 44, segundaFase: { questaoId: 9, rascunhos: { 9: { A: 'art. 186 do CC' } } } };
+  salvarDadosDaConta(44, escrevendo);
+  const chave44 = JSON.parse(guardado['ma-questoes-conta-v1:44']);
+  exigir(chave44.segundaFase?.rascunhos?.[9]?.A === 'art. 186 do CC', 'o rascunho discursivo não foi para a chave da conta');
+  exigir(!('questaoId' in (chave44.segundaFase || {})), 'a questão aberta foi para a chave da conta');
+  // "Sair" zera a interface; ao entrar de novo, o rascunho volta.
+  const deVolta = estadoDaConta({ ...comFase2, theme: 'azul' }, 44, comFase2, carregarDadosDaConta(44));
+  exigir(deVolta.segundaFase.rascunhos[9]?.A === 'art. 186 do CC', 'sair apagou o rascunho discursivo');
+  exigir(deVolta.segundaFase.questaoId === null, 'a questão aberta voltou pela chave da conta');
+  // Outra aba apagou o rascunho (a resposta foi salva): esta recebe a remoção.
+  const semRascunho = lerDadosDaConta(JSON.stringify({ segundaFase: { rascunhos: {} } }));
+  const outraAba44 = estadoDaConta(escrevendo, 44, comFase2, semRascunho);
+  exigir(Object.keys(outraAba44.segundaFase.rascunhos).length === 0, 'a remoção do rascunho não passou para a outra aba');
+  exigir(outraAba44.segundaFase.questaoId === 9, 'sincronizar o rascunho mexeu na questão aberta desta aba');
+  // Outra conta não vê.
+  const outraConta = estadoDaConta(escrevendo, 45, comFase2, carregarDadosDaConta(45));
+  exigir(Object.keys(outraConta.segundaFase.rascunhos).length === 0, 'outra conta viu o rascunho discursivo');
 }
 
 if (falhas.length > 0) {

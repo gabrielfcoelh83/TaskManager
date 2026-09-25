@@ -812,3 +812,301 @@ test.describe('Todas as telas', () => {
     await expect(page.locator(`text=${texto}`)).toHaveCount(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 2ª fase: questões discursivas
+// ---------------------------------------------------------------------------
+//
+// Os três primeiros testes simulam as rotas /api/discursivas no navegador: o
+// acervo da 2ª fase só existe no backend a partir da versão que criou a
+// tabela, e o que eles medem — o seletor, os avisos, a conferência — é do
+// front. O último usa o backend de verdade e se pula quando ele ainda não tem
+// a rota ou o acervo semeado (tests/e2e-discursivas.sql).
+
+// Trechos reais: o item A é do 44º Exame (questão 1), com a distribuição
+// dos pontos; o B é o do 43º (questão 1) em que a FGV aceita duas respostas,
+// separadas por uma linha "OU".
+const QUESTAO_DISCURSIVA = {
+  id: 9901,
+  exame: 99,
+  numero: 1,
+  area: 'civil',
+  fonte: 'Teste e2e (trechos do 43º e do 44º Exame)',
+  enunciado: 'Guilherme ingressou com uma ação de execução de título extrajudicial em face de Fabiano.\nAo longo do processo de execução, houve a penhora de um automóvel, fruto de herança recebida por Fabiano.\nDiante do caso narrado, responda aos itens a seguir.',
+  itens: [
+    {
+      letra: 'A',
+      pergunta: 'O automóvel penhorado entra na comunhão de bens de Maria e Fabiano? Justifique.',
+      valor: 0.6,
+      gabarito: 'Não. Tendo em vista que o bem móvel penhorado foi adquirido por Fabiano em razão de herança recebida na constância do casamento, ele estará excluído da comunhão, nos termos do Art. 1.659, inciso I, do CC.',
+      distribuicao: 'A. Não, pois foi adquirido por Fabiano em razão de herança recebida na constância do casamento e estará excluído da comunhão (0,50), nos termos do Art. 1.659, inciso I, do CC (0,10).',
+    },
+    {
+      letra: 'B',
+      pergunta: 'Em que foro deve ser proposta a ação? Justifique.',
+      valor: 0.65,
+      gabarito: 'Camila e seus demais filhos deverão propor ação de anulação do negócio jurídico em Santos, SP, por ser o foro de localização do imóvel objeto da lide, conforme o Art. 47 do CPC.\nOU\nEm São Paulo, SP, o foro do domicílio do réu, entendendo ser obrigação pessoal, conforme Art. 46 do CPC.',
+    },
+  ],
+};
+
+// `alvo`: a página, ou o contexto inteiro quando o teste abre duas abas.
+async function simularDiscursivas(alvo, { lista = [], questao = null, falharGravacao = false, atrasoGravacaoMs = 0 } = {}) {
+  const gravadas = [];
+  const enviadas = [];
+  const consultas = { respostas: 0 };
+
+  await alvo.route(/\/api\/discursivas(?:[/?]|$)/, async (rota) => {
+    const pedido = rota.request();
+    const url = new URL(pedido.url());
+
+    if (url.pathname === '/api/discursivas/respostas') {
+      if (pedido.method() === 'POST') {
+        const corpo = pedido.postDataJSON();
+        enviadas.push(corpo);
+        if (atrasoGravacaoMs) await new Promise((r) => setTimeout(r, atrasoGravacaoMs));
+        if (falharGravacao) return rota.fulfill({ status: 500, json: { error: 'banco fora do ar' } });
+        const linha = { id: gravadas.length + 1, ...corpo, criada_em: new Date().toISOString() };
+        gravadas.unshift(linha);
+        return rota.fulfill({ status: 201, json: linha });
+      }
+      consultas.respostas += 1;
+      return rota.fulfill({
+        json: gravadas.filter((r) => String(r.questao_id) === url.searchParams.get('questao_id')),
+      });
+    }
+
+    if (url.pathname === '/api/discursivas') return rota.fulfill({ json: lista });
+    if (questao && url.pathname === `/api/discursivas/${questao.id}`) return rota.fulfill({ json: questao });
+    return rota.fulfill({ status: 404, json: { error: 'Questão não encontrada' } });
+  });
+
+  return { enviadas, consultas };
+}
+
+const RESUMO_DISCURSIVA = {
+  id: QUESTAO_DISCURSIVA.id, exame: 99, numero: 1, area: 'civil', resumo: 'Bem herdado e foro competente',
+};
+
+test.describe('2ª fase: questões discursivas', () => {
+  test('o seletor troca de fase, e o acervo vazio vira aviso sem erro no console', async ({ page }) => {
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e)));
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') erros.push(msg.text());
+    });
+    await simularDiscursivas(page, { lista: [] });
+    await entrar(page);
+
+    const seletor = page.locator('[data-testid="seletor-fase"]');
+    await expect(seletor).toHaveValue('objetiva');
+    await seletor.selectOption('discursiva-civil');
+
+    await expect(page.locator('[data-testid="discursivas-vazio"]')).toBeVisible();
+    await expect(page.locator('text=As questões discursivas estão chegando')).toBeVisible();
+    // A 2ª fase é outra página: o menu e o dashboard da 1ª saem.
+    await expect(page.locator('[data-testid="nav-questoes"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="nav-discursivas"]')).toBeVisible();
+
+    // A fase é estado da interface: recarregar volta a ela.
+    await page.reload();
+    await expect(page.locator('[data-testid="discursivas-vazio"]')).toBeVisible();
+
+    // Pelo teclado, como qualquer <select>.
+    await seletor.focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.locator('[data-testid="nav-questoes"]')).toBeVisible();
+    await expect(seletor).toHaveValue('objetiva');
+
+    expect(erros).toEqual([]);
+  });
+
+  test('responder, corrigir e reabrir mostra a última resposta e a conferência dela', async ({ page }) => {
+    const { enviadas } = await simularDiscursivas(page, { lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await expect(page.locator('[data-testid="enunciado"]')).toContainText('Fabiano');
+    await expect(page.locator('[data-testid="item-A"]')).toContainText('(Valor: 0,60)');
+
+    // Sem texto não há o que conferir.
+    await expect(page.locator('[data-testid="corrigir"]')).toBeDisabled();
+    await expect(page.locator('[data-testid="resposta-A"]')).toHaveAttribute('maxlength', '6000');
+
+    const respostaA = 'Não. O bem herdado não se comunica (art. 1659, I, CC).';
+    await page.fill('[data-testid="resposta-A"]', respostaA);
+    // Segue o segundo caminho do padrão ("OU"): tem de valer como completo.
+    await page.fill('[data-testid="resposta-B"]', 'Em São Paulo, domicílio do réu (art. 46 do CPC).');
+    await page.click('[data-testid="corrigir"]');
+
+    await expect(page.locator('[data-testid="fundamentos-A"]')).toHaveText('Fundamentos: 1 de 1');
+    await expect(page.locator('[data-testid="fundamentos-B"]')).toHaveText('Fundamentos: 1 de 1');
+    await expect(page.locator('[data-testid="item-B"]')).toContainText('A banca aceita 2 respostas');
+    await expect(page.locator('[data-testid="gabarito-A"]')).toContainText('Art. 1.659, inciso I, do CC');
+    await expect(page.locator('[data-testid="distribuicao-A"]')).toContainText('(0,50)');
+    await expect(page.locator('[data-testid="resumo-conferencia"]')).toContainText('citar o artigo sozinho não pontua');
+    await expect(page.locator('[data-testid="resposta-salva"]')).toBeVisible();
+
+    expect(enviadas).toHaveLength(1);
+    expect(enviadas[0].questao_id).toBe(QUESTAO_DISCURSIVA.id);
+    expect(enviadas[0].respostas.A).toBe(respostaA);
+    expect(enviadas[0].fundamentos).toEqual({ citados: 2, esperados: 2 });
+
+    // Voltar e reabrir: a última resposta vem do servidor, já conferida.
+    await page.click('[data-testid="voltar-lista"]');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await expect(page.locator('[data-testid="sua-resposta-A"]')).toHaveText(respostaA);
+    await expect(page.locator('[data-testid="fundamentos-A"]')).toHaveText('Fundamentos: 1 de 1');
+
+    // E dá para responder de novo, partindo do texto anterior.
+    await page.click('[data-testid="responder-de-novo"]');
+    await expect(page.locator('[data-testid="resposta-A"]')).toHaveValue(respostaA);
+  });
+
+  test('gravação recusada avisa, e o rascunho sobrevive ao recarregar', async ({ page }) => {
+    await simularDiscursivas(page, { lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA, falharGravacao: true });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+
+    await page.fill('[data-testid="resposta-A"]', 'Art. 1.659, I, do CC.');
+    await page.click('[data-testid="corrigir"]');
+
+    // A conferência aparece mesmo assim; o que falhou foi só a gravação.
+    await expect(page.locator('[data-testid="erro-gravacao"]')).toContainText('banco fora do ar');
+    await expect(page.locator('[data-testid="fundamentos-A"]')).toHaveText('Fundamentos: 1 de 1');
+
+    await page.reload();
+    await expect(page.locator('[data-testid="resposta-A"]')).toHaveValue('Art. 1.659, I, do CC.');
+  });
+
+  test('o rascunho é da conta: sair e entrar de novo o traz de volta', async ({ page }) => {
+    await simularDiscursivas(page, { lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await page.fill('[data-testid="resposta-A"]', 'Rascunho que sobrevive ao sair');
+
+    await page.click('[data-testid="sair"]');
+    await page.fill('input[type="email"]', EMAIL);
+    await page.fill('input[type="password"]', SENHA);
+    await page.click('button[type="submit"]');
+
+    // "Sair" zera a interface (a fase volta à 1ª), não o rascunho.
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await expect(page.locator(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`)).toContainText('Rascunho');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await expect(page.locator('[data-testid="resposta-A"]')).toHaveValue('Rascunho que sobrevive ao sair');
+  });
+
+  test('sair da questão com a gravação no ar não deixa o rascunho para trás', async ({ page }) => {
+    const { enviadas } = await simularDiscursivas(page, {
+      lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA, atrasoGravacaoMs: 1500,
+    });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await page.fill('[data-testid="resposta-A"]', 'Art. 1.659, I, do CC.');
+    await page.click('[data-testid="corrigir"]');
+    await page.click('[data-testid="voltar-lista"]');
+
+    // Na lista, enquanto o POST não volta, o rascunho ainda existe…
+    const item = page.locator(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await expect(item).toContainText('Rascunho');
+    // …e sai quando a resposta é salva, com a questão já fechada.
+    await expect(item).not.toContainText('Rascunho', { timeout: 5000 });
+    expect(enviadas).toHaveLength(1);
+    const naChave = await page.evaluate(() => {
+      const chave = Object.keys(localStorage).find((k) => k.startsWith('ma-questoes-conta-v1:'));
+      return JSON.parse(localStorage.getItem(chave) || '{}').segundaFase?.rascunhos || {};
+    });
+    expect(naChave).toEqual({});
+  });
+
+  test('reabrir a questão com a gravação no ar mostra a resposta salva quando ela volta', async ({ page }) => {
+    await simularDiscursivas(page, { lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA, atrasoGravacaoMs: 1500 });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    const item = page.locator(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await item.click();
+    await page.fill('[data-testid="resposta-A"]', 'Art. 1.659, I, do CC.');
+    await page.click('[data-testid="corrigir"]');
+    await page.click('[data-testid="voltar-lista"]');
+    await item.click();
+
+    // A carga desta abertura saiu antes do POST voltar; quando ele volta, a
+    // questão mostra a resposta salva — não um campo vazio.
+    await expect(page.locator('[data-testid="sua-resposta-A"]')).toHaveText('Art. 1.659, I, do CC.', { timeout: 5000 });
+    await expect(page.locator('[data-testid="fundamentos-A"]')).toHaveText('Fundamentos: 1 de 1');
+  });
+
+  test('a outra aba, com a mesma questão aberta, passa a mostrar a resposta salva', async ({ page, context }) => {
+    await simularDiscursivas(context, { lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await page.fill('[data-testid="resposta-A"]', 'Resposta escrita na primeira aba, art. 1.659 do CC.');
+
+    // Mesma questão aberta na outra aba, com o rascunho vindo da chave da conta.
+    const outra = await context.newPage();
+    await outra.goto('/');
+    await expect(outra.locator('[data-testid="resposta-A"]')).toHaveValue('Resposta escrita na primeira aba, art. 1.659 do CC.');
+
+    await page.click('[data-testid="corrigir"]');
+    await expect(page.locator('[data-testid="resposta-salva"]')).toBeVisible();
+
+    // A remoção do rascunho chega pelo evento `storage`; a outra aba busca a
+    // última resposta no servidor em vez de ficar com o campo vazio.
+    await expect(outra.locator('[data-testid="sua-resposta-A"]')).toHaveText('Resposta escrita na primeira aba, art. 1.659 do CC.', { timeout: 5000 });
+  });
+
+  test('descartar o rascunho volta à última correção sem ir ao servidor', async ({ page }) => {
+    const { consultas } = await simularDiscursivas(page, { lista: [RESUMO_DISCURSIVA], questao: QUESTAO_DISCURSIVA });
+    await entrar(page);
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await page.click(`[data-testid="discursiva-${QUESTAO_DISCURSIVA.id}"]`);
+    await page.fill('[data-testid="resposta-A"]', 'Primeira, art. 1.659 do CC.');
+    await page.click('[data-testid="corrigir"]');
+    await expect(page.locator('[data-testid="resposta-salva"]')).toBeVisible();
+
+    await page.click('[data-testid="responder-de-novo"]');
+    await page.fill('[data-testid="resposta-A"]', 'Segunda, que vou descartar.');
+    // Espera a busca disparada pelo salvamento assentar antes de contar: a
+    // contagem tem de ficar parada entre duas leituras.
+    await expect.poll(async () => {
+      const agora = consultas.respostas;
+      await page.waitForTimeout(250);
+      return consultas.respostas === agora;
+    }, { timeout: 10000 }).toBe(true);
+    const antes = consultas.respostas;
+    await page.click('button:has-text("Descartar e ver a última correção")');
+
+    await expect(page.locator('[data-testid="sua-resposta-A"]')).toHaveText('Primeira, art. 1.659 do CC.');
+    await page.waitForTimeout(500);
+    expect(consultas.respostas).toBe(antes);
+  });
+
+  test('com o acervo semeado, a resposta vai para o servidor e volta ao reabrir', async ({ page }) => {
+    await entrar(page);
+    const lista = await page.evaluate(async () => {
+      const token = localStorage.getItem('ma-questoes-token-v1');
+      const res = await fetch('/api/discursivas?area=civil', { headers: { Authorization: `Bearer ${token}` } });
+      return res.ok ? res.json() : null;
+    });
+    const semeada = (lista || []).find((q) => q.exame === 99);
+    test.skip(!semeada, 'backend sem /api/discursivas ou sem o seed de tests/e2e-discursivas.sql');
+
+    await page.locator('[data-testid="seletor-fase"]').selectOption('discursiva-civil');
+    await page.click(`[data-testid="discursiva-${semeada.id}"]`);
+
+    const texto = `Não, art. 1.659, I, do CC. (${Date.now()})`;
+    await page.fill('[data-testid="resposta-A"]', texto);
+    await page.click('[data-testid="corrigir"]');
+    await expect(page.locator('[data-testid="resposta-salva"]')).toBeVisible();
+
+    // Recarregar zera tudo o que é da tela; a resposta tem de vir do banco.
+    await page.reload();
+    await expect(page.locator('[data-testid="sua-resposta-A"]')).toHaveText(texto);
+  });
+});

@@ -44,6 +44,21 @@ $COMPOSE up -d --wait
 echo "Semeando o acervo de questões…"
 $COMPOSE exec -T postgres psql -q -U postgres -d questoes_db < tests/e2e-questoes.sql
 
+# As discursivas da 2ª fase só existem nas imagens do questoes-service que já
+# criam a tabela. Antes delas, pular o seed é o esperado — e o e2e real da 2ª
+# fase se pula junto; os que simulam a rota no navegador rodam de qualquer
+# jeito. Falha do seed com a tabela presente (coluna renomeada, por exemplo)
+# não derruba a suíte inteira: avisa aqui e o mesmo teste se pula.
+TEM_DISCURSIVAS=$($COMPOSE exec -T postgres psql -tA -U postgres -d questoes_db \
+  -c "SELECT to_regclass('public.questoes_discursivas') IS NOT NULL")
+if [ "$(echo "$TEM_DISCURSIVAS" | tr -d '[:space:]')" = "t" ]; then
+  echo "Semeando as questões discursivas…"
+  $COMPOSE exec -T postgres psql -q -v ON_ERROR_STOP=1 -U postgres -d questoes_db < tests/e2e-discursivas.sql \
+    || echo "  ✗ o seed de tests/e2e-discursivas.sql falhou — o e2e real da 2ª fase vai se pular" >&2
+else
+  echo "  questoes_discursivas ainda não existe nesta imagem — seed da 2ª fase pulado"
+fi
+
 echo "Criando o usuário de teste…"
 # 400 quando o e-mail já existe é resultado esperado, não erro: o script tem de
 # poder rodar duas vezes seguidas sem falhar.
