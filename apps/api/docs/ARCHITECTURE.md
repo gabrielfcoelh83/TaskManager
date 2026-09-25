@@ -119,6 +119,12 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 5. Middleware `verifyToken` (em shared/) valida o token
 6. `req.user` contém `{ userId, email }`
 
+**Login com o Google:** `POST /auth/google` recebe o ID token do Google
+Identity Services, confere assinatura e audiência com `GOOGLE_CLIENT_ID` e
+devolve o mesmo JWT. Sem a variável a rota responde 503. Em produção ela vem
+da variável `GOOGLE_CLIENT_ID` do GitHub Actions (não é secret: o Client ID é
+público) e precisa ser a mesma do `VITE_GOOGLE_CLIENT_ID` do front.
+
 **Problema Atual:** `verifyToken` duplicado em 4 lugares  
 **Solução:** Centralizar em `shared/middleware/auth.js` + `@shared` no package.json
 

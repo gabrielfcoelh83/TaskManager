@@ -240,6 +240,9 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          # Variável, não secret: o Client ID do Google é público (vai no
+          # bundle do front). Vazia, a rota /google responde 503.
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
@@ -250,6 +253,7 @@ jobs:
             IMAGE_TAG="$IMAGE_TAG" \
             DB_PASSWORD="$DB_PASSWORD" \
             JWT_SECRET="$JWT_SECRET" \
+            GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
             'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /srv/projects/TaskManager
@@ -263,6 +267,7 @@ jobs:
           IMAGE_TAG=${IMAGE_TAG}
           DB_PASSWORD=${DB_PASSWORD}
           JWT_SECRET=${JWT_SECRET}
+          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
           EOF
 
           # Pacotes no ghcr.io nascem privados. O GITHUB_TOKEN desta execução
