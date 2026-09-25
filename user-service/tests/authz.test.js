@@ -76,6 +76,53 @@ describe('PUT /users/:id — escrita por dono', () => {
   });
 });
 
+describe('PUT /users/:id — profile_data é mesclado, não substituído', () => {
+  const put = (body) =>
+    request(app).put(`/users/${DONO}`).set('Authorization', como(DONO)).send(body);
+
+  beforeEach(async () => {
+    await pool.query('UPDATE users SET profile_data = NULL WHERE user_id = $1', [DONO]);
+  });
+
+  it('gravar uma chave preserva as outras', async () => {
+    await put({ profile_data: { ficha: { versao: 1, concluidaEm: '2026-09-25T00:00:00Z' } } });
+    // O que uma aba antiga mandaria: só meta e data da prova.
+    const res = await put({ profile_data: { meta: 30, dataProva: null } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.profile_data).toEqual({
+      ficha: { versao: 1, concluidaEm: '2026-09-25T00:00:00Z' },
+      meta: 30,
+      dataProva: null,
+    });
+  });
+
+  it('a chave enviada substitui só a si mesma', async () => {
+    await put({ profile_data: { meta: 20, ficha: { dificuldades: ['Civil'] } } });
+    const res = await put({ profile_data: { ficha: { dificuldades: ['Penal'] } } });
+    expect(res.body.profile_data).toEqual({ meta: 20, ficha: { dificuldades: ['Penal'] } });
+  });
+
+  it('sem profile_data no corpo, o gravado fica', async () => {
+    await put({ profile_data: { meta: 25 } });
+    const res = await put({ name: 'Outro Nome' });
+    expect(res.body.profile_data).toEqual({ meta: 25 });
+  });
+
+  it('valor antigo que não é objeto recomeça do vazio', async () => {
+    await pool.query(`UPDATE users SET profile_data = '[1,2]'::jsonb WHERE user_id = $1`, [DONO]);
+    const res = await put({ profile_data: { meta: 10 } });
+    expect(res.body.profile_data).toEqual({ meta: 10 });
+  });
+
+  it('recusa profile_data que não é objeto, e o grande demais', async () => {
+    for (const ruim of [[1, 2], 'texto', 42]) {
+      expect((await put({ profile_data: ruim })).status).toBe(400);
+    }
+    expect((await put({ profile_data: { x: 'a'.repeat(20001) } })).status).toBe(400);
+  });
+});
+
 describe('GET /users — listagem restrita', () => {
   it('recusa usuário comum com 403', async () => {
     const res = await request(app).get('/users').set('Authorization', como(DONO));

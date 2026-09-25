@@ -192,14 +192,44 @@ app.post('/users', verifyToken, async (req, res) => {
   }
 });
 
+// Teto do profile_data gravado de uma vez: preferências e a ficha cabem com
+// folga em poucos kB; o teto só impede usar o perfil como depósito.
+const PROFILE_DATA_MAX = 20000;
+
 // Atualizar perfil de usuário
 app.put('/users/:id', verifyToken, requireOwnership, async (req, res) => {
-  const { name, email, profile_data } = req.body;
+  const { name, email, profile_data } = req.body || {};
+
+  // `profile_data` é MESCLADO no primeiro nível, não substituído. Antes a
+  // coluna inteira era trocada pelo que chegava: uma aba antiga (ou o bundle
+  // anterior, aberto antes de um deploy) que mandasse só `{ meta, dataProva }`
+  // apagava tudo o que outra tela tivesse gravado ali — a ficha de boas-vindas,
+  // por exemplo. Agora cada chave enviada substitui só a si mesma; para
+  // apagar uma chave, mande-a com `null`.
+  if (profile_data !== undefined && profile_data !== null &&
+      (typeof profile_data !== 'object' || Array.isArray(profile_data))) {
+    return res.status(400).json({ error: 'profile_data deve ser um objeto' });
+  }
+  const perfilJson = profile_data ? JSON.stringify(profile_data) : null;
+  if (perfilJson && perfilJson.length > PROFILE_DATA_MAX) {
+    return res.status(400).json({ error: `profile_data passa de ${PROFILE_DATA_MAX} caracteres` });
+  }
 
   try {
     const result = await pool.query(
-      'UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), profile_data = COALESCE($3, profile_data), updated_at = NOW() WHERE user_id = $4 RETURNING *',
-      [name, email, profile_data ? JSON.stringify(profile_data) : null, req.params.id]
+      `UPDATE users
+          SET name = COALESCE($1, name),
+              email = COALESCE($2, email),
+              profile_data = CASE
+                WHEN $3::jsonb IS NULL THEN profile_data
+                -- Valor antigo que não seja objeto (não deveria existir) não
+                -- vira array concatenado: recomeça do objeto vazio.
+                ELSE (CASE WHEN jsonb_typeof(profile_data) = 'object' THEN profile_data ELSE '{}'::jsonb END) || $3::jsonb
+              END,
+              updated_at = NOW()
+        WHERE user_id = $4
+        RETURNING *`,
+      [name, email, perfilJson, req.params.id]
     );
 
     if (result.rows.length === 0) {
