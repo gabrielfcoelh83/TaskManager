@@ -21,6 +21,7 @@
 
 const { pool } = require('./app');
 const { migrate } = require('./migrate');
+const { modelosEmOrdem } = require('./openrouter');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -28,17 +29,19 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // classificar 80 questões não justifica gasto, e escolher rótulo de uma lista
 // fechada é tarefa fácil o bastante para eles.
 //
-// Estes ids foram conferidos contra GET /api/v1/models antes de entrar aqui, e
-// isso não é zelo excessivo: os três ids que este arquivo tinha na primeira
-// versão — copiados da rota de geração do front — NÃO EXISTEM na OpenRouter.
-// Model id errado devolve 404, o laço cai para o próximo, o último também
-// falha, e o resultado é "nenhum modelo respondeu" — que parece rede ruim ou
-// chave inválida. Ao trocar um id, confira contra a API, não contra a memória
-// de como o modelo se chama.
-const MODELOS = [
+// Isto é só PREFERÊNCIA, não a lista usada: antes de cada rodada os ids são
+// conferidos contra GET /api/v1/models (openrouter.js), e os que não existirem
+// mais são pulados. Uma lista fixa já quebrou duas vezes aqui — os três ids da
+// primeira versão, copiados da rota de geração do front, não existiam, e
+// `openai/gpt-oss-20b:free`, conferido quando entrou, sumiu depois. Model id
+// errado devolve 404, o laço cai para o próximo, o último também falha, e o
+// resultado é "nenhum modelo respondeu" — que parece rede ruim ou chave
+// inválida. Se nenhum daqui existir, openrouter.js cai para os gratuitos de
+// maior contexto; a env IA_MODELOS substitui esta lista sem mexer no código.
+const PREFERIDOS = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'google/gemma-4-31b-it:free',
-  'openai/gpt-oss-20b:free',
+  'qwen/qwen3.8-27b:free',
 ];
 
 // Lista fechada, tirada do edital da 1ª fase. É o coração deste arquivo.
@@ -159,12 +162,17 @@ function interpretarResposta(texto, questoes) {
   return { aceitas, recusadas };
 }
 
-async function chamarOpenRouter(prompt, { chave, modelos = MODELOS } = {}) {
+async function chamarOpenRouter(prompt, { chave, modelos } = {}) {
   if (!chave) throw new Error('OPENROUTER_API_KEY não definida');
+
+  // Descoberta a cada chamada, mas com cache de 1h em openrouter.js: numa
+  // rodada de vários lotes, a listagem sai uma vez só.
+  const ordem = modelos || (await modelosEmOrdem(PREFERIDOS));
+  if (ordem.length === 0) throw new Error('a OpenRouter não lista nenhum modelo gratuito');
 
   let ultimoErro = null;
 
-  for (const modelo of modelos) {
+  for (const modelo of ordem) {
     try {
       const res = await fetch(OPENROUTER_URL, {
         method: 'POST',
