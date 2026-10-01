@@ -94,6 +94,32 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 
 ---
 
+## 📚 Objetivas: disciplina e tema
+
+Enunciado, alternativas, gabarito e anulação são copiados da prova e do
+gabarito definitivo da FGV. Disciplina e tema são enriquecimento, e cada um
+guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004):
+
+- **disciplina** vem da posição da questão na prova (`'prova'`): a FGV monta
+  a 1ª fase em blocos fixos por disciplina. A tabela fica em
+  `questoes-service/disciplinas.js`, por exame e tipo de prova, e só tem
+  exames conferidos (hoje 44º e 45º). Exame fora da tabela fica sem
+  disciplina e a IA escolhe de uma lista fechada (`'ia'`).
+- **tema** vem da IA (`'ia'`), que recebe a disciplina pronta quando ela existe.
+- `'humano'` nunca é sobrescrito por carga, backfill ou IA.
+
+**Carga do acervo** (fora do serviço)
+1. `importador/importar.py --exame N --tipo 1 --prova ... --gabarito ... --saida oabN.json`
+2. `node carregar.js oabN.json` — upsert idempotente; grava a disciplina pela
+   posição quando a tabela conhece (exame, tipo).
+3. `node aplicar_disciplina_posicao.js [--exame N] [--aplicar]` — só para o
+   acervo carregado antes da tabela, ou depois de a tabela mudar. Sem
+   `--aplicar`, só mostra o que mudaria.
+4. `OPENROUTER_API_KEY=... node classificar.js [--aplicar]` — preenche o tema
+   (e a disciplina, onde a tabela não chega).
+
+---
+
 ## ✍️ Discursivas da 2ª fase
 
 Questões discursivas da prova prático-profissional (só as 4 questões; a peça
