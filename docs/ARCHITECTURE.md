@@ -117,6 +117,20 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    `--aplicar`, só mostra o que mudaria.
 4. `OPENROUTER_API_KEY=... node classificar.js [--aplicar]` — preenche o tema
    (e a disciplina, onde a tabela não chega).
+5. `OPENROUTER_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia]`
+   — escreve a **explicação** a partir do gabarito oficial (`explicacao_fonte = 'ia'`,
+   `revisada = false`). O modelo recebe a letra oficial e devolve, junto do texto,
+   a letra que considera correta; se ela divergir do gabarito, a explicação é
+   recusada (um modelo que discorda do gabarito não o explica). Também recusa
+   texto vazio, curto/longo demais, com cerca markdown ou que afirme outra
+   alternativa como correta. Anuladas ficam de fora (não há resposta oficial
+   para explicar); `'humano'` nunca entra na fila nem é sobrescrito, e o UPDATE
+   repete as condições (vazia / `'ia'` não revisada, não anulada, mesmo
+   gabarito) para não gravar sobre o que mudou no meio. `--refazer-ia` refaz
+   só as `'ia'` ainda não revisadas. Padrão: lotes de 3, 30 questões por
+   rodada — a cota gratuita é de 50 pedidos/dia, e a conferência (sem
+   `--aplicar`) gasta cota igual. Se todos os modelos devolverem 429, a rodada
+   para. Lotes recusados ou com JSON quebrado voltam na próxima execução.
 
 ---
 
