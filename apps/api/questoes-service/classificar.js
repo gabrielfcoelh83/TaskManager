@@ -1,19 +1,34 @@
-// Classifica por disciplina e tema as questões que ainda não têm.
+// Dá TEMA às questões que ainda não têm — e disciplina só às que a prova não
+// define.
 //
 //   node classificar.js                    # mostra o que faria, não grava
 //   node classificar.js --aplicar          # grava
 //   node classificar.js --exame 45 --lote 8 --aplicar
 //
 // ONDE ENTRA A IA, E ONDE NÃO ENTRA
-// O modelo escolhe um RÓTULO de uma lista fechada. Ele não vê, não escreve e
-// não pode alterar enunciado, alternativas ou gabarito — essas colunas nem
-// aparecem no UPDATE. Um rótulo errado põe a questão na gaveta errada; um
-// gabarito errado ensina Direito errado. Só a primeira coisa é reversível, e é
-// por isso que só ela é confiada a um modelo.
+// O modelo escreve RÓTULOS. Ele não vê, não escreve e não pode alterar
+// enunciado, alternativas ou gabarito — essas colunas nem aparecem no UPDATE.
+// Um rótulo errado põe a questão na gaveta errada; um gabarito errado ensina
+// Direito errado. Só a primeira coisa é reversível, e é por isso que só ela é
+// confiada a um modelo.
 //
-// A disciplina gravada sai marcada como `disciplina_fonte = 'ia'` e a questão
-// continua `revisada = false`. Ninguém precisa confiar nisto: precisa saber
-// de onde veio.
+// A DISCIPLINA, na maior parte do acervo, nem é mais dele: a FGV monta a prova
+// em blocos fixos por disciplina, e o carregar.js grava a disciplina pela
+// posição da questão (fonte 'prova', tabela em disciplinas.js). No 45º Exame
+// o modelo errou 16 de 72 disciplinas, confundindo vizinhas (Penal ×
+// Processual Penal, Constitucional × Internacional) ou escolhendo por falta de
+// opção (a lista não tinha Eleitoral nem Financeiro). Quando a questão já tem disciplina, o modelo recebe essa disciplina
+// pronta e devolve só o tema; o que ele disser sobre disciplina é ignorado.
+//
+// A lista fechada continua valendo para as questões SEM disciplina — exame
+// (ou tipo de prova) que a tabela ainda não conhece. Para elas o modelo é a única fonte que
+// existe, e a lista é o que impede "Civil", "D. Civil" e "Direito Civil" de
+// virarem três gavetas.
+//
+// O que o modelo grava sai marcado 'ia' (`tema_fonte`, e `disciplina_fonte`
+// quando a disciplina também foi dele), e a questão continua
+// `revisada = false`. Ninguém precisa confiar nisto: precisa saber de onde
+// veio.
 //
 // Roda à mão, fora do serviço, como o carregar.js. O serviço não tem rota de
 // escrita, e uma rota que aceitasse classificação seria a porta pela qual um
@@ -22,6 +37,7 @@
 const { pool } = require('./app');
 const { migrate } = require('./migrate');
 const { modelosEmOrdem } = require('./openrouter');
+const { DISCIPLINAS } = require('./disciplinas');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -44,40 +60,26 @@ const PREFERIDOS = [
   'qwen/qwen3.8-27b:free',
 ];
 
-// Lista fechada, tirada do edital da 1ª fase. É o coração deste arquivo.
+// Lista fechada: a de disciplinas.js, a mesma da tabela da prova. Uma cópia
+// aqui seria a forma de as duas divergirem sem ninguém perceber — foi o que
+// deixou Direito Eleitoral e Direito Financeiro de fora da versão anterior.
 //
-// O modelo não devolve disciplina: ele ESCOLHE uma daqui. Qualquer coisa fora
-// da lista é recusada e a questão fica sem classificação, para ser vista de
-// novo na próxima rodada. Sem isso, o acervo acumularia "Direito Civil",
-// "Civil", "D. Civil" e "Direito Civil e Processual Civil" como quatro
-// disciplinas diferentes, e o filtro da tela mostraria as quatro.
-const DISCIPLINAS = [
-  'Ética Profissional',
-  'Filosofia do Direito',
-  'Direito Constitucional',
-  'Direitos Humanos',
-  'Direito Internacional',
-  'Direito Tributário',
-  'Direito Administrativo',
-  'Direito Ambiental',
-  'Direito Civil',
-  'Direito do Consumidor',
-  'Direito da Criança e do Adolescente',
-  'Direito Empresarial',
-  'Direito Processual Civil',
-  'Direito Penal',
-  'Direito Processual Penal',
-  'Direito do Trabalho',
-  'Direito Processual do Trabalho',
-  'Direito Previdenciário',
-];
-
+// Quando a questão não tem disciplina, o modelo não devolve uma: ele ESCOLHE
+// uma daqui. Qualquer coisa fora da lista é recusada e a questão fica sem
+// classificação, para ser vista de novo na próxima rodada. Sem isso, o acervo
+// acumularia "Direito Civil", "Civil", "D. Civil" e "Direito Civil e
+// Processual Civil" como quatro disciplinas diferentes, e o filtro da tela
+// mostraria as quatro.
 const VALIDAS = new Set(DISCIPLINAS);
 
 const PROMPT_SISTEMA = `Você classifica questões do Exame de Ordem da OAB.
 
-Para cada questão, escolha a disciplina EXATAMENTE como escrita na lista abaixo
-e um tema curto (2 a 5 palavras) dentro dela.
+Algumas questões já chegam com "disciplina": ela foi definida pela banca e NÃO
+pode ser trocada. Para essas, devolva apenas um tema curto (2 a 5 palavras)
+dentro daquela disciplina, mesmo que o assunto pareça de outra.
+
+Para as que chegam SEM disciplina, escolha a disciplina EXATAMENTE como escrita
+na lista abaixo e um tema curto (2 a 5 palavras) dentro dela.
 
 Lista de disciplinas permitidas:
 ${DISCIPLINAS.map((d) => `- ${d}`).join('\n')}
@@ -93,6 +95,10 @@ Regras:
 function montarPrompt(questoes) {
   const itens = questoes.map((q) => ({
     id: q.id,
+    // A disciplina da prova vai junto: tema escolhido sabendo a gaveta sai
+    // coerente com ela ("Cadeia de custódia" em Processual Penal, e não
+    // "Homicídio" só porque o caso narra um).
+    ...(q.disciplina ? { disciplina: q.disciplina } : {}),
     // Enunciado cortado: o começo já diz a matéria, e mandar 80 enunciados
     // inteiros estoura o contexto dos modelos gratuitos.
     enunciado: String(q.enunciado).slice(0, 700),
@@ -108,8 +114,13 @@ Responda no formato:
 
 // Separada da chamada de rede de propósito: é a parte que decide o que entra
 // no banco, e é a que precisa de teste sem internet.
+//
+// Questão que chegou com disciplina sai com ESSA disciplina, diga o modelo o
+// que disser: ele foi chamado para dar tema, e deixar a resposta dele escolher
+// a gaveta seria devolver a ele a decisão que a prova já tomou.
 function interpretarResposta(texto, questoes) {
   const idsDoLote = new Set(questoes.map((q) => q.id));
+  const definida = new Map(questoes.filter((q) => q.disciplina).map((q) => [q.id, q.disciplina]));
 
   const limpo = String(texto || '')
     .replace(/```json\n?/g, '')
@@ -139,6 +150,18 @@ function interpretarResposta(texto, questoes) {
       continue;
     }
 
+    const tema = item.tema == null ? null : String(item.tema).trim().slice(0, 120) || null;
+
+    if (definida.has(id)) {
+      // Sem tema não há o que gravar: a disciplina já estava lá.
+      if (!tema) {
+        recusadas.push({ id, motivo: 'modelo não deu tema' });
+        continue;
+      }
+      aceitas.push({ id, disciplina: definida.get(id), tema });
+      continue;
+    }
+
     if (item.disciplina === null || item.disciplina === undefined) {
       recusadas.push({ id, motivo: 'modelo não soube classificar' });
       continue;
@@ -153,8 +176,6 @@ function interpretarResposta(texto, questoes) {
       recusadas.push({ id, motivo: `disciplina fora da lista: ${JSON.stringify(disciplina)}` });
       continue;
     }
-
-    const tema = item.tema == null ? null : String(item.tema).trim().slice(0, 120) || null;
 
     aceitas.push({ id, disciplina, tema });
   }
@@ -217,7 +238,9 @@ async function chamarOpenRouter(prompt, { chave, modelos } = {}) {
 
 async function buscarPendentes(cliente, { exame, limite, ignorar = [] }) {
   const valores = [];
-  const condicoes = ['disciplina IS NULL'];
+  // A fila é "sem tema", e não mais "sem disciplina": a maior parte do acervo
+  // já chega com a disciplina da prova e ainda precisa do tema.
+  const condicoes = ['tema IS NULL'];
 
   if (exame != null) {
     valores.push(exame);
@@ -235,7 +258,7 @@ async function buscarPendentes(cliente, { exame, limite, ignorar = [] }) {
   valores.push(limite);
 
   const { rows } = await cliente.query(
-    `SELECT id, exame, numero, enunciado
+    `SELECT id, exame, numero, enunciado, disciplina
        FROM questoes
       WHERE ${condicoes.join(' AND ')}
       ORDER BY exame DESC, numero ASC
@@ -254,16 +277,25 @@ async function gravar(cliente, aceitas) {
   let gravadas = 0;
 
   for (const item of aceitas) {
-    // O WHERE repete `disciplina IS NULL`: entre a leitura e a escrita alguém
-    // pode ter classificado à mão, e uma classificação humana não pode ser
-    // sobrescrita por uma de modelo.
+    // A disciplina só é escrita se estava vazia — e só então a fonte dela vira
+    // 'ia'. Se já havia disciplina (da prova ou de uma pessoa), ela e a fonte
+    // ficam como estão, e o modelo escreve apenas o tema.
+    //
+    // O WHERE repete a leitura: entre ela e a escrita alguém pode ter posto
+    // tema à mão, ou a disciplina pode ter mudado (backfill por posição,
+    // correção humana). Nos dois casos o palpite do modelo foi dado sobre um
+    // estado que não existe mais, e a questão volta na próxima rodada. Uma
+    // classificação humana nunca é sobrescrita por uma de modelo.
     const { rowCount } = await cliente.query(
       `UPDATE questoes
-          SET disciplina       = $2,
+          SET disciplina       = COALESCE(disciplina, $2),
+              disciplina_fonte = CASE WHEN disciplina IS NULL THEN 'ia' ELSE disciplina_fonte END,
               tema             = $3,
-              disciplina_fonte = 'ia',
+              tema_fonte       = CASE WHEN $3::text IS NULL THEN NULL ELSE 'ia' END,
               atualizada_em    = NOW()
-        WHERE id = $1 AND disciplina IS NULL`,
+        WHERE id = $1
+          AND tema IS NULL
+          AND (disciplina IS NULL OR disciplina = $2)`,
       [item.id, item.disciplina, item.tema]
     );
     gravadas += rowCount;
