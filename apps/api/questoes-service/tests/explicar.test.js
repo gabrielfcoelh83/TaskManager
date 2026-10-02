@@ -16,6 +16,7 @@ const {
   montarPrompt,
   chamarOpenRouter,
   letraAfirmadaNoTexto,
+  citacaoNumerada,
   PROMPT_SISTEMA,
 } = require('../explicar');
 
@@ -131,9 +132,16 @@ describe('montarPrompt', () => {
     expect(prompt).toMatch(/"gabarito_oficial": "A"/);
   });
 
-  it('o prompt de sistema proíbe inventar número de artigo', () => {
-    expect(PROMPT_SISTEMA).toMatch(/NÃO INVENTE NÚMERO DE ARTIGO/);
-    expect(PROMPT_SISTEMA).toMatch(/sem citar número/);
+  it('o prompt de sistema proíbe número de dispositivo, mesmo com certeza', () => {
+    expect(PROMPT_SISTEMA).toMatch(/É PROIBIDO ESCREVER QUALQUER NÚMERO DE DISPOSITIVO/);
+    expect(PROMPT_SISTEMA).toMatch(/mesmo\s+que você tenha certeza/);
+    for (const termo of ['artigo', 'parágrafo', 'inciso', 'alínea', 'súmula', 'lei', 'decreto', 'tema', 'enunciado', 'REsp', 'ADI', '§']) {
+      expect(PROMPT_SISTEMA).toContain(termo);
+    }
+    // nomear o diploma sem número continua permitido
+    expect(PROMPT_SISTEMA).toMatch(/"a Lei do\s+Inquilinato"/);
+    // e a regra antiga, que deixava citar "com certeza", não volta
+    expect(PROMPT_SISTEMA).not.toMatch(/QUANDO VOCÊ TIVER CERTEZA/);
   });
 });
 
@@ -206,6 +214,103 @@ describe('interpretarResposta', () => {
       expect(aceitas).toEqual([]);
       expect(recusadas[0].motivo).toMatch(motivo);
     }
+  });
+
+  // Os três erros reais da rodada no 45º Exame (ver explicar.js): todos em
+  // citação numerada, todos escritos com "certeza".
+  it('recusa os três erros reais de citação numerada do 45º Exame', () => {
+    const casos = [
+      ['A Súmula 37 do STJ admite cumular dano estético e moral.', 'Súmula 37'],
+      ['A Lei 9.514/97, que regula a alienação fiduciária de bens móveis, autoriza a busca.', 'Lei 9.514/97'],
+      ['A procuração pode ser outorgada oralmente, nos termos do art. 112 do ECA.', 'art. 112'],
+    ];
+    for (const [frase, trecho] of casos) {
+      const { aceitas, recusadas } = interpretarResposta(
+        resp([{ id: 1, correta: 'C', explicacao: `${textoBom()} ${frase}` }]),
+        [lote[0]]
+      );
+      expect(aceitas).toEqual([]);
+      expect(recusadas).toEqual([{ id: 1, motivo: `cita dispositivo numerado: ${trecho}` }]);
+    }
+  });
+
+  it('aceita texto com números que não são citação e diplomas nomeados sem número', () => {
+    const frase =
+      'O prazo é de 15 dias, a multa chega a R$ 10.000,00 e o réu era maior de 18 anos; a prova tem 80 questões ' +
+      'e o contrato durou 2 anos. A CF/88, a Constituição de 1988, o Código Civil de 2002, o CPC/2015, ' +
+      'a Lei do Inquilinato, o Estatuto da Advocacia, o ECA, a LINDB, a jurisprudência do STJ e o parágrafo ' +
+      'único do dispositivo tratam do tema; o 1º grau decidiu em 30% do valor.';
+    const { aceitas, recusadas } = interpretarResposta(
+      resp([{ id: 1, correta: 'C', explicacao: `${textoBom()} ${frase}` }]),
+      [lote[0]]
+    );
+    expect(recusadas).toEqual([]);
+    expect(aceitas).toHaveLength(1);
+  });
+
+  describe('citacaoNumerada', () => {
+    it.each([
+      ['art 112 do ECA', 'art 112'],
+      ['Art.5º', 'Art.5º'],
+      ['arts. 1.228 e 1.229', 'arts. 1.228'],
+      ['artigo 37 da Constituição', 'artigo 37'],
+      ['nos termos do § 2º', '§ 2º'],
+      ['no § único', '§'],
+      ['parágrafo 2º', 'parágrafo 2º'],
+      ['inciso IV', 'inciso IV'],
+      ['incisos ii e iii', 'incisos ii'],
+      ['inciso 3', 'inciso 3'],
+      ['alínea "a"', 'alínea "a"'],
+      ['alinea b', 'alinea b'],
+      ['Súmula Vinculante 13', 'Súmula Vinculante 13'],
+      ['súmula nº 7 do STJ', 'súmula nº 7'],
+      ['SV 13', 'SV 13'],
+      ['Lei nº 8.245/1991', 'Lei nº 8.245/1991'],
+      ['Lei n. 8.078', 'Lei n. 8.078'],
+      ['Lei Complementar 123', 'Lei Complementar 123'],
+      ['Decreto-Lei 911/69', 'Decreto-Lei 911/69'],
+      ['DL 911/69', 'DL 911/69'],
+      ['decreto 3.000', 'decreto 3.000'],
+      ['MP 2.200', 'MP 2.200'],
+      ['LC 123', 'LC 123'],
+      ['Medida Provisória 1.000', 'Medida Provisória 1.000'],
+      ['Tema 1.046 do STF', 'Tema 1.046'],
+      ['Enunciado 22 da Jornada', 'Enunciado 22'],
+      ['REsp 1.234.567', 'REsp 1.234.567'],
+      ['AgRg no AREsp 123', 'AREsp 123'],
+      ['RE 574.706', 'RE 574.706'],
+      ['HC 126.292', 'HC 126.292'],
+      ['ADI 4.277', 'ADI 4.277'],
+      ['ADPF 132', 'ADPF 132'],
+      ['ADC 43', 'ADC 43'],
+      ['a Lei do Inquilinato (8.245/91)', '8.245/91'],
+      ['processo nº 123', 'nº 123'],
+    ])('recusa %j', (texto, trecho) => {
+      expect(citacaoNumerada(texto)).toBe(trecho);
+    });
+
+    it.each([
+      'prazo de 15 dias',
+      '80 questões',
+      '2 anos',
+      'R$ 10.000',
+      'CF/88',
+      'a Constituição de 1988',
+      'CPC/2015',
+      '1º grau e 2ª fase',
+      'o 45º Exame',
+      'o parágrafo único do dispositivo',
+      'o enunciado no 2º parágrafo',
+      'a lei de 1990',
+      'a súmula do STJ, editada em 2009,',
+      'o artigo de lei',
+      'a parte 2',
+      'inciso do artigo',
+      'a alínea é clara',
+      'RE e REsp',
+    ])('aceita %j', (texto) => {
+      expect(citacaoNumerada(texto)).toBeNull();
+    });
   });
 
   it('recusa id fora do lote e id repetido, e registra questão sem resposta', () => {
