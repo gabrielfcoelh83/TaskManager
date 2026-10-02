@@ -123,7 +123,19 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    a letra que considera correta; se ela divergir do gabarito, a explicação é
    recusada (um modelo que discorda do gabarito não o explica). Também recusa
    texto vazio, curto/longo demais, com cerca markdown ou que afirme outra
-   alternativa como correta. Anuladas ficam de fora (não há resposta oficial
+   alternativa como correta. **Número de dispositivo é proibido**: o prompt
+   veda número de artigo, parágrafo, inciso, alínea, súmula, lei, decreto, MP,
+   tema/tese, enunciado e julgado (REsp, RE, HC, ADI...) — o modelo nomeia o
+   diploma ou o tribunal sem número ("o Código Civil", "a Lei do Inquilinato",
+   "a jurisprudência do STJ") — e `citacaoNumerada` recusa o texto que trouxer
+   um ("cita dispositivo numerado: <trecho>"). Motivo: na primeira rodada (42
+   questões do 45º, 9 conferidas), 3 dos 4 erros jurídicos eram citações
+   numeradas erradas escritas com "certeza" (Súmula 37 no lugar da 387; Lei
+   9.514/97 como de bens móveis; art. 112 do ECA para procuração oral).
+   Número solto não é citação e passa (prazos, valores, idades, "CF/88",
+   "Constituição de 1988"); "§" é sempre recusado; "parágrafo único" por
+   extenso passa. Erro de conteúdo sem número nenhum o filtro não pega — por
+   isso `revisada = false`. Anuladas ficam de fora (não há resposta oficial
    para explicar); `'humano'` nunca entra na fila nem é sobrescrito, e o UPDATE
    repete as condições (vazia / `'ia'` não revisada, não anulada, mesmo
    gabarito) para não gravar sobre o que mudou no meio. `--refazer-ia` refaz

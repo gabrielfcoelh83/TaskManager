@@ -88,6 +88,23 @@ const MIN_PALAVRAS = 50;
 const MAX_PALAVRAS = 400;
 const MAX_CARACTERES = 3500;
 
+// SEM NÚMERO DE DISPOSITIVO
+// A primeira versão do prompt pedia "cite o dispositivo QUANDO TIVER CERTEZA".
+// Rodada em 42 questões reais do 45º Exame, das 9 conferidas à mão 4 tinham
+// erro jurídico — e 3 desses 4 estavam justamente na citação numerada, que o
+// modelo escreveu com toda a "certeza":
+//   - "Súmula 37 do STJ admite cumular dano estético e moral" (é a 387);
+//   - "Lei 9.514/97, que regula a alienação fiduciária de bens móveis" (ela é
+//     de imóveis; a de veículos é o DL 911/69);
+//   - "art. 112 do ECA" como base da procuração oral (o 112 é o das medidas
+//     socioeducativas).
+// Modelo gratuito não sabe quando sabe um número, e número errado é o pior
+// erro possível numa explicação de cursinho: o aluno decora. Então o número
+// está PROIBIDO — o modelo nomeia o diploma ou o tribunal e explica a regra —
+// e a proibição é conferida no texto (`citacaoNumerada`), não só pedida.
+// (O 4º erro foi de conteúdo — renovatória: disse que o terceiro precisa
+// explorar o mesmo ramo, quando a lei diz que NÃO pode. Esse nenhum filtro
+// pega; é para isso que existe `revisada = false`.)
 const PROMPT_SISTEMA = `Você é professor de cursinho preparatório para o Exame de Ordem da OAB.
 Sua tarefa é EXPLICAR o gabarito oficial da FGV de questões objetivas.
 
@@ -95,12 +112,20 @@ Para cada questão você recebe o enunciado, as alternativas A, B, C e D e a
 letra correta segundo o gabarito oficial. Escreva uma explicação que:
 - diga por que a alternativa correta está certa;
 - diga, uma a uma, por que cada uma das outras três está errada;
-- cite o dispositivo legal, a súmula ou o entendimento jurisprudencial que
-  fundamenta a resposta QUANDO VOCÊ TIVER CERTEZA dele.
+- explique a regra jurídica que fundamenta a resposta, com suas palavras.
 
-NÃO INVENTE NÚMERO DE ARTIGO, PARÁGRAFO, INCISO OU SÚMULA. Na dúvida sobre o
-número, explique a regra sem citar número ("o Código Civil prevê que...").
-Uma citação errada é pior do que nenhuma: o aluno vai decorá-la.
+É PROIBIDO ESCREVER QUALQUER NÚMERO DE DISPOSITIVO OU DE PRECEDENTE, mesmo
+que você tenha certeza dele: nenhum número de artigo, parágrafo, inciso,
+alínea, súmula (inclusive vinculante), lei, lei complementar, decreto,
+decreto-lei, medida provisória, tema ou tese, enunciado, nem de julgado
+(REsp, RE, HC, ADI, ADPF etc.). Não use o símbolo §.
+Nomeie o diploma ou o tribunal SEM número: "o Código Civil", "a Lei do
+Inquilinato", "o Estatuto da Advocacia", "o ECA", "a LINDB", "a Constituição",
+"a jurisprudência do STJ", "súmula do STF". Exemplo: em vez de "conforme o
+art. 1.228 do CC", escreva "o Código Civil assegura ao proprietário...".
+Explicação com número de dispositivo é descartada automaticamente.
+Prazos, valores, idades e quantidades continuam permitidos ("prazo de 15
+dias", "maior de 18 anos").
 
 Estilo: português do Brasil, tom de professor de cursinho, direto e
 didático. Entre 120 e 200 palavras por questão. Texto corrido, sem
@@ -148,6 +173,78 @@ function letraAfirmadaNoTexto(texto) {
   return [...letras];
 }
 
+// CITAÇÃO NUMERADA (ver "SEM NÚMERO DE DISPOSITIVO", acima do prompt).
+//
+// Critério: recusa um NÚMERO preso a uma palavra que designa dispositivo,
+// norma ou julgado. Número solto não é citação e passa: "prazo de 15 dias",
+// "80 questões", "2 anos", "R$ 10.000", "1º grau", "Constituição de 1988",
+// "Código Civil de 2002". Ano só é recusado quando faz parte do número de uma
+// norma ("Lei 9.514/97", "8.245/1991"). Siglas de diploma com ano — "CF/88",
+// "CPC/2015", "CC/2002" — nomeiam o diploma, não um dispositivo, e passam.
+//
+// Decisões de fronteira:
+//  - "§" é recusado sempre, com ou sem número: o símbolo só existe em citação.
+//  - "parágrafo único" escrito por extenso passa: sem o número do artigo não
+//    aponta dispositivo nenhum. "parágrafo 2º" é recusado.
+//  - ordinais por extenso ("artigo quinto") NÃO são pegos: "o artigo segundo
+//    o qual..." daria falso positivo, e modelo não costuma escrever assim.
+//  - "tema", "tese" e "enunciado" + número são recusados mesmo fora de
+//    citação ("no tema 2 vezes" cairia): frase rara, e "Tema 1.046" é como
+//    se cita repercussão geral. Errar para o lado da recusa custa só um
+//    pedido; errar para o lado da aceitação grava citação inventada.
+//
+// Fronteira de palavra por lookaround Unicode (\p{L}), não \b: \b é ASCII e
+// trata "í" de "alínea" como separador.
+// "nº", "n°", "n.", "no." (com ponto: "no" sozinho é preposição — "o
+// enunciado no 2º parágrafo" não é citação) + 5 · 1.228 · 9.514/97 · 5º
+const NUM = String.raw`(?:n\s*(?:[º°]\.?|o\.|\.)\s*)?\d+(?:\.\d+)*(?:\/\d{2,4})?[º°ª]?`;
+const ANTES = String.raw`(?<!\p{L})`;
+const DEPOIS = String.raw`(?!\p{L})`;
+
+const CITACOES_NUMERADAS = [
+  // art. 5º · art 112 · arts. 1.228 · artigo 37
+  new RegExp(String.raw`${ANTES}(?:arts?\.?|artigos?)\s*${NUM}`, 'iu'),
+  // qualquer §
+  /§+\s*[\d\wº°]*/u,
+  // parágrafo 2º · parágrafos 1º e 2º (mas não "parágrafo único")
+  new RegExp(String.raw`${ANTES}par[aá]grafos?\s*${NUM}`, 'iu'),
+  // inciso IV · inciso 3 · incisos II e III
+  new RegExp(String.raw`${ANTES}incisos?\s+(?:[ivxlcdm]+${DEPOIS}|\d+)`, 'iu'),
+  // alínea "a" · alínea b · alíneas a e b
+  new RegExp(String.raw`${ANTES}al[ií]neas?\s*["“'‘(]?[a-z]["”'’)]?${DEPOIS}`, 'iu'),
+  // Súmula 387 · Súmula Vinculante 13 · súmulas nº 7 · SV 13
+  new RegExp(String.raw`${ANTES}s[uú]mulas?\s+(?:vinculantes?\s+)?${NUM}`, 'iu'),
+  new RegExp(String.raw`${ANTES}SV\s*${NUM}`, 'u'),
+  // Lei 9.514/97 · Lei nº 8.245/1991 · Lei Complementar 123 · Decreto-Lei 911 ·
+  // DL 911/69 · MP 2.200 · LC 123 · Medida Provisória 1.000 · EC 45
+  new RegExp(
+    String.raw`${ANTES}(?:leis?(?:\s+(?:complementar|ordin[aá]ria|delegada|federal|estadual|municipal))?` +
+      String.raw`|decretos?(?:[\s-]+leis?)?|DL|MP|LC|EC|medidas?\s+provis[oó]rias?` +
+      String.raw`|emendas?\s+constitucion(?:al|ais))\s*${NUM}`,
+    'iu'
+  ),
+  // Tema 1.046 · Tese 5 · Enunciado 22 (das Jornadas, do FONAJE...)
+  new RegExp(String.raw`${ANTES}(?:temas?|teses?|enunciados?)\s+${NUM}`, 'iu'),
+  // Julgados. Sensível à caixa: "re", "ms", "ai" minúsculos são palavras.
+  new RegExp(
+    String.raw`${ANTES}(?:E?A?REsp|AgRg|AgInt|EDcl|A?RE|AI|R?HC|R?MS|ADIn?|ADPF|ADC|ADO|Rcl)[\s-]*${NUM}`,
+    'u'
+  ),
+  // número de norma sem a palavra: "(8.245/91)", "9.514/1997"
+  /(?<![\d.])\d{1,2}\.\d{3}\/(?:\d{4}|\d{2})(?!\d)/u,
+  // "nº 123" sozinho
+  new RegExp(String.raw`${ANTES}n[º°]\s*\.?\s*\d+(?:\.\d+)*`, 'iu'),
+];
+
+// O trecho da primeira citação numerada do texto, ou null.
+function citacaoNumerada(texto) {
+  for (const re of CITACOES_NUMERADAS) {
+    const m = re.exec(texto);
+    if (m) return m[0].trim();
+  }
+  return null;
+}
+
 // Motivo da recusa do texto, ou null se passa.
 function problemaNoTexto(texto, letraOficial) {
   if (texto.includes('```')) return 'texto com cerca de markdown';
@@ -155,6 +252,8 @@ function problemaNoTexto(texto, letraOficial) {
   const palavras = texto.split(/\s+/).filter(Boolean).length;
   if (palavras < MIN_PALAVRAS) return `texto curto demais (${palavras} palavras)`;
   if (palavras > MAX_PALAVRAS) return `texto longo demais (${palavras} palavras)`;
+  const citacao = citacaoNumerada(texto);
+  if (citacao) return `cita dispositivo numerado: ${citacao}`;
   const outras = letraAfirmadaNoTexto(texto).filter((l) => l !== letraOficial);
   if (outras.length > 0) return `texto afirma outra alternativa como correta (${outras.join(', ')})`;
   return null;
@@ -466,6 +565,7 @@ module.exports = {
   montarPrompt,
   chamarOpenRouter,
   letraAfirmadaNoTexto,
+  citacaoNumerada,
   PROMPT_SISTEMA,
   LOTE_PADRAO,
   MAX_CARACTERES,
