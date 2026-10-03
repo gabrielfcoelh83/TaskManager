@@ -5,14 +5,14 @@ import axios from 'axios';
 const API_URL = process.env.API_URL || 'http://localhost:3100';
 
 // Gateway do backend de teste (scripts/e2e-backend.sh), de onde sai o token.
-// As rotas de IA exigem login (api/_lib/auth.js) e validam o token contra
+// As rotas de api/ exigem login (api/_lib/auth.js) e validam o token contra
 // VITE_API_URL — que no CI aponta para este mesmo backend, nunca para a
 // produção.
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3000';
 const EMAIL = process.env.E2E_EMAIL || 'maria.lais@email.com';
 const SENHA = process.env.E2E_SENHA || 'senha-de-teste-123';
 
-const ROTAS_PROTEGIDAS = ['/api/gerar-questoes', '/api/enriquecer-questao', '/api/buscar-datajud'];
+const ROTAS_PROTEGIDAS = ['/api/enriquecer-questao', '/api/buscar-datajud'];
 
 async function obterToken() {
   const { data } = await axios.post(`${GATEWAY_URL}/api/auth/login`, { email: EMAIL, password: SENHA });
@@ -20,10 +20,11 @@ async function obterToken() {
   return data.token;
 }
 
-// Sem login, nenhuma rota que gasta cota paga (OpenRouter, DATAJUD) pode
-// responder: é a garantia que api/_lib/auth.js existe para dar.
+// Sem login, nenhuma rota que gasta cota de serviço externo (DATAJUD hoje; a
+// OpenRouter, quando o chat existir) pode responder: é a garantia que
+// api/_lib/auth.js existe para dar.
 async function testRotasSemToken() {
-  console.log('Testing rotas de IA sem token (should be 401)...');
+  console.log('Testing rotas protegidas sem token (should be 401)...');
   let ok = true;
 
   for (const rota of ROTAS_PROTEGIDAS) {
@@ -44,10 +45,10 @@ async function testRotasSemToken() {
 }
 
 async function testTokenInvalido() {
-  console.log('Testing /api/gerar-questoes com token inválido (should be 401)...');
+  console.log('Testing /api/enriquecer-questao com token inválido (should be 401)...');
 
   try {
-    await axios.post(`${API_URL}/api/gerar-questoes`, { tema: 'x' }, {
+    await axios.post(`${API_URL}/api/enriquecer-questao`, { questao: { topico: 'x' } }, {
       headers: { Authorization: 'Bearer token-invalido' }
     });
     console.error('❌ token inválido foi aceito (deveria ser 401)');
@@ -59,80 +60,6 @@ async function testTokenInvalido() {
     }
     console.error(`❌ token inválido FAILED (expected 401, got ${err.response?.status ?? err.code})`);
     return false;
-  }
-}
-
-// Helper to test /api/gerar-questoes without tema (should be 400)
-async function testGerarQuestoesSemTema(auth) {
-  console.log('Testing /api/gerar-questoes without tema...');
-
-  try {
-    await axios.post(`${API_URL}/api/gerar-questoes`, {
-      quantidade: 3,
-      disciplina: 'Direito Constitucional'
-    }, auth);
-
-    // Should NOT succeed
-    console.error('❌ /api/gerar-questoes sem tema FAILED (should be 400)');
-    return false;
-  } catch (err) {
-    if (err.response?.status === 400) {
-      console.log('✅ /api/gerar-questoes sem tema retornou 400 (esperado)');
-      return true;
-    } else {
-      console.error('❌ /api/gerar-questoes sem tema FAILED (expected 400, got', err.response?.status, ')');
-      return false;
-    }
-  }
-}
-
-// Helper to test /api/gerar-questoes with tema (should be 200)
-async function testGerarQuestoesComTema(auth) {
-  console.log('Testing /api/gerar-questoes with tema...');
-
-  try {
-    const response = await axios.post(`${API_URL}/api/gerar-questoes`, {
-      tema: 'Direitos Fundamentais',
-      quantidade: 3,
-      disciplina: 'Direito Constitucional'
-    }, {
-      ...auth,
-      timeout: 30000  // 30 second timeout
-    });
-
-    if (response.status === 200) {
-      console.log('✅ /api/gerar-questoes OK');
-      console.log(`   Generated: ${response.data.questoes_geradas} questions`);
-      console.log(`   Model: ${response.data.modelo}`);
-
-      // Validar estrutura
-      if (response.data.questoes && Array.isArray(response.data.questoes)) {
-        const q = response.data.questoes[0];
-        if (q.numero && q.enunciado && q.alternativas && q.gabarito && q.explicacao) {
-          console.log('✅ Question structure valid');
-          return true;
-        } else {
-          console.error('❌ Question structure invalid');
-          return false;
-        }
-      } else {
-        console.error('❌ Response format invalid');
-        return false;
-      }
-    }
-  } catch (err) {
-    // 503 ou 429 é OK para este teste (fallback works)
-    if (err.response?.status === 503 || err.response?.status === 429) {
-      console.log(`✅ /api/gerar-questoes returned ${err.response.status} (fallback/rate-limit, acceptable)`);
-      return true;
-    } else if (err.code === 'ECONNREFUSED' || err.message.includes('connect')) {
-      console.error('❌ /api/gerar-questoes FAILED (server not running)');
-      return false;
-    } else {
-      console.error('❌ /api/gerar-questoes FAILED');
-      console.error(err.message);
-      return false;
-    }
   }
 }
 
@@ -202,12 +129,6 @@ async function runTests() {
     const token = await obterToken();
     const auth = { headers: { Authorization: `Bearer ${token}` } };
     console.log('🔑 Login do usuário de teste OK\n');
-
-    resultados.push(await testGerarQuestoesSemTema(auth));
-    console.log();
-
-    resultados.push(await testGerarQuestoesComTema(auth));
-    console.log();
 
     resultados.push(await testEnriquecerQuestao(auth));
     console.log();

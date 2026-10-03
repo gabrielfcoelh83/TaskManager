@@ -12,10 +12,10 @@ import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
 // atribuiu a cada questão, e os percentuais são as suas respostas.
 
 const STATUS = {
-  domina: { label: 'Domina', color: '#047857', bg: '#D1FAE5' },
-  'em-desenvolvimento': { label: 'Em desenvolvimento', color: '#B45309', bg: '#FEF3C7' },
-  necessita: { label: 'Precisa reforço', color: '#B91C1C', bg: '#FEE2E2' },
-  novo: { label: 'Não iniciada', color: '#5c5462', bg: '#F3F4F6' },
+  domina: { label: 'Domina', color: '#355E35', bg: '#E4EEE1' },
+  'em-desenvolvimento': { label: 'Em desenvolvimento', color: '#94661A', bg: '#F5EEDC' },
+  necessita: { label: 'Precisa reforço', color: '#8F2F29', bg: '#F6E4E1' },
+  novo: { label: 'Não iniciada', color: '#4f4b45', bg: '#f1efea' },
 };
 
 // Botões do card no layout LEGJUR: "Iniciar Simulado" abre o formulário do
@@ -32,7 +32,7 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
   if (!aberta) {
     if (lista.length === 0) {
       return (
-        <div style={{ ...s.card, textAlign: 'center', padding: '48px 24px', color: '#8b8391', fontSize: 13.5, lineHeight: 1.6 }}>
+        <div style={{ ...s.card, textAlign: 'center', padding: '48px 24px', color: '#7a766f', fontSize: 13.5, lineHeight: 1.6 }}>
           O acervo ainda não tem questões carregadas.
           <br />As disciplinas aparecem aqui conforme as provas entram.
         </div>
@@ -46,7 +46,7 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
           return (
             <div key={d.nome} style={{ ...s.card, display: 'flex', flexDirection: 'column', gap: 12, padding: 22 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ width: 52, height: 52, borderRadius: 14, background: `${d.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 52, height: 52, borderRadius: 10, background: `${d.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name={ICONE_POR_DISCIPLINA[d.nome] || 'library'} color={d.cor} size={26} />
                 </div>
                 <span style={s.pill(st.bg, st.color)}>{st.label}</span>
@@ -56,7 +56,7 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
                   <div
                     onClick={() => setDisc({ openNome: d.nome })}
-                    style={{ fontSize: 16, fontWeight: 700, color: '#2c2530', cursor: 'pointer' }}
+                    style={{ fontSize: 16, fontWeight: 700, color: '#1c1b19', cursor: 'pointer' }}
                   >
                     {d.nome}
                   </div>
@@ -68,22 +68,22 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
                     Ver temas ›
                   </button>
                 </div>
-                <div style={{ fontSize: 12.5, color: '#8b8391', marginTop: 3 }}>
+                <div style={{ fontSize: 12.5, color: '#7a766f', marginTop: 3 }}>
                   {d.total} {d.total === 1 ? 'questão' : 'questões'} no acervo · {d.respondidas} já respondidas
                 </div>
               </div>
 
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#8b8391', marginBottom: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#7a766f', marginBottom: 6 }}>
                   <span>{d.pct != null ? 'Acerto' : 'Cobertura'}</span>
-                  <span style={{ fontWeight: 700, color: '#2c2530' }}>
+                  <span style={{ fontWeight: 700, color: '#1c1b19' }}>
                     {d.pct != null ? `${d.pct}%` : `${d.cobertura}%`}
                   </span>
                 </div>
                 <div style={s.progressTrack}>
                   <div style={{ width: `${d.pct != null ? d.pct : d.cobertura}%`, height: '100%', background: d.cor, borderRadius: 5 }} />
                 </div>
-                <div style={{ fontSize: 11, color: '#8b8391', marginTop: 6 }}>
+                <div style={{ fontSize: 11, color: '#7a766f', marginTop: 6 }}>
                   {d.pct != null
                     ? `${d.acertos} acertos em ${d.tentativas} ${d.tentativas === 1 ? 'resposta' : 'respostas'}`
                     : 'sem respostas ainda'}
@@ -95,19 +95,19 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
                   <button
                     data-testid="simular-disciplina"
                     onClick={() => simular(d.nome)}
-                    style={{ flex: 1, padding: '10px 12px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'nowrap' }}
+                    style={{ flex: 1, padding: '10px 12px', background: '#fff', color: '#1c1b19', border: '1px solid #d6d1c8', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, whiteSpace: 'nowrap' }}
                   >
-                    <Icon name="graduation-cap" color="#fff" size={13} /> Iniciar Simulado
+                    <Icon name="graduation-cap" color="#1c1b19" size={13} /> Iniciar simulado
                   </button>
                 )}
                 <button
                   data-testid="praticar-disciplina"
                   onClick={() => praticarDisciplina(d.nome)}
                   style={d.classificada === false
-                    ? { flex: 1, padding: '10px 12px', background: '#343a46', color: '#fff', border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }
-                    : { padding: '10px 14px', background: '#fff', color: '#5c5462', border: '1px solid #e3e7ee', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                    ? { flex: 1, padding: '10px 12px', background: '#fff', color: '#1c1b19', border: '1px solid #d6d1c8', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }
+                    : { padding: '10px 14px', background: '#fff', color: '#4f4b45', border: '1px solid #e6e2da', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
                 >
-                  <Icon name="play" color={d.classificada === false ? '#fff' : '#5c5462'} size={12} /> Praticar
+                  <Icon name="play" color={d.classificada === false ? '#1c1b19' : '#4f4b45'} size={12} /> Praticar
                 </button>
               </div>
             </div>
@@ -127,12 +127,12 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
       </button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14, flexWrap: 'wrap' }}>
-        <div style={{ width: 56, height: 56, borderRadius: 16, background: `${aberta.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+        <div style={{ width: 56, height: 56, borderRadius: 10, background: `${aberta.cor}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
           <Icon name={ICONE_POR_DISCIPLINA[aberta.nome] || 'library'} color={aberta.cor} size={28} />
         </div>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontSize: 19, fontWeight: 700, color: '#2c2530' }}>{aberta.nome}</div>
-          <div style={{ fontSize: 13, color: '#8b8391' }}>
+          <div style={{ fontSize: 19, fontWeight: 700, color: '#1c1b19' }}>{aberta.nome}</div>
+          <div style={{ fontSize: 13, color: '#7a766f' }}>
             {aberta.total} questões · {aberta.respondidas} respondidas
             {aberta.pct != null ? ` · ${aberta.pct}% de acerto` : ''}
           </div>
@@ -160,7 +160,7 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
       {/* Enquanto a classificação não passou por revisão humana, quem lê
           precisa saber — é a mesma etiqueta que aparece na explicação. */}
       {naoRevisadas > 0 && (
-        <div style={{ marginTop: 14, padding: '10px 14px', background: '#FEF3C7', color: '#B45309', borderRadius: 10, fontSize: 12, lineHeight: 1.5 }}>
+        <div style={{ marginTop: 14, padding: '10px 14px', background: '#F5EEDC', color: '#94661A', borderRadius: 10, fontSize: 12, lineHeight: 1.5 }}>
           {naoRevisadas === aberta.total
             ? 'A separação por matéria e tema desta disciplina foi feita por IA e ainda não passou por revisão humana.'
             : `${naoRevisadas} de ${aberta.total} questões desta disciplina foram classificadas por IA e ainda não passaram por revisão humana.`}
@@ -171,10 +171,10 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
       <div style={{ ...s.sectionTitle, marginTop: 22 }}>Temas</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
         {temas.map((t) => (
-          <div key={t.nome} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 14px', background: '#faf9fb', borderRadius: 12, flexWrap: 'wrap' }}>
+          <div key={t.nome} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 14px', background: '#faf9f6', borderRadius: 12, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: '#2c2530' }}>{t.nome}</div>
-              <div style={{ fontSize: 11.5, color: '#8b8391', marginTop: 2 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1c1b19' }}>{t.nome}</div>
+              <div style={{ fontSize: 11.5, color: '#7a766f', marginTop: 2 }}>
                 {t.total} {t.total === 1 ? 'questão' : 'questões'}
                 {t.tentativas > 0 ? ` · ${t.acertos}/${t.tentativas} respostas certas` : ' · sem respostas'}
               </div>
@@ -182,7 +182,7 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
                 <div style={{ width: `${t.pct ?? 0}%`, height: '100%', background: aberta.cor, borderRadius: 5 }} />
               </div>
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: t.pct == null ? '#8b8391' : '#2c2530', width: 44, textAlign: 'right' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: t.pct == null ? '#7a766f' : '#1c1b19', width: 44, textAlign: 'right' }}>
               {t.pct == null ? '—' : `${t.pct}%`}
             </div>
             <button

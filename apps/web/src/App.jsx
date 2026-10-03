@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { THEMES, buildStyles } from './lib/theme';
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { THEMES, TEMA_PADRAO, buildStyles, chaveDeTema, aplicarTemaNoDocumento } from './lib/theme';
 import { Icon } from './lib/icons';
 import { NAV, PAGE_META, FASE_PADRAO, faseValida } from './lib/navegacao';
 import {
@@ -9,16 +9,18 @@ import {
 import { diasAteProva, metaDiaria, sequenciaAtual } from './lib/metrics';
 import { montarDisciplinas } from './lib/disciplinas';
 import { planoDaSemana } from './lib/agenda';
-import { embaralhar } from './lib/questions/acervo';
+import { tamanhoDoQuiz, sortearQuiz } from './lib/quiz';
 import { classificarRevisao } from './lib/revisao';
 import { mesclarTentativas } from './lib/historico';
 import { enviarEmFila } from './lib/fila';
-import { payloadDoToken, saudacao, iniciais, nomeDeExibicao } from './lib/perfil';
+import { payloadDoToken, saudacao, nomeDeExibicao } from './lib/perfil';
 import {
   TOKEN_KEY, getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
   buscarPerfil, salvarPerfil, salvarRespostaDiscursiva,
 } from './lib/api/api';
 import SeletorDeFase from './components/ui/SeletorDeFase';
+import UserMenu from './components/ui/user-menu';
+import Kepy from './components/ui/Kepy';
 import { mesmoRascunho } from './lib/discursivas';
 import { fichaConcluida, montarFicha, respostasIniciais, opcoesDeDificuldade } from './lib/ficha';
 import { criarFilaDePreferencias, configuracoesDoPerfil } from './lib/preferencias';
@@ -37,6 +39,7 @@ import Favoritos from './screens/Favoritos';
 import Configuracoes from './screens/Configuracoes';
 import SegundaFase from './screens/SegundaFase';
 import FichaDeBoasVindas from './screens/FichaDeBoasVindas';
+import { HaloBadge } from '@/components/ui/halo-badge';
 
 // O que é da INTERFACE começa aqui. O que é da PESSOA — nome, e-mail, meta,
 // data da prova — vem do servidor: até esta versão, `configuracoes` trazia
@@ -56,12 +59,12 @@ import FichaDeBoasVindas from './screens/FichaDeBoasVindas';
 // para o servidor, e aí o rascunho sai.
 const DEFAULT_STATE = {
   __usuario: null,
-  theme: 'rosa',
+  theme: TEMA_PADRAO,
   fase: FASE_PADRAO,
   screen: 'dashboard',
   dashboard: { period: '7' },
   cronograma: {},
-  questoes: { selected: null, quiz: null, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
+  questoes: { selected: null, quiz: null, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
   simulados: { running: {}, resultados_historico: [] },
   revisoes: { tab: 'todas' },
   desempenho: { period: '6' },
@@ -72,6 +75,9 @@ const DEFAULT_STATE = {
   configuracoes: { meta: 20, dataProva: null },
   resultados_historico: [],
   segundaFase: { questaoId: null, rascunhos: {} },
+  // Menu lateral só com ícones. É da interface, como `screen`: fica salvo
+  // neste navegador e vale para qualquer conta.
+  barraRecolhida: false,
 };
 
 const TELA_ESTREITA = '(max-width: 760px)';
@@ -388,8 +394,10 @@ export default function App() {
     return () => { cancelado = true; };
   }, [sessao, recarga, encerrarSessao]);
 
-  const theme = THEMES[state.theme] || THEMES.rosa;
+  const theme = THEMES[chaveDeTema(state.theme)];
   const s = useMemo(() => buildStyles(theme), [theme]);
+  // Os componentes do shadcn (Halo Badge) leem a paleta por variável CSS.
+  useEffect(() => { aplicarTemaNoDocumento(theme); }, [theme]);
 
   // A lista de disciplinas é derivada do acervo carregado e do histórico. Era
   // uma constante de oito nomes com percentuais fixos; o acervo tem 18.
@@ -665,14 +673,14 @@ export default function App() {
     setState((st) => ({
       ...st,
       screen: 'questoes',
-      questoes: { ...st.questoes, quiz: lista, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
+      questoes: { ...st.questoes, quiz: lista, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
     }));
   };
 
   // `iniciar` distingue os dois jeitos de chegar ao quiz de uma matéria.
   //
   // Sem ele — como Disciplinas, Simulados e Cronograma chamam — a tela abre
-  // com a fonte marcada e o usuário decide quantas responder. Com ele, o quiz
+  // filtrada pela matéria (um selo removível) e o usuário gera o quiz. Com ele, o quiz
   // já vem montado: é o caminho do "Foco de hoje", onde a pergunta "qual
   // matéria, quantas questões" já foi respondida pelo plano e repeti-la ao
   // usuário é só uma tela a mais entre ele e a primeira questão.
@@ -685,17 +693,14 @@ export default function App() {
       return;
     }
 
-    // Quantas abrir: o que falta para a meta. Abrir as 80 da matéria quando
-    // faltam 12 transforma um objetivo alcançável numa lista sem fim — e a
-    // barra de progresso do quiz passaria a medir outra coisa que não a meta.
-    // Com a meta já batida, quem clicou quer continuar: abre o que houver.
-    const quantas = meta.batida ? daMateria.length : Math.max(1, meta.faltam);
-    const lista = embaralhar(daMateria).slice(0, quantas);
+    // Quantas abrir e quais: a mesma regra do quiz montado na tela de
+    // Questões (lib/quiz.js) — o tamanho da meta, nunca respondidas primeiro.
+    const lista = sortearQuiz(daMateria, tamanhoDoQuiz(meta), usuarioTentativas);
 
     setState((st) => ({
       ...st,
       screen: 'questoes',
-      questoes: { ...st.questoes, selected: [nome], quiz: lista, idx: 0, selectedAlt: null, certas: 0, erradas: 0, done: false },
+      questoes: { ...st.questoes, selected: [nome], quiz: lista, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
     }));
   };
 
@@ -730,7 +735,7 @@ export default function App() {
   if (perfil.estado === 'carregando') {
     return (
       <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}>
-        <div role="status" data-testid="carregando-perfil" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#8b8391', fontSize: 13 }}>
+        <div role="status" data-testid="carregando-perfil" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#7a766f', fontSize: 13 }}>
           <div className="esqueleto" style={{ ...s.logoMark, width: 40, height: 40, borderRadius: 12 }} aria-hidden="true">
             <Icon name="scale" color="#fff" size={20} />
           </div>
@@ -772,18 +777,24 @@ export default function App() {
   // fase junto — senão o clique mudaria uma tela que não está à vista.
   const verPerfil = () => setState((st) => ({ ...st, fase: FASE_PADRAO, screen: 'configuracoes' }));
 
+  // Nome, e-mail, perfil e "Sair" moram no menu da conta: o rosto abre um
+  // painel (folha inferior no celular). `menuDaConta(true)` mostra o nome ao
+  // lado do rosto; sem ele, só as iniciais (barra recolhida, faixa do celular).
+  const menuDaConta = (comNome, align = 'start') => (
+    <UserMenu
+      user={{ name: nome, email: perfil.email }}
+      cores={{ primary: theme.primary, primarySoft: theme.primarySoft, primaryDark: theme.primaryDark }}
+      showName={comNome}
+      align={align}
+      testId="menu-conta"
+      items={[{ label: 'Perfil e configurações', icon: 'settings', onSelect: verPerfil, testId: 'ver-perfil' }]}
+      onSignOut={sair}
+    />
+  );
+
   const linhaDoPerfil = (
-    <div style={s.profileRow}>
-      <div style={s.avatar} data-testid="avatar">{iniciais(nome, '·')}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div data-testid="perfil-nome" style={{ fontSize: 13.5, fontWeight: 600, color: '#2c2530', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {nome || (perfil.estado === 'carregando' ? '—' : 'Sem nome')}
-        </div>
-        <div onClick={verPerfil} style={{ fontSize: 11.5, color: '#8b8391', cursor: 'pointer' }}>Ver perfil ›</div>
-      </div>
-      <div data-testid="sair" onClick={sair} style={{ fontSize: 11.5, color: theme.primary, fontWeight: 600, cursor: 'pointer' }}>
-        Sair
-      </div>
+    <div style={{ ...s.profileRow, padding: '8px 0 0' }}>
+      {menuDaConta(true)}
     </div>
   );
 
@@ -792,7 +803,7 @@ export default function App() {
       role="alert"
       data-testid="erro-sync"
       style={{
-        background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA',
+        background: '#FAF0EE', color: '#8F2F29', border: '1px solid #EBCBC6',
         borderRadius: 12, padding: '10px 14px', fontSize: 12.5, marginBottom: 14,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
       }}
@@ -823,11 +834,10 @@ export default function App() {
     if (estreita) {
       return (
         <div style={{ ...s.app, flexDirection: 'column' }}>
-          <div style={{ flex: 'none', background: '#fff', borderBottom: '1px solid rgba(0,0,0,.06)', padding: '12px 14px', display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+          <div style={{ flex: 'none', background: '#fff', borderBottom: '1px solid #e6e2da', padding: '12px 14px', display: 'flex', alignItems: 'flex-end', gap: 12 }}>
             <SeletorDeFase theme={theme} s={s} fase={fase} onTrocar={trocarFase} compacto />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none', paddingBottom: 4 }}>
-              <div style={{ ...s.avatar, width: 30, height: 30, fontSize: 11 }} data-testid="avatar" title={nome || undefined}>{iniciais(nome, '·')}</div>
-              <div data-testid="sair" onClick={sair} style={{ fontSize: 12, color: theme.primary, fontWeight: 600, cursor: 'pointer' }}>Sair</div>
+            <div style={{ display: 'flex', alignItems: 'center', flex: 'none', paddingBottom: 2 }}>
+              {menuDaConta(false, 'end')}
             </div>
           </div>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 14px 28px' }}>
@@ -855,7 +865,7 @@ export default function App() {
             <Icon name="pencil" color={theme.primaryDark} size={20} />
             <span>Questões discursivas</span>
           </div>
-          <div style={{ fontSize: 12, color: '#8b8391', lineHeight: 1.5, padding: '8px 12px 0' }}>
+          <div style={{ fontSize: 12, color: '#7a766f', lineHeight: 1.5, padding: '8px 12px 0' }}>
             As 4 questões de cada exame, com o padrão de resposta oficial da FGV. A peça não entra.
           </div>
           {linhaDoPerfil}
@@ -890,7 +900,7 @@ export default function App() {
   const notificacoes = [];
   if (!meta.batida) {
     notificacoes.push({
-      icone: 'flag', cor: '#F59E0B',
+      icone: 'flag', cor: '#B07A1F',
       titulo: `Faltam ${meta.faltam} ${meta.faltam === 1 ? 'questão' : 'questões'} para a meta de hoje`,
       texto: `Você respondeu ${meta.respondidas} de ${meta.meta}.`,
       acao: { rotulo: 'Praticar', ir: 'questoes' },
@@ -898,7 +908,7 @@ export default function App() {
   }
   if (fichaPendente) {
     notificacoes.push({
-      icone: 'clipboard-list', cor: '#8B5CF6',
+      icone: 'clipboard-list', cor: theme.primary,
       titulo: 'Preencha sua ficha de boas-vindas',
       texto: 'Ela abre na próxima troca de tela.',
       acao: { rotulo: 'Preencher agora', ir: state.screen },
@@ -906,7 +916,7 @@ export default function App() {
   }
   if (revisao.resumo.erros > 0) {
     notificacoes.push({
-      icone: 'repeat', cor: '#EF4444',
+      icone: 'repeat', cor: '#B4413A',
       titulo: `${revisao.resumo.erros} ${revisao.resumo.erros === 1 ? 'questão errada' : 'questões erradas'} esperando revisão`,
       texto: 'São as que você errou na última tentativa.',
       acao: { rotulo: 'Revisar', ir: 'revisoes' },
@@ -914,14 +924,14 @@ export default function App() {
   }
   if (!state.configuracoes.dataProva) {
     notificacoes.push({
-      icone: 'calendar', cor: '#8B5CF6',
+      icone: 'calendar', cor: theme.primary,
       titulo: 'Defina a data da sua prova',
       texto: 'A contagem regressiva do topo depende dela.',
       acao: { rotulo: 'Definir', ir: 'configuracoes' },
     });
   } else if (diasProva != null && diasProva <= 30) {
     notificacoes.push({
-      icone: 'graduation-cap', cor: '#EC4899',
+      icone: 'graduation-cap', cor: theme.accent,
       titulo: diasProva === 0 ? 'Sua prova é hoje' : `Faltam ${diasProva} dias para a prova`,
       texto: 'Reta final: priorize revisão do que você erra mais.',
       acao: { rotulo: 'Ver revisões', ir: 'revisoes' },
@@ -929,7 +939,7 @@ export default function App() {
   }
   if (sequencia.dias >= 2) {
     notificacoes.push({
-      icone: 'trending-up', cor: '#10B981',
+      icone: 'trending-up', cor: '#4A7A4A',
       titulo: `${sequencia.dias} dias seguidos de estudo`,
       texto: 'Responda hoje para não perder a sequência.',
     });
@@ -963,6 +973,9 @@ export default function App() {
         : `Faltam ${meta.faltam} em ${materiaDeHoje.disciplina} para bater a meta.`
       : `Faltam ${meta.faltam} ${meta.faltam === 1 ? 'questão' : 'questões'} para bater a meta de hoje.`;
 
+  const recolhida = Boolean(state.barraRecolhida);
+  const alternarBarra = () => setState((st) => ({ ...st, barraRecolhida: !st.barraRecolhida }));
+
   const navItems = NAV.map((n) => {
     const active = n.key === state.screen;
     return {
@@ -972,8 +985,9 @@ export default function App() {
       active,
       style: {
         display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10,
+        justifyContent: recolhida ? 'center' : 'flex-start',
         fontSize: 13.5, fontWeight: active ? 600 : 500, cursor: 'pointer',
-        color: active ? theme.primaryDark : '#5c5462',
+        color: active ? theme.primaryDark : '#4f4b45',
         background: active ? theme.primarySoft : 'transparent',
       },
     };
@@ -989,58 +1003,66 @@ export default function App() {
 
   return (
     <div style={s.app}>
-      <div style={s.sidebar}>
-        <SeletorDeFase theme={theme} s={s} fase={fase} onTrocar={trocarFase} />
+      <div data-testid="barra-lateral" data-recolhida={recolhida ? 'sim' : 'nao'} style={{ ...s.sidebar, width: recolhida ? 72 : 232, overflowX: 'hidden' }}>
+        {/* Recolhida, a barra fica só com a marca: trocar de fase pede o
+            seletor inteiro, então é preciso abrir o menu para isso. */}
+        {recolhida ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0 12px' }} title="ma. questões">
+            <div style={{ ...s.logoMark, width: 30, height: 30 }} aria-hidden="true">
+              <Icon name="scale" color="#ffffff" size={16} />
+            </div>
+          </div>
+        ) : (
+          <SeletorDeFase theme={theme} s={s} fase={fase} onTrocar={trocarFase} />
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
           {navItems.map((item) => (
-            <div key={item.key} data-testid={`nav-${item.key}`} onClick={() => goTo(item.key)} style={item.style}>
+            <div
+              key={item.key}
+              data-testid={`nav-${item.key}`}
+              onClick={() => goTo(item.key)}
+              style={item.style}
+              title={recolhida ? item.label : undefined}
+              aria-label={recolhida ? item.label : undefined}
+            >
               <div style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-                <Icon name={item.icon} color={item.active ? theme.primaryDark : '#9a93a1'} size={20} />
+                <Icon name={item.icon} color={item.active ? theme.primaryDark : '#9a958d'} size={20} />
               </div>
-              <span>{item.label}</span>
+              {!recolhida && <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>}
             </div>
           ))}
         </div>
 
-        {/* Botão, e não div, quando há matéria: o cartão é o caminho mais
-            curto entre "abri o app" e "estou respondendo questão da matéria
-            certa". Sem matéria definida — acervo ainda sem classificação — ele
-            continua sendo só o aviso que sempre foi, porque um botão que não
-            leva a lugar nenhum é pior que texto. */}
-        {materiaDeHoje?.disciplina ? (
-          <button
-            type="button"
-            data-testid="foco-do-dia"
-            onClick={() => praticarDisciplina(materiaDeHoje.disciplina, { iniciar: true })}
-            style={{ ...s.focusCard, width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer', font: 'inherit', display: 'block' }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
-            </div>
-            {/* O dashboard já traz a mesma sugestão no card "Próximo passo",
-                com o mesmo texto e mais espaço para ele. Repetir aqui, na
-                mesma tela, é ruído — mas o atalho continua valendo, porque a
-                barra acompanha todas as outras telas, onde aquele card não
-                existe. Some o texto, fica o caminho. */}
-            {state.screen !== 'dashboard' && (
-              <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
-            )}
-            <div style={{ fontSize: 12, fontWeight: 600, color: theme.primaryDark, marginTop: state.screen === 'dashboard' ? 6 : 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Icon name="play" color={theme.primaryDark} size={12} />
-              {meta.batida ? 'Continuar em ' : 'Estudar '}{materiaDeHoje.disciplina}
-            </div>
-          </button>
-        ) : (
-          <div style={s.focusCard}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: theme.primaryDark, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="target" color={theme.primaryDark} size={15} />Foco de hoje
-            </div>
-            <div style={{ fontSize: 12.5, color: '#6b6470', marginTop: 6, lineHeight: 1.45 }}>{foco}</div>
-          </div>
-        )}
+        {/* O "Foco de hoje" que morava aqui virou o Kepy, no canto da tela
+            (components/ui/Kepy.jsx): a mesma sugestão, mais a meta, as revisões,
+            o plano e uma conversa, em todas as telas da 1ª fase. */}
 
-        {linhaDoPerfil}
+        <button
+          type="button"
+          data-testid="recolher-barra"
+          onClick={alternarBarra}
+          aria-expanded={!recolhida}
+          title={recolhida ? 'Abrir menu' : 'Recolher menu'}
+          style={{
+            marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8,
+            justifyContent: recolhida ? 'center' : 'flex-start', border: 'none', background: 'transparent',
+            color: '#7a766f', fontSize: 12.5, fontWeight: 500, whiteSpace: 'nowrap',
+          }}
+        >
+          <Icon name={recolhida ? 'panel-left-open' : 'panel-left-close'} color="#7a766f" size={18} />
+          {!recolhida && 'Recolher menu'}
+        </button>
+
+        {recolhida ? (
+          <div style={{ ...s.profileRow, marginTop: 0, justifyContent: 'center', padding: '8px 0 0' }}>
+            {menuDaConta(false)}
+          </div>
+        ) : (
+          // A linha do perfil empurra a si mesma para o fundo (`marginTop: auto`);
+          // aqui quem empurra é o botão de recolher, logo acima dela.
+          cloneElement(linhaDoPerfil, { style: { ...linhaDoPerfil.props.style, marginTop: 0 } })
+        )}
       </div>
 
       <div style={s.main}>
@@ -1058,21 +1080,25 @@ export default function App() {
               {diasProva != null ? (
                 <div>
                   <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Faltam</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{diasProva} dias</div>
-                  <div style={{ fontSize: 10.5, color: '#8b8391' }}>para a prova da OAB</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#1c1b19' }}>{diasProva} dias</div>
+                  <div style={{ fontSize: 10.5, color: '#7a766f' }}>para a prova da OAB</div>
                 </div>
               ) : (
                 <div>
                   <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Sua prova</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#2c2530' }}>Definir data</div>
-                  <div style={{ fontSize: 10.5, color: '#8b8391' }}>para contar os dias</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1c1b19' }}>Definir data</div>
+                  <div style={{ fontSize: 10.5, color: '#7a766f' }}>para contar os dias</div>
                 </div>
               )}
             </div>
             <div style={{ position: 'relative' }}>
               <div data-testid="sino" style={{ ...s.bellWrap, cursor: 'pointer' }} onClick={() => setNotifOpen((v) => !v)}>
-                <Icon name="bell" color="#5c5462" size={19} />
-                {notificacoes.length > 0 && <div style={s.bellBadge}>{notificacoes.length}</div>}
+                <Icon name="bell" color="#4f4b45" size={19} />
+                {notificacoes.length > 0 && (
+                  <HaloBadge tabularNums translucent={false} interactive={false} layout={false} style={{ position: 'absolute', top: -9, right: -9 }}>
+                    {notificacoes.length}
+                  </HaloBadge>
+                )}
               </div>
 
               {notifOpen && (
@@ -1081,17 +1107,17 @@ export default function App() {
                   data-testid="painel-notificacoes"
                   style={{
                     position: 'absolute', right: 0, top: 48, width: 320, zIndex: 500,
-                    background: '#fff', borderRadius: 14, border: '1px solid rgba(0,0,0,.06)',
-                    boxShadow: '0 12px 32px rgba(0,0,0,.14)', padding: 14,
+                    background: '#fff', borderRadius: 10, border: '1px solid #e6e2da',
+                    boxShadow: '0 8px 24px rgba(28,27,25,.10)', padding: 14,
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700, color: '#2c2530' }}>Avisos</div>
-                    <span onClick={() => setNotifOpen(false)} style={{ color: '#8b8391', cursor: 'pointer', fontWeight: 700 }}>×</span>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1c1b19' }}>Avisos</div>
+                    <span onClick={() => setNotifOpen(false)} style={{ color: '#7a766f', cursor: 'pointer', fontWeight: 700 }}>×</span>
                   </div>
 
                   {notificacoes.length === 0 ? (
-                    <div style={{ fontSize: 12.5, color: '#8b8391', marginTop: 10, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 12.5, color: '#7a766f', marginTop: 10, lineHeight: 1.5 }}>
                       Nada pendente por aqui. Meta batida e nenhuma questão errada esperando revisão.
                     </div>
                   ) : (
@@ -1102,8 +1128,8 @@ export default function App() {
                             <Icon name={n.icone} color={n.cor} size={16} />
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 600, color: '#2c2530', lineHeight: 1.35 }}>{n.titulo}</div>
-                            <div style={{ fontSize: 11.5, color: '#8b8391', marginTop: 2 }}>{n.texto}</div>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1c1b19', lineHeight: 1.35 }}>{n.titulo}</div>
+                            <div style={{ fontSize: 11.5, color: '#7a766f', marginTop: 2 }}>{n.texto}</div>
                             {n.acao && (
                               <button
                                 onClick={() => { setNotifOpen(false); goTo(n.acao.ir); }}
@@ -1125,6 +1151,9 @@ export default function App() {
 
         <div style={s.content}>
           {faixaDeErro}
+          {/* `key` na tela: a entrada escalonada (`.tela` no index.css) toca a cada
+              navegação e não a cada render. */}
+          <div key={state.screen} className="tela">
           {state.screen === 'dashboard' && (
             <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} acervo={acervo} />
           )}
@@ -1134,6 +1163,7 @@ export default function App() {
               {...screenProps}
               quest={state.questoes}
               setQuest={(p) => updateSlice('questoes', p)}
+              materiaDeHoje={materiaDeHoje}
               registrar={registrar}
               acervo={acervo}
               recarregarAcervo={() => setRecarga((n) => n + 1)}
@@ -1190,12 +1220,27 @@ export default function App() {
               opcoesDeDificuldade={(marcadas) => opcoesDeDificuldade(acervo.questoes, marcadas)}
               acervoCarregando={acervo.estado === 'carregando'}
               atualizarConfig={atualizarConfig}
-              themeKey={state.theme}
+              themeKey={chaveDeTema(state.theme)}
               setTheme={setTheme}
             />
           )}
+          </div>
         </div>
       </div>
+
+      <Kepy
+        theme={theme}
+        meta={meta}
+        materia={materiaDeHoje}
+        foco={foco}
+        erros={revisao.resumo.erros}
+        diasProva={diasProva}
+        temDataProva={Boolean(state.configuracoes.dataProva)}
+        sequenciaDias={sequencia.dias}
+        disciplinas={disciplinas.map((d) => d.nome).filter((n) => n !== 'Sem classificação')}
+        onEstudar={(disciplina) => praticarDisciplina(disciplina, { iniciar: true })}
+        onIr={goTo}
+      />
     </div>
   );
 }

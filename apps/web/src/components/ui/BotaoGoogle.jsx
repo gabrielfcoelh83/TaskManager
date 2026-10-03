@@ -81,7 +81,7 @@ export default function BotaoGoogle({ onCredencial, largura = 320 }) {
   // um aviso curto evita um espaço vazio sem explicação.
   if (falhou) {
     return (
-      <div style={{ fontSize: 12, color: '#8b8391', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: '#7a766f', textAlign: 'center' }}>
         O login com o Google não carregou. Use e-mail e senha.
       </div>
     );

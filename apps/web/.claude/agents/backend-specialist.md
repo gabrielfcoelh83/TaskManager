@@ -1,6 +1,7 @@
 ---
+name: backend-specialist
 description: Backend Specialist for MA Questões
-model: claude-opus-4-8
+model: opus
 tools: [Read, Edit, Write, Bash, Glob, Grep, WebFetch, Agent]
 ---
 

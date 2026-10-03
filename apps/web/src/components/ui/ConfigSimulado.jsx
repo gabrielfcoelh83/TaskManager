@@ -32,17 +32,17 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
 
   return (
     <div style={{ ...s.card, padding: '36px 32px', maxWidth: 680, margin: '0 auto', textAlign: 'center' }}>
-      <div style={{ width: 60, height: 60, borderRadius: 16, margin: '0 auto 14px', background: `linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name="graduation-cap" color="#fff" size={30} />
+      <div style={{ width: 48, height: 48, borderRadius: 10, margin: '0 auto 14px', background: theme.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="graduation-cap" color="#fff" size={22} />
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: '#2c2530' }}>Vamos começar!</div>
-      <div style={{ fontSize: 14, color: '#8b8391', marginTop: 8 }}>
-        Você selecionou <b style={{ color: '#2c2530' }}>{efetiva} {efetiva === 1 ? 'questão' : 'questões'}</b>. Gerencie seu tempo e boa sorte!
+      <div style={{ fontSize: 24, fontWeight: 700, color: '#1c1b19' }}>Vamos começar!</div>
+      <div style={{ fontSize: 14, color: '#7a766f', marginTop: 8 }}>
+        Você selecionou <b style={{ color: '#1c1b19' }}>{efetiva} {efetiva === 1 ? 'questão' : 'questões'}</b>. Gerencie seu tempo e boa sorte!
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 28, textAlign: 'left' }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#2c2530' }}>Tipo de simulado</div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#1c1b19' }}>Tipo de simulado</div>
           <div style={{ display: 'flex', gap: 12 }}>
             {['geral', 'disciplina'].map((t) => (
               <button
@@ -52,13 +52,13 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
                 style={{
                   flex: 1,
                   padding: 12,
-                  border: tipo === t ? `2px solid ${theme.primary}` : '1px solid #e3e7ee',
+                  border: tipo === t ? `2px solid ${theme.primary}` : '1px solid #e6e2da',
                   borderRadius: 10,
                   background: tipo === t ? theme.primarySoft : '#fff',
                   cursor: 'pointer',
                   fontSize: 13,
                   fontWeight: 600,
-                  color: tipo === t ? theme.primaryDark : '#5c5462',
+                  color: tipo === t ? theme.primaryDark : '#4f4b45',
                 }}
               >
                 {t === 'geral' ? 'Geral — OAB 1ª Fase' : 'Por disciplina'}
@@ -69,9 +69,9 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
 
         {tipo === 'disciplina' && (
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#2c2530' }}>Disciplina</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#1c1b19' }}>Disciplina</div>
             {opcoes.length === 0 ? (
-              <div style={{ fontSize: 12.5, color: '#8b8391', lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12.5, color: '#7a766f', lineHeight: 1.5 }}>
                 As questões do acervo ainda não foram separadas por matéria. O simulado geral já usa todas.
               </div>
             ) : (
@@ -79,7 +79,7 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
                 data-testid="disciplina-simulado"
                 value={disciplina || ''}
                 onChange={(e) => setDisciplina(e.target.value || null)}
-                style={{ width: '100%', padding: 12, border: '1px solid #e3e7ee', borderRadius: 10, fontSize: 13, cursor: 'pointer', background: '#fff' }}
+                style={{ width: '100%', padding: 12, border: '1px solid #e6e2da', borderRadius: 10, fontSize: 13, cursor: 'pointer', background: '#fff' }}
               >
                 <option value="">-- Escolha uma disciplina --</option>
                 {opcoes.map((d) => (
@@ -90,25 +90,25 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
           </div>
         )}
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: '#f6f8fb', borderRadius: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#2c2530' }}>Qtd. Questões:</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: '#f8f7f3', borderRadius: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1b19' }}>Qtd. Questões:</div>
           <select
             data-testid="qtd-questoes"
             value={quantidade}
             onChange={(e) => setQuantidade(parseInt(e.target.value, 10))}
-            style={{ padding: '8px 14px', border: '1px solid #e3e7ee', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#fff' }}
+            style={{ padding: '8px 14px', border: '1px solid #e6e2da', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#fff' }}
           >
             {QUANTIDADES.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
 
         {!invalido && quantidade > disponiveis && (
-          <div data-testid="aviso-quantidade" style={{ fontSize: 12.5, color: '#B45309', background: '#FEF3C7', borderRadius: 10, padding: '10px 14px', lineHeight: 1.5 }}>
+          <div data-testid="aviso-quantidade" style={{ fontSize: 12.5, color: '#94661A', background: '#F5EEDC', borderRadius: 10, padding: '10px 14px', lineHeight: 1.5 }}>
             {tipo === 'geral' ? 'O acervo tem' : 'Esta disciplina tem'} {disponiveis} {disponiveis === 1 ? 'questão' : 'questões'} — a prova terá {disponiveis}.
           </div>
         )}
 
-        <div style={{ fontSize: 12.5, color: '#8b8391', textAlign: 'center' }}>
+        <div style={{ fontSize: 12.5, color: '#7a766f', textAlign: 'center' }}>
           Tempo de prova: ~{tempoDeProvaMinutos(efetiva)} minutos · sem feedback durante o simulado, como na prova real
         </div>
 
@@ -118,7 +118,7 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
           disabled={invalido}
           style={{
             padding: 14,
-            background: invalido ? '#c3c8d2' : '#343a46',
+            background: invalido ? '#cbc6bd' : theme.primary,
             color: '#fff',
             border: 'none',
             borderRadius: 10,
@@ -134,7 +134,7 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
           <Icon name="play" color="#fff" size={14} /> Iniciar Simulado
         </button>
         {invalido && motivo && (
-          <div data-testid="motivo-desabilitado" role="status" style={{ fontSize: 12.5, color: '#B45309', textAlign: 'center', marginTop: -8, lineHeight: 1.5 }}>
+          <div data-testid="motivo-desabilitado" role="status" style={{ fontSize: 12.5, color: '#94661A', textAlign: 'center', marginTop: -8, lineHeight: 1.5 }}>
             {motivo}
           </div>
         )}

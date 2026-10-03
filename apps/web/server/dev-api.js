@@ -4,7 +4,7 @@
 // Node puro (módulo http), sem express. Porta 3000.
 //
 // - Carrega variáveis de .env.local (parse manual simples).
-// - Roteia POST /api/gerar-questoes, /api/enriquecer-questao e /api/buscar-datajud
+// - Roteia POST /api/enriquecer-questao e /api/buscar-datajud
 //   para os MESMOS handlers de api/ (mesmo código que roda na Vercel).
 // - Adapta req/res com um shim: req.body (JSON parseado) e res.status().json().
 //
@@ -57,7 +57,6 @@ async function importHandler(arquivo) {
 }
 
 const rotas = {
-  '/api/gerar-questoes': await importHandler('gerar-questoes.js'),
   '/api/enriquecer-questao': await importHandler('enriquecer-questao.js'),
   '/api/buscar-datajud': await importHandler('buscar-datajud.js'),
 };

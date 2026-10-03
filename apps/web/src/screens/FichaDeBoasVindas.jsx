@@ -62,7 +62,7 @@ export default function FichaDeBoasVindas({
   const voltar = () => { setAviso(null); setErroGravacao(null); setPasso((p) => Math.max(0, p - 1)); };
 
   const pct = salvo ? 100 : Math.round((passo / PASSOS.length) * 100);
-  const cartao = { ...s.card, padding: 'clamp(18px, 4vw, 30px)', borderRadius: 20 };
+  const cartao = { ...s.card, padding: 'clamp(18px, 4vw, 30px)', borderRadius: 10 };
 
   return (
     <div style={{ minHeight: '100vh', background: theme.bg, display: 'flex', justifyContent: 'center', padding: 'clamp(14px, 4vw, 40px) clamp(12px, 3vw, 24px)', overflowY: 'auto' }}>
@@ -71,7 +71,7 @@ export default function FichaDeBoasVindas({
           <div style={{ ...s.logoMark, width: 30, height: 30 }} aria-hidden="true"><Icon name="scale" color="#fff" size={16} /></div>
           <div style={{ ...s.logoText, fontSize: 18 }}>ma.</div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            {email && <span style={{ fontSize: 12, color: '#8b8391', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>}
+            {email && <span style={{ fontSize: 12, color: '#7a766f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>}
             <button type="button" data-testid="sair" onClick={onSair} style={{ background: 'none', border: 'none', color: theme.primary, fontWeight: 600, fontSize: 12.5, padding: 4 }}>
               Sair
             </button>
@@ -80,7 +80,7 @@ export default function FichaDeBoasVindas({
 
         {salvo ? (
           <section style={cartao} className="entra" aria-labelledby="ficha-titulo">
-            <div style={{ width: 46, height: 46, borderRadius: 14, background: `linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 46, height: 46, borderRadius: 10, background: theme.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="check" color="#fff" size={24} />
             </div>
             <h1 id="ficha-titulo" ref={titulo} tabIndex={-1} data-testid="ficha-titulo" style={{ ...s.pageTitle, margin: '14px 0 4px', outline: 'none' }}>
@@ -98,7 +98,7 @@ export default function FichaDeBoasVindas({
           </section>
         ) : (
           <form onSubmit={avancar} noValidate style={cartao} aria-labelledby="ficha-titulo">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, fontSize: 12, color: '#8b8391', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, fontSize: 12, color: '#7a766f', marginBottom: 8 }}>
               <span data-testid="ficha-progresso">Passo {passo + 1} de {PASSOS.length}</span>
               <span>Ficha de boas-vindas</span>
             </div>
@@ -129,12 +129,12 @@ export default function FichaDeBoasVindas({
             </div>
 
             {aviso && (
-              <div role="alert" data-testid="ficha-aviso" style={{ marginTop: 18, fontSize: 12.5, color: '#B45309', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 10, padding: '9px 12px' }}>
+              <div role="alert" data-testid="ficha-aviso" style={{ marginTop: 18, fontSize: 12.5, color: '#94661A', background: '#FBF7EC', border: '1px solid #EAD9A8', borderRadius: 10, padding: '9px 12px' }}>
                 {aviso}
               </div>
             )}
             {erroGravacao && (
-              <div role="alert" data-testid="ficha-erro" style={{ marginTop: 18, fontSize: 12.5, color: '#B91C1C', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '9px 12px', lineHeight: 1.5 }}>
+              <div role="alert" data-testid="ficha-erro" style={{ marginTop: 18, fontSize: 12.5, color: '#8F2F29', background: '#FAF0EE', border: '1px solid #EBCBC6', borderRadius: 10, padding: '9px 12px', lineHeight: 1.5 }}>
                 Não foi possível salvar sua ficha: {erroGravacao}. Suas respostas continuam aqui — tente de novo.
               </div>
             )}

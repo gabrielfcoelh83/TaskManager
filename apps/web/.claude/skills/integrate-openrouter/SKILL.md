@@ -1,4 +1,5 @@
 ---
+name: integrate-openrouter
 description: Create /api/gerar-questoes with fallback (Qwen → Llama → Gemini)
 tags: [backend, openrouter, module5]
 ---

@@ -1,4 +1,5 @@
 ---
+name: test-frontend
 description: Run comprehensive frontend tests
 tags: [testing, frontend, module8]
 ---

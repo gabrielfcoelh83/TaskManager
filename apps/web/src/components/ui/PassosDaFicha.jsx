@@ -13,7 +13,7 @@ import {
 // leitor de tela e a roda de datas do celular vêm do navegador. O visual de
 // "cartão marcado" é só a borda e o fundo do rótulo.
 
-const cor = { texto: '#2c2530', suave: '#8b8391', borda: 'rgba(0,0,0,.1)' };
+const cor = { texto: '#1c1b19', suave: '#7a766f', borda: 'rgba(0,0,0,.1)' };
 
 export const estiloCampo = {
   width: '100%', fontSize: 14, border: `1px solid ${cor.borda}`, borderRadius: 10,

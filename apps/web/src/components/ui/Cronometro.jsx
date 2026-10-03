@@ -26,9 +26,9 @@ export default function Cronometro({ tempoTotalMinutos, aoTerminar }) {
   const segundos = tempoRestante % 60;
   const pct = (tempoRestante / (tempoTotalMinutos * 60)) * 100;
 
-  let cor = '#2c2530';
-  if (pct <= 25) cor = '#EF4444';
-  else if (pct <= 50) cor = '#F59E0B';
+  let cor = '#1c1b19';
+  if (pct <= 25) cor = '#B4413A';
+  else if (pct <= 50) cor = '#B07A1F';
 
   return (
     <div data-testid="cronometro" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

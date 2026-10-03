@@ -59,19 +59,23 @@
 
   <h2>Com quem os dados passam</h2>
   <ul>
-    <li><strong>Hospedagem:</strong> o site e as funções de geração de questões rodam
-      na Vercel, que processa esses pedidos e mantém registros deles (como IP e o
-      tema pedido). A API e o banco de dados rodam num servidor contratado por
+    <li><strong>Hospedagem:</strong> o site e as funções de consulta de jurisprudência
+      e de IA rodam na Vercel, que processa esses pedidos e mantém registros deles
+      (como IP e o tema pedido). A API e o banco de dados rodam num servidor contratado por
       nós.</li>
     <li><strong>Google:</strong> as fontes do site vêm do Google Fonts, e a tela de login
       carrega o botão do Google. Nos dois casos o Google recebe dados técnicos da
       visita, como o IP. Se você escolher entrar com o Google, ele também confirma
       sua identidade para nós.</li>
-    <li><strong>Geração de questões por IA:</strong> quando você pede questões novas
-      sobre um tema, o tema e a disciplina são enviados a um serviço de modelos de
-      linguagem (OpenRouter), e o tema também é usado numa busca de jurisprudência na
-      API pública do DataJud, do Conselho Nacional de Justiça. Nenhum dado da sua
-      conta vai junto: evite escrever dados pessoais no tema.</li>
+    <li><strong>Inteligência artificial e jurisprudência:</strong> as questões do site
+      são as reais do Exame de Ordem; a IA não cria questões. Quando você usar um
+      recurso de IA (como pedir uma explicação), o texto enviado — a questão e o que
+      você escrever — vai a um serviço de modelos de linguagem (OpenRouter), que o
+      repassa ao provedor do modelo. Usamos só modelos gratuitos, cujos provedores
+      podem guardar o conteúdo e usá-lo para melhorar seus modelos. Na busca de
+      jurisprudência, o tema da questão é enviado à API pública do DataJud, do
+      Conselho Nacional de Justiça. Nenhum dado da sua conta vai junto: evite
+      escrever dados pessoais nesses textos.</li>
   </ul>
 
   <h2>Por quanto tempo</h2>

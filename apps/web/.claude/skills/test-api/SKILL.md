@@ -1,4 +1,5 @@
 ---
+name: test-api
 description: Test all API endpoints
 tags: [testing, backend, module8]
 ---

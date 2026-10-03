@@ -1,6 +1,7 @@
 ---
+name: devops-specialist
 description: DevOps Specialist for MA Questões
-model: claude-haiku-4-5-20251001
+model: haiku
 tools: [Read, Edit, Write, Bash, Glob, Grep]
 ---
 

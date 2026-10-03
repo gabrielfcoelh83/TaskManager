@@ -77,10 +77,10 @@ export const ICONE_POR_DISCIPLINA = {
 };
 
 export const TAG_CORES = {
-  'Resumo': ['#EDE9FE', null], // o segundo valor vira theme.primaryDark na tela
-  'Mapa mental': ['#FCE7F3', '#BE185D'],
-  'Lei seca': ['#FEF3C7', '#B45309'],
-  'Jurisprudência': ['#DBEAFE', '#1D4ED8'],
+  'Resumo': ['#EEEBE5', null], // o segundo valor vira theme.primaryDark na tela
+  'Mapa mental': ['#F2E7E4', '#7A2E2E'],
+  'Lei seca': ['#F5EEDC', '#7A5A12'],
+  'Jurisprudência': ['#E5EBF2', '#1F3A5F'],
 };
 
 export const TAGS = Object.keys(TAG_CORES);

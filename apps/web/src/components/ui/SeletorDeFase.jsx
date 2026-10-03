@@ -1,5 +1,6 @@
 import { Icon } from '../../lib/icons';
 import { FASES } from '../../lib/navegacao';
+import { HaloBadge } from '@/components/ui/halo-badge';
 
 // O topo da barra lateral: a marca e a escolha entre a 1ª fase (o app de
 // questões objetivas) e as áreas da 2ª fase.
@@ -20,9 +21,9 @@ export default function SeletorDeFase({ theme, s, fase, onTrocar, compacto = fal
           <Icon name="scale" color="#ffffff" size={15} />
         </div>
         <div style={{ ...s.logoText, fontSize: 17 }}>ma.</div>
-        <div aria-hidden="true" style={{ ...s.logoSub, fontSize: 10, letterSpacing: '1.5px', marginLeft: 'auto' }}>
+        <HaloBadge aria-hidden="true" variant="secondary" interactive={false} layout={false} style={{ marginLeft: 'auto' }}>
           {fase.grupo}
-        </div>
+        </HaloBadge>
       </div>
       <div style={{ position: 'relative' }}>
         <select

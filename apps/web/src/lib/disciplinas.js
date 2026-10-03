@@ -18,12 +18,14 @@
 // aparece em três telas diferentes e precisa ser a MESMA nas três, sem depender
 // da ordem em que a lista chegou.
 const PALETA = [
-  '#8B5CF6', '#EC4899', '#06B6D4', '#F59E0B', '#10B981', '#EF4444',
-  '#6366F1', '#0EA5E9', '#D946EF', '#84CC16', '#F97316', '#14B8A6',
+  // Tons terrosos e de tinta, com saturação contida: distinguem doze matérias
+  // sem transformar o painel num arco-íris.
+  '#7A2E2E', '#1F3A5F', '#3F5A3A', '#B4532A', '#5B4A7A', '#2F6B6B',
+  '#8A6D1F', '#6B3F5A', '#3D6B8C', '#7A8B3E', '#A0522D', '#4A5560',
 ];
 
 export function corDaDisciplina(nome) {
-  if (!nome) return '#9a93a1';
+  if (!nome) return '#9a958d';
 
   let hash = 0;
   for (let i = 0; i < nome.length; i++) {

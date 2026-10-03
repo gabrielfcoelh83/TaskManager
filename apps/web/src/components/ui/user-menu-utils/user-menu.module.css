@@ -1,0 +1,284 @@
+/* Menu da conta. As cores da paleta escolhida chegam por variável
+   (--um-primary, --um-primary-soft, --um-primary-dark), postas no gatilho e
+   no painel — o painel vai para o <body> por portal e não herda do gatilho. */
+
+.root {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/* ---- Gatilho ---- */
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  color: #1c1b19;
+  cursor: pointer;
+  transition: background-color 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.trigger:hover,
+.trigger[data-state="open"] {
+  background: var(--um-primary-soft, #f1ece4);
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--um-primary, #1c1b19);
+  outline-offset: 2px;
+}
+.trigger:not([data-name]) {
+  width: auto;
+  padding: 4px;
+  border-radius: 50%;
+}
+
+.triggerName {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chevron {
+  color: #7a766f;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.trigger[data-state="open"] .chevron {
+  transform: rotate(180deg);
+}
+
+/* ---- Rosto (avatar) ---- */
+
+.face {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+.face[data-size="sm"] { width: 34px; height: 34px; font-size: 12px; }
+.face[data-size="md"] { width: 38px; height: 38px; font-size: 13px; }
+
+.portrait {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--um-primary-soft, #f1ece4);
+  color: var(--um-primary-dark, #1c1b19);
+  font-weight: 600;
+  user-select: none;
+  transition: background-color 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* No gatilho em destaque o fundo é o mesmo véu das iniciais: o rosto vira
+   branco para não sumir nele. */
+.trigger[data-name]:hover .initials,
+.trigger[data-name][data-state="open"] .initials {
+  background: #fff;
+}
+
+/* ---- Painel ---- */
+
+.panel {
+  position: fixed;
+  z-index: 60;
+  width: 256px;
+  padding: 6px;
+  background: #fff;
+  border-radius: 12px;
+  /* Camada flutuante: a única sombra grande do app, como o painel do sino. */
+  box-shadow: 0 0 0 1px rgba(28, 27, 25, 0.08), 0 8px 24px rgba(28, 27, 25, 0.12);
+  transform-origin: var(--origin-x, 50%) var(--origin-y, 0);
+  outline: none;
+  color: #1c1b19;
+  font-family: 'Geist', system-ui, sans-serif;
+}
+.panel[data-inline] {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 10px;
+}
+.identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.name {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--um-primary-soft, #f1ece4);
+  color: var(--um-primary-dark, #1c1b19);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.email {
+  font-size: 12px;
+  color: #7a766f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fundo que desliza até a linha com foco (mouse ou teclado). */
+.highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  border-radius: 8px;
+  background: var(--um-primary-soft, #f1ece4);
+  pointer-events: none;
+}
+.highlight[data-tone="danger"] {
+  background: #faf0ee;
+}
+
+.separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: #eeebe5;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: #1c1b19;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.item[data-tone="danger"] {
+  color: #b4413a;
+}
+.item[aria-busy] {
+  cursor: progress;
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+  color: #7a766f;
+}
+.item[data-tone="danger"] .icon {
+  color: #b4413a;
+}
+.itemLabel {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rise {
+  display: inline-block;
+}
+
+.keys {
+  display: inline-flex;
+  gap: 3px;
+  font-family: inherit;
+}
+.key {
+  min-width: 18px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f4f2ee;
+  color: #7a766f;
+  font-family: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+.spinner {
+  animation: um-spin 0.9s linear infinite;
+}
+@keyframes um-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Folha inferior (celular) ---- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  background: rgba(28, 27, 25, 0.32);
+}
+.sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  padding: 8px 10px calc(14px + env(safe-area-inset-bottom));
+  border-radius: 12px 12px 0 0;
+  touch-action: none;
+}
+.sheet .item {
+  height: 44px;
+  font-size: 14px;
+}
+.handle {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 2px auto 8px;
+  border-radius: 4px;
+  background: #e6e2da;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron,
+  .trigger { transition: none; }
+}

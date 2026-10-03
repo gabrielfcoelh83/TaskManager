@@ -1,7 +1,61 @@
+/* Tailwind entra SEM o preflight (o reset global): o app inteiro estiliza por
+   objeto inline e conta com os padrões do navegador — o reset deixaria todo
+   <svg> em display:block e todo botão sem fundo. Só tema e utilitários, o
+   bastante para os componentes do shadcn. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Variantes que os componentes do shadcn/cult-ui usam. `dark:` responde só a
+   uma classe .dark (que o app não tem): sem isto ele seguiria o modo escuro do
+   sistema e pintaria componentes escuros num app que é só claro. */
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant fine-hover (@media (hover: hover) and (pointer: fine));
+
+/* Tokens no formato do shadcn. Os de marca (--primary, --tema-acento,
+   --primary-soft) são trocados pelo App a cada mudança de paleta
+   (`aplicarTemaNoDocumento` em lib/theme.js); estes valores são só o ponto
+   de partida, iguais à paleta Bordô. */
+:root {
+  --primary: #7A2E2E;
+  --primary-foreground: #fff;
+  --primary-soft: #F2E7E4;
+  --tema-acento: #B4532A;
+  --card: #fff;
+  --muted: #f1efea;
+  --muted-foreground: #7a766f;
+  --foreground: #1c1b19;
+  --border: #e6e2da;
+  --ring: var(--primary);
+  --destructive: #B4413A;
+  --secondary: #f1efea;
+  --secondary-foreground: #1c1b19;
+  --accent: #f1efea;
+  --accent-foreground: #1c1b19;
+}
+
+@theme inline {
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+}
+
 body {
   margin: 0;
-  font-family: 'Roboto', system-ui, sans-serif;
+  font-family: 'Geist', system-ui, sans-serif;
+  color: #1c1b19;
   -webkit-font-smoothing: antialiased;
+  /* Peso que a fonte não tem falha à vista, em vez de virar negrito falso. */
+  font-synthesis: none;
 }
 * {
   box-sizing: border-box;
@@ -53,14 +107,39 @@ button {
 
 /* Todo elemento pressionável responde ao toque. Sem isso a interface parece
    não ter ouvido o clique — o retorno visual só chega quando a tela troca,
-   que numa rede ruim é tarde demais. 0.97 é sutil de propósito: dá para
+   que numa rede ruim é tarde demais. 0.98 é sutil de propósito: dá para
    sentir sem dar para reparar. */
 button:not(:disabled) {
   transition: transform 160ms var(--ease-out);
 }
 button:not(:disabled):active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
+
+/* --- Entrada de uma tela ---------------------------------------------- */
+
+/* Ao trocar de tela, os blocos do conteúdo entram em sequência (80ms entre
+   um e outro) em vez de a página inteira aparecer de uma vez: o olho segue a
+   ordem de leitura. Opacidade + 8px + um desfoque curto, só na entrada — a
+   saída é a troca de tela, sem animação. A `key` do contêiner é a tela, então
+   isto toca uma vez por navegação e nunca a cada render. `backwards` e não
+   `both`: terminada a entrada, a animação deixa de valer, e um transform
+   preso no bloco viraria o contêiner de todo `position: fixed` lá dentro. */
+@keyframes entra-tela {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(4px);
+  }
+}
+
+.tela > * > * {
+  animation: entra-tela 520ms cubic-bezier(0.2, 0, 0, 1) backwards;
+}
+.tela > * > *:nth-child(2) { animation-delay: 80ms; }
+.tela > * > *:nth-child(3) { animation-delay: 160ms; }
+.tela > * > *:nth-child(4) { animation-delay: 240ms; }
+.tela > * > *:nth-child(n + 5) { animation-delay: 320ms; }
 
 /* --- Entrada de uma questão -------------------------------------------- */
 
@@ -132,7 +211,7 @@ button:not(:disabled):active {
 }
 
 .esqueleto {
-  background: #eceaef;
+  background: #ebe8e2;
   border-radius: 8px;
   animation: pulso 1.4s ease-in-out infinite;
 }
@@ -144,7 +223,8 @@ button:not(:disabled):active {
    é o que causa enjoo em quem pediu esta preferência. */
 @media (prefers-reduced-motion: reduce) {
   .entra,
-  .alternativa {
+  .alternativa,
+  .tela > * > * {
     animation-name: so-opacidade;
   }
 
@@ -160,5 +240,19 @@ button:not(:disabled):active {
   .esqueleto {
     animation: none;
     opacity: 0.75;
+  }
+}
+
+/* --- Listas de seleção ---------------------------------------------------- */
+
+/* Linha de lista clicável (fontes do quiz): sem fundo em repouso — o estado
+   fica no checkbox — e um véu neutro só sob o ponteiro. Pintar cada linha
+   marcada com a cor da paleta transformava a lista numa coluna de blocos. */
+.linha-fonte {
+  transition: background-color 160ms ease, opacity 160ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .linha-fonte:hover {
+    background: rgba(28, 27, 25, 0.04);
   }
 }

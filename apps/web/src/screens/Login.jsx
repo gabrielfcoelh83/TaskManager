@@ -86,7 +86,7 @@ export default function Login({ theme, s, onEntrar }) {
     borderRadius: 10,
     padding: '11px 13px',
     fontSize: 13.5,
-    color: '#2c2530',
+    color: '#1c1b19',
     background: '#fff',
     outlineColor: theme.primary,
   };
@@ -94,20 +94,42 @@ export default function Login({ theme, s, onEntrar }) {
   const rotulo = { ...s.statLabel, display: 'block', marginBottom: 5 };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        width: '100%',
-        background: theme.bg,
-        padding: 20,
-        boxSizing: 'border-box',
-      }}
-    >
-      <form onSubmit={submeter} style={{ ...s.card, width: 360, maxWidth: '100%', padding: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 20 }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100%', background: theme.bg }}>
+      {/* Painel editorial: diz o que o produto é antes de pedir a senha. Some
+          em tela estreita (classe do Tailwind, porque estilo inline não tem
+          media query), onde o formulário sozinho já ocupa a tela. */}
+      <aside
+        className="hidden lg:flex"
+        style={{ flex: '0 0 46%', flexDirection: 'column', justifyContent: 'space-between', padding: '48px 56px', background: theme.primaryDark, color: '#f4efe8' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="scale" color="#f4efe8" size={20} />
+          <span style={{ ...s.logoText, color: '#f4efe8' }}>ma.</span>
+          <span style={{ ...s.logoSub, color: 'rgba(244,239,232,.6)' }}>questões</span>
+        </div>
+        <div style={{ maxWidth: 460 }}>
+          <div style={{ fontFamily: s.pageTitle.fontFamily, fontSize: 40, lineHeight: 1.12, letterSpacing: '-0.02em', fontWeight: 400 }}>
+            As questões que a FGV cobra, com o gabarito que a FGV publicou.
+          </div>
+          <div style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 0, borderTop: '1px solid rgba(244,239,232,.18)' }}>
+            {[
+              ['Acervo', 'Questões dos Exames de Ordem, prova a prova'],
+              ['Revisão', 'O que você errou volta até você acertar'],
+              ['Simulados', 'Tempo e formato da prova real'],
+            ].map(([t, d]) => (
+              <div key={t} style={{ display: 'flex', gap: 16, padding: '12px 0', borderBottom: '1px solid rgba(244,239,232,.18)', fontSize: 13.5 }}>
+                <span style={{ width: 84, flex: 'none', color: 'rgba(244,239,232,.6)' }}>{t}</span>
+                <span>{d}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'rgba(244,239,232,.55)' }}>Exame de Ordem Unificado · 1ª e 2ª fase</div>
+      </aside>
+
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <form onSubmit={submeter} style={{ width: 360, maxWidth: '100%' }}>
+        <div className="flex lg:hidden" style={{ alignItems: 'center', gap: 9, marginBottom: 20 }}>
           <div style={s.logoMark}>
             <Icon name="scale" color="#ffffff" size={17} />
           </div>
@@ -117,7 +139,7 @@ export default function Login({ theme, s, onEntrar }) {
           </div>
         </div>
 
-        <div style={{ ...s.sectionTitle, marginBottom: 4 }}>
+        <div style={{ ...s.pageTitle, fontSize: 26, marginBottom: 6 }}>
           {criando ? 'Criar conta' : 'Entrar'}
         </div>
         <div style={{ ...s.pageSub, marginBottom: 18 }}>
@@ -194,9 +216,9 @@ export default function Login({ theme, s, onEntrar }) {
           <div
             role="alert"
             style={{
-              background: '#FEF2F2',
-              color: '#B91C1C',
-              border: '1px solid #FECACA',
+              background: '#FAF0EE',
+              color: '#8F2F29',
+              border: '1px solid #EBCBC6',
               borderRadius: 10,
               padding: '9px 12px',
               fontSize: 12.5,
@@ -259,6 +281,7 @@ export default function Login({ theme, s, onEntrar }) {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 }

@@ -14,11 +14,11 @@ import { listarDiscursivas, buscarDiscursiva, listarRespostasDiscursivas } from 
 // conferidos, que são da conta: vão para a chave dela no localStorage,
 // sobrevivem ao "Sair" e passam entre abas (ver `FATIAS_DA_CONTA`).
 
-const COR_TEXTO = '#2c2530';
+const COR_TEXTO = '#1c1b19';
 
 // O servidor recusa resposta maior que isto por item.
 const MAX_CARACTERES = 6000;
-const COR_SUAVE = '#8b8391';
+const COR_SUAVE = '#7a766f';
 
 const AVISO_CORRECAO = 'Esta conferência não é nota: ela só verifica se você citou os fundamentos do padrão de resposta. '
   + 'A banca também avalia a fundamentação; citar o artigo sozinho não pontua.';
@@ -28,10 +28,10 @@ function Aviso({ s, icone, cor, titulo, texto, acao, testid }) {
     <div
       className="entra"
       data-testid={testid}
-      style={{ background: '#fff', border: '1px solid rgba(0,0,0,.05)', borderRadius: 18, padding: '44px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+      style={{ ...s.card, padding: '44px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
     >
-      <div style={{ width: 64, height: 64, borderRadius: 20, background: cor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name={icone} color="#fff" size={30} />
+      <div style={{ width: 52, height: 52, borderRadius: 10, background: cor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={icone} color="#fff" size={24} />
       </div>
       <div style={{ fontSize: 18, fontWeight: 700, color: COR_TEXTO, marginTop: 14 }}>{titulo}</div>
       <div style={{ fontSize: 13.5, color: COR_SUAVE, marginTop: 6, maxWidth: 460, lineHeight: 1.55 }}>{texto}</div>
@@ -91,7 +91,7 @@ function ListaDeQuestoes({ theme, s, area, rascunhos, abrir, sessaoExpirou }) {
   if (lista.estado === 'erro') {
     return (
       <Aviso
-        s={s} testid="discursivas-erro" icone="triangle-alert" cor="#EF4444"
+        s={s} testid="discursivas-erro" icone="triangle-alert" cor="#B4413A"
         titulo="As questões não carregaram"
         texto={lista.erro}
         acao={{ rotulo: 'Tentar de novo', onClick: () => setRecarga((n) => n + 1) }}
@@ -136,7 +136,7 @@ function ListaDeQuestoes({ theme, s, area, rascunhos, abrir, sessaoExpirou }) {
                       <div style={{ fontSize: 12.5, color: COR_SUAVE, marginTop: 2, lineHeight: 1.45 }}>{q.resumo}</div>
                     )}
                   </div>
-                  {temRascunho && <span style={s.pill('#FEF3C7', '#B45309')}>Rascunho</span>}
+                  {temRascunho && <span style={s.pill('#F5EEDC', '#94661A')}>Rascunho</span>}
                   <Icon name="play" color={theme.primary} size={14} />
                 </button>
               );
@@ -160,7 +160,7 @@ function ConferenciaDoItem({ theme, s, item, resultado }) {
   const { esperados, atendidos, faltando, extras } = resultado;
   const total = esperados.length;
   const tudo = total > 0 && atendidos.length === total;
-  const cor = total === 0 ? ['#F1EEF4', '#5c5462'] : tudo ? ['#D1FAE5', '#047857'] : atendidos.length > 0 ? ['#FEF3C7', '#B45309'] : ['#FEE2E2', '#B91C1C'];
+  const cor = total === 0 ? ['#eeebe5', '#4f4b45'] : tudo ? ['#E4EEE1', '#355E35'] : atendidos.length > 0 ? ['#F5EEDC', '#94661A'] : ['#F6E4E1', '#8F2F29'];
   const valor = formatarValor(item.valor);
 
   return (
@@ -174,11 +174,11 @@ function ConferenciaDoItem({ theme, s, item, resultado }) {
 
       {faltando.length > 0 && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#B91C1C' }}>Faltou citar</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#8F2F29' }}>Faltou citar</div>
           <ul style={{ margin: '4px 0 0', paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 3 }}>
             {faltando.map((f) => (
               <li key={f.rotulo} style={{ fontSize: 13, color: COR_TEXTO, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                <Icon name="x" color="#EF4444" size={14} style={{ marginTop: 2 }} />
+                <Icon name="x" color="#B4413A" size={14} style={{ marginTop: 2 }} />
                 <span>
                   {f.opcoes.map((o) => comDetalhe(o.rotulo, o.detalhe)).join(' ou ')}
                   {f.opcoes.length > 1 && <span style={{ color: COR_SUAVE }}> — qualquer um deles</span>}
@@ -191,14 +191,14 @@ function ConferenciaDoItem({ theme, s, item, resultado }) {
 
       {(atendidos.length > 0 || extras.length > 0) && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#047857' }}>Você citou</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#355E35' }}>Você citou</div>
           <ul style={{ margin: '4px 0 0', paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 3 }}>
             {atendidos.map((a) => (
               <li key={a.rotulo} style={{ fontSize: 13, color: COR_TEXTO, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                <Icon name="check" color="#10B981" size={14} style={{ marginTop: 2 }} />
+                <Icon name="check" color="#4A7A4A" size={14} style={{ marginTop: 2 }} />
                 <span>
                   {comDetalhe(a.citado.rotulo, a.citado.detalhe)}
-                  {a.citado.semDiploma && <span style={{ color: '#B45309' }}> — diga de qual lei é o artigo</span>}
+                  {a.citado.semDiploma && <span style={{ color: '#94661A' }}> — diga de qual lei é o artigo</span>}
                 </span>
               </li>
             ))}
@@ -232,7 +232,7 @@ function ConferenciaDoItem({ theme, s, item, resultado }) {
         {item.distribuicao && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(109,40,217,.15)' }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: theme.primaryDark }}>Distribuição dos pontos</div>
-            <div data-testid={`distribuicao-${item.letra}`} style={{ fontSize: 12.5, color: '#5c5462', marginTop: 4, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+            <div data-testid={`distribuicao-${item.letra}`} style={{ fontSize: 12.5, color: '#4f4b45', marginTop: 4, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
               {item.distribuicao}
             </div>
           </div>
@@ -347,7 +347,7 @@ function QuestaoAberta({ theme, s, questaoId, rascunho, setRascunho, voltar, gra
       <>
         {cabecalho}
         <Aviso
-          s={s} testid="discursiva-erro" icone="triangle-alert" cor="#EF4444"
+          s={s} testid="discursiva-erro" icone="triangle-alert" cor="#B4413A"
           titulo="A questão não carregou" texto={carga.erro}
           acao={{ rotulo: 'Tentar de novo', onClick: () => setRecarga((n) => n + 1) }}
         />
@@ -409,7 +409,7 @@ function QuestaoAberta({ theme, s, questaoId, rascunho, setRascunho, voltar, gra
       </div>
 
       {erroDasRespostas && !ultimaDoServidor && (
-        <div role="status" style={{ marginTop: 12, background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E', borderRadius: 12, padding: '10px 14px', fontSize: 12.5 }}>
+        <div role="status" style={{ marginTop: 12, background: '#FBF7EC', border: '1px solid #EAD9A8', color: '#92400E', borderRadius: 12, padding: '10px 14px', fontSize: 12.5 }}>
           Sua última resposta a esta questão não carregou ({erroDasRespostas}). O que você responder agora é salvo normalmente.
         </div>
       )}
@@ -459,7 +459,7 @@ function QuestaoAberta({ theme, s, questaoId, rascunho, setRascunho, voltar, gra
               ) : (
                 <>
                   <div style={{ marginTop: 10, fontSize: 11.5, fontWeight: 700, color: COR_SUAVE, textTransform: 'uppercase', letterSpacing: '.5px' }}>Sua resposta</div>
-                  <div data-testid={`sua-resposta-${item.letra}`} style={{ marginTop: 4, fontSize: 13.5, color: COR_TEXTO, lineHeight: 1.6, whiteSpace: 'pre-wrap', background: '#FAF9FB', borderRadius: 10, padding: '10px 12px' }}>
+                  <div data-testid={`sua-resposta-${item.letra}`} style={{ marginTop: 4, fontSize: 13.5, color: COR_TEXTO, lineHeight: 1.6, whiteSpace: 'pre-wrap', background: '#faf9f6', borderRadius: 10, padding: '10px 12px' }}>
                     {conferida[item.letra]?.trim() || <span style={{ color: COR_SUAVE }}>Em branco.</span>}
                   </div>
                   <ConferenciaDoItem theme={theme} s={s} item={item} resultado={conferencia.porItem[item.letra]} />
@@ -507,7 +507,7 @@ function EstadoDaGravacao({ s, pendente, ultima, tentarDeNovo }) {
   }
   if (pendente?.erro) {
     return (
-      <span role="alert" data-testid="erro-gravacao" style={{ fontSize: 12, color: '#B91C1C', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <span role="alert" data-testid="erro-gravacao" style={{ fontSize: 12, color: '#8F2F29', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         Resposta não salva: {pendente.erro}
         <button type="button" onClick={tentarDeNovo} style={{ ...s.btnOutline, padding: '5px 10px', fontSize: 11.5 }}>Tentar de novo</button>
       </span>
@@ -515,8 +515,8 @@ function EstadoDaGravacao({ s, pendente, ultima, tentarDeNovo }) {
   }
   const quando = ultima?.criada_em ? formatarData(ultima.criada_em) : null;
   return (
-    <span data-testid="resposta-salva" style={{ fontSize: 12, color: '#047857', display: 'flex', alignItems: 'center', gap: 5 }}>
-      <Icon name="circle-check" color="#10B981" size={14} />
+    <span data-testid="resposta-salva" style={{ fontSize: 12, color: '#355E35', display: 'flex', alignItems: 'center', gap: 5 }}>
+      <Icon name="circle-check" color="#4A7A4A" size={14} />
       {quando ? `Salva em ${quando}` : 'Resposta salva'}
     </span>
   );

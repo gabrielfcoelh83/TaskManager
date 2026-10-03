@@ -49,7 +49,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
   const ativa = itens.find((n) => n.id === notas.activeId) || visiveis[0] || null;
 
   const tagStyle = (tag) => {
-    const [bg, fg] = TAG_CORES[tag] || ['#f3f1f5', '#8b8391'];
+    const [bg, fg] = TAG_CORES[tag] || ['#f1efea', '#7a766f'];
     return s.pill(bg, fg === null ? theme.primaryDark : fg);
   };
 
@@ -101,7 +101,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
                   display: 'flex', justifyContent: 'space-between', gap: 6,
                   padding: '8px 10px', borderRadius: 9, fontSize: 12.5, cursor: 'pointer',
                   background: notas.folder === f ? theme.primarySoft : 'transparent',
-                  color: notas.folder === f ? theme.primaryDark : '#5c5462',
+                  color: notas.folder === f ? theme.primaryDark : '#4f4b45',
                   fontWeight: notas.folder === f ? 600 : 500,
                 }}
               >
@@ -111,7 +111,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
             );
           })}
         </div>
-        <div style={{ fontSize: 10.5, color: '#8b8391', marginTop: 14, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 10.5, color: '#7a766f', marginTop: 14, lineHeight: 1.5 }}>
           As anotações ficam guardadas neste navegador, separadas por conta, e
           continuam aqui depois de sair. Limpar os dados do site apaga todas —
           em computador compartilhado, é o jeito de não deixá-las para trás.
@@ -125,7 +125,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
         </div>
 
         {visiveis.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: '#8b8391', padding: '20px 4px', lineHeight: 1.55 }}>
+          <div style={{ fontSize: 12.5, color: '#7a766f', padding: '20px 4px', lineHeight: 1.55 }}>
             {itens.length === 0
               ? 'Seu caderno está vazio. Crie a primeira anotação com o botão acima.'
               : 'Nenhuma anotação nesta pasta.'}
@@ -136,13 +136,13 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
               <div
                 key={n.id}
                 onClick={() => setNotas({ activeId: n.id })}
-                style={{ padding: '10px 12px', borderRadius: 10, cursor: 'pointer', background: ativa?.id === n.id ? theme.primarySoft : '#faf9fb' }}
+                style={{ padding: '10px 12px', borderRadius: 10, cursor: 'pointer', background: ativa?.id === n.id ? theme.primarySoft : '#faf9f6' }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#2c2530', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.titulo || 'Sem título'}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1c1b19', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.titulo || 'Sem título'}</div>
                   <span style={tagStyle(n.tag)}>{n.tag}</span>
                 </div>
-                <div style={{ fontSize: 11.5, color: '#8b8391', marginTop: 4 }}>
+                <div style={{ fontSize: 11.5, color: '#7a766f', marginTop: 4 }}>
                   {n.disciplina || SEM_DISCIPLINA} · {formatarData(n.atualizadaEm || n.criadaEm)}
                 </div>
               </div>
@@ -156,7 +156,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <input
-                style={{ ...campoInvisivel, fontSize: 19, fontWeight: 700, color: '#2c2530', width: '100%' }}
+                style={{ ...campoInvisivel, fontSize: 19, fontWeight: 700, color: '#1c1b19', width: '100%' }}
                 value={ativa.titulo}
                 onChange={(e) => editar(ativa.id, 'titulo', e.target.value)}
                 placeholder="Título da anotação"
@@ -165,7 +165,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
                 data-testid="apagar-anotacao"
                 onClick={() => apagar(ativa.id)}
                 title="Apagar anotação"
-                style={{ background: 'none', border: '1px solid #FECACA', color: '#B91C1C', borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flex: 'none' }}
+                style={{ background: 'none', border: '1px solid #EBCBC6', color: '#8F2F29', borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flex: 'none' }}
               >
                 Apagar
               </button>
@@ -175,7 +175,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
               <select
                 value={ativa.disciplina || SEM_DISCIPLINA}
                 onChange={(e) => editar(ativa.id, 'disciplina', e.target.value)}
-                style={{ fontSize: 11.5, border: '1px solid rgba(0,0,0,.1)', borderRadius: 20, padding: '4px 10px', color: '#5c5462', background: '#fff' }}
+                style={{ fontSize: 11.5, border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, padding: '4px 10px', color: '#4f4b45', background: '#fff' }}
               >
                 {[...new Set([SEM_DISCIPLINA, ...nomesDeDisciplina, ativa.disciplina || SEM_DISCIPLINA])].map((d) => (
                   <option key={d} value={d}>{d}</option>
@@ -190,7 +190,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
                 {TAGS.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
 
-              <span style={{ fontSize: 11.5, color: '#8b8391', marginLeft: 'auto' }}>
+              <span style={{ fontSize: 11.5, color: '#7a766f', marginLeft: 'auto' }}>
                 editada {formatarData(ativa.atualizadaEm || ativa.criadaEm)}
               </span>
             </div>
@@ -203,7 +203,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
             />
           </div>
         ) : (
-          <div style={{ color: '#8b8391', fontSize: 13.5, padding: '40px 10px', textAlign: 'center', lineHeight: 1.6 }}>
+          <div style={{ color: '#7a766f', fontSize: 13.5, padding: '40px 10px', textAlign: 'center', lineHeight: 1.6 }}>
             Nenhuma anotação aberta.
             <br />Crie uma com o botão “+ Nova”.
           </div>

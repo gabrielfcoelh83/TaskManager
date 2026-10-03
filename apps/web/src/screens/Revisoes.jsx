@@ -22,13 +22,15 @@ const ABAS = [
 ];
 
 const SITUACAO = {
-  errou: { rotulo: 'Errei', bg: '#FEE2E2', fg: '#B91C1C' },
-  acertou: { rotulo: 'Acertei', bg: '#D1FAE5', fg: '#047857' },
-  'em-aberto': { rotulo: 'Não respondida', bg: '#F3F4F6', fg: '#5c5462' },
+  errou: { rotulo: 'Errei', bg: '#F6E4E1', fg: '#8F2F29' },
+  acertou: { rotulo: 'Acertei', bg: '#E4EEE1', fg: '#355E35' },
+  'em-aberto': { rotulo: 'Não respondida', bg: '#f1efea', fg: '#4f4b45' },
 };
 
-function iw(from, to) {
-  return { width: 38, height: 38, borderRadius: 11, background: `linear-gradient(135deg, ${from}, ${to})`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
+// Ladrilho do ícone: fundo com um véu da cor e o ícone na própria cor, em vez
+// de ícone branco sobre degradê saturado.
+function iw(_from, to) {
+  return { width: 36, height: 36, borderRadius: 8, background: `${to}14`, color: to, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
 }
 
 function dot(c) {
@@ -43,14 +45,14 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
   const itens = aba.lista(revisao) || [];
 
   const stats = [
-    { iconWrap: iw('#F87171', '#DC2626'), icon: 'circle-x', value: resumo.erros, label: 'Errei na última vez' },
+    { iconWrap: iw('#B4413A', '#9E3630'), icon: 'circle-x', value: resumo.erros, label: 'Errei na última vez' },
     { iconWrap: iw(theme.gradA, theme.gradB), icon: 'star', value: resumo.favoritas, label: 'Favoritas' },
     { iconWrap: iw('#9CA3AF', '#6B7280'), icon: 'bookmark', value: resumo.emAberto, label: 'Nunca respondidas' },
-    { iconWrap: iw('#34D399', '#059669'), icon: 'check', value: resumo.acertos, label: 'Acertei na última vez' },
+    { iconWrap: iw('#4A7A4A', '#3E6B3E'), icon: 'check', value: resumo.acertos, label: 'Acertei na última vez' },
   ];
 
   // A rosca mede o acervo inteiro: acertadas, erradas e ainda em aberto. A
-  // anterior era `conic-gradient(#10B981 0% 68%, ...)` — um desenho fixo.
+  // anterior era `conic-gradient(#4A7A4A 0% 68%, ...)` — um desenho fixo.
   const totalAcervo = Math.max(1, resumo.acervo);
   const fatiaAcertos = Math.round((resumo.acertos / totalAcervo) * 100);
   const fatiaErros = Math.round((resumo.erros / totalAcervo) * 100);
@@ -61,14 +63,13 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
     .slice(0, 5);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1fr', gap: 18, alignItems: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2.2fr) minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
           {stats.map((st, i) => (
             <div key={i} style={s.card}>
-              <div style={st.iconWrap}><Icon name={st.icon} color="#fff" size={20} /></div>
-              <div style={{ ...s.statNum, marginTop: 8 }}>{st.value}</div>
-              <div style={s.statLabel}>{st.label}</div>
+              <div style={{ fontSize: 12.5, color: '#7a766f' }}>{st.label}</div>
+              <div style={{ ...s.statNum, fontSize: 30, marginTop: 6 }}>{st.value}</div>
             </div>
           ))}
         </div>
@@ -83,7 +84,7 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
                 onClick={() => setRev({ tab: t.key })}
                 style={{
                   background: rev.tab === t.key ? theme.primarySoft : '#fff',
-                  color: rev.tab === t.key ? theme.primaryDark : '#5c5462',
+                  color: rev.tab === t.key ? theme.primaryDark : '#4f4b45',
                   border: rev.tab === t.key ? 'none' : '1px solid rgba(0,0,0,.08)',
                   borderRadius: 10, padding: '9px 14px', fontSize: 12.5, fontWeight: 600,
                 }}
@@ -105,7 +106,7 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
         </div>
 
         {itens.length === 0 ? (
-          <div style={{ ...s.card, textAlign: 'center', padding: '40px 20px', color: '#8b8391', fontSize: 13.5, lineHeight: 1.6 }}>
+          <div style={{ ...s.card, textAlign: 'center', padding: '40px 20px', color: '#7a766f', fontSize: 13.5, lineHeight: 1.6 }}>
             {rev.tab === 'errei' && 'Nenhuma questão errada na última tentativa. Quando você errar alguma, ela aparece aqui.'}
             {rev.tab === 'favoritas' && 'Você ainda não marcou nenhuma questão com a estrela.'}
             {rev.tab === 'aberto' && 'Você já respondeu todas as questões do acervo pelo menos uma vez.'}
@@ -123,15 +124,15 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
                 <div key={q.id} data-testid={`revisao-item-${q.id}`} style={{ ...s.card, display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ width: 36, height: 36, borderRadius: 10, background: theme.primarySoft, color: theme.primaryDark, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flex: 'none' }}>{i + 1}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#2c2530' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#1c1b19' }}>
                       {q.disciplina || (q.exame ? `${q.exame}º Exame de Ordem` : 'Sem classificação')}
                     </div>
-                    <div data-testid={`revisao-enunciado-${q.id}`} style={{ fontSize: 13, color: '#5c5462', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.enunciado}</div>
+                    <div data-testid={`revisao-enunciado-${q.id}`} style={{ fontSize: 13, color: '#4f4b45', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.enunciado}</div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                      {q.exame && <span style={s.pill('#f3f1f5', '#8b8391')}>{q.exame}º Exame · questão {q.numero}</span>}
-                      {q.topico && <span style={s.pill('#f3f1f5', '#8b8391')}>{q.topico}</span>}
+                      {q.exame && <span style={s.pill('#f1efea', '#7a766f')}>{q.exame}º Exame · questão {q.numero}</span>}
+                      {q.topico && <span style={s.pill('#f1efea', '#7a766f')}>{q.topico}</span>}
                       {item.tentativas > 0 && (
-                        <span style={s.pill('#f3f1f5', '#8b8391')}>
+                        <span style={s.pill('#f1efea', '#7a766f')}>
                           {item.acertos}/{item.tentativas} {item.tentativas === 1 ? 'tentativa' : 'tentativas'} · {item.pct}%
                         </span>
                       )}
@@ -144,10 +145,10 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
                     style={{ background: 'none', border: 'none', flex: 'none', cursor: 'pointer' }}
                     onClick={() => toggleFavorito(q.id)}
                   >
-                    <Icon name="star" color={favorita ? '#F59E0B' : '#c9c3cf'} size={19} />
+                    <Icon name="star" color={favorita ? '#B07A1F' : '#cfcac2'} size={19} />
                   </button>
-                  <button data-testid={`revisar-${q.id}`} style={s.btnPrimary} onClick={() => revisarQuestoes([q])}>
-                    <Icon name="play" color="#fff" size={13} /> Revisar agora
+                  <button data-testid={`revisar-${q.id}`} style={{ ...s.btnOutline, display: "flex", alignItems: "center", gap: 6, flex: "none" }} onClick={() => revisarQuestoes([q])}>
+                    <Icon name="play" color="#1c1b19" size={12} /> Revisar
                   </button>
                 </div>
               );
@@ -160,18 +161,18 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
         <div style={s.card}>
           <div style={s.sectionTitle}>Onde você está no acervo</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
-            <div style={{ width: 88, height: 88, borderRadius: '50%', background: `conic-gradient(#10B981 0% ${fatiaAcertos}%, #EF4444 ${fatiaAcertos}% ${fatiaAcertos + fatiaErros}%, #e5e2ea ${fatiaAcertos + fatiaErros}% 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+            <div style={{ width: 88, height: 88, borderRadius: '50%', background: `conic-gradient(#4A7A4A 0% ${fatiaAcertos}%, #B4413A ${fatiaAcertos}% ${fatiaAcertos + fatiaErros}%, #e6e2da ${fatiaAcertos + fatiaErros}% 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
               <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#2c2530' }}>{resumo.pct != null ? `${resumo.pct}%` : '—'}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#1c1b19' }}>{resumo.pct != null ? `${resumo.pct}%` : '—'}</div>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={dot('#10B981')}></span>Acertei <b style={{ marginLeft: 'auto' }}>{resumo.acertos}</b></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={dot('#EF4444')}></span>Errei <b style={{ marginLeft: 'auto' }}>{resumo.erros}</b></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={dot('#c9c3cf')}></span>Em aberto <b style={{ marginLeft: 'auto' }}>{resumo.emAberto}</b></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={dot('#4A7A4A')}></span>Acertei <b style={{ marginLeft: 'auto' }}>{resumo.acertos}</b></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={dot('#B4413A')}></span>Errei <b style={{ marginLeft: 'auto' }}>{resumo.erros}</b></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={dot('#cfcac2')}></span>Em aberto <b style={{ marginLeft: 'auto' }}>{resumo.emAberto}</b></div>
             </div>
           </div>
-          <div style={{ fontSize: 11.5, color: '#8b8391', marginTop: 12, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 11.5, color: '#7a766f', marginTop: 12, lineHeight: 1.5 }}>
             Conta a ÚLTIMA tentativa de cada uma das {resumo.acervo} questões do acervo — quem errou e depois acertou já saiu da lista de revisão.
           </div>
         </div>
@@ -183,25 +184,25 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
               {piores.map((d) => (
                 <div key={d.nome}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
-                    <span style={{ color: '#2c2530', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{d.nome}</span>
-                    <span style={{ color: '#8b8391' }}>{d.pct}%</span>
+                    <span style={{ color: '#1c1b19', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>{d.nome}</span>
+                    <span style={{ color: '#7a766f' }}>{d.pct}%</span>
                   </div>
-                  <div style={{ ...s.progressTrack, marginTop: 5 }}><div style={{ width: d.pct + '%', height: '100%', background: '#EF4444', borderRadius: 5 }} /></div>
+                  <div style={{ ...s.progressTrack, marginTop: 5 }}><div style={{ width: d.pct + '%', height: '100%', background: '#B4413A', borderRadius: 5 }} /></div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 12.5, color: '#8b8391', marginTop: 12, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12.5, color: '#7a766f', marginTop: 12, lineHeight: 1.5 }}>
               Nenhuma disciplina tem resposta registrada ainda.
             </div>
           )}
         </div>
 
-        <div style={{ background: `linear-gradient(135deg, ${theme.gradA}, ${theme.gradB})`, borderRadius: 16, padding: '18px 20px', color: '#fff' }}>
+        <div style={{ ...s.card, borderLeft: `3px solid ${theme.accent}`, borderRadius: 8, padding: '16px 18px', color: '#1c1b19' }}>
           <div style={{ fontSize: 14.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Icon name="lightbulb" color="#fff" size={22} />Sobre as favoritas
+            <Icon name="lightbulb" color={theme.accent} size={18} />Sobre as favoritas
           </div>
-          <div style={{ fontSize: 12.5, marginTop: 8, opacity: .92, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 12.5, marginTop: 8, color: '#5f5b55', lineHeight: 1.5 }}>
             A estrela fica guardada neste navegador — ainda não existe rota de
             favorito na API, então ela não segue você para outro aparelho.
           </div>

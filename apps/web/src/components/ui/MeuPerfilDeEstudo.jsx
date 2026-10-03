@@ -53,11 +53,11 @@ export default function MeuPerfilDeEstudo({ theme, s, perfil, config, fase, salv
       {!editando && (
         <div style={{ marginTop: 14 }}>
           {!pronto ? (
-            <div style={{ fontSize: 12.5, color: '#B45309' }}>Seu perfil ainda não carregou — as respostas aparecem aqui quando ele vier.</div>
+            <div style={{ fontSize: 12.5, color: '#94661A' }}>Seu perfil ainda não carregou — as respostas aparecem aqui quando ele vier.</div>
           ) : fichaConcluida(preferencias) ? (
             <ResumoDaFicha nome={perfil?.name} preferencias={preferencias} />
           ) : null}
-          {salvo && <div role="status" style={{ fontSize: 11.5, color: '#047857', marginTop: 10 }}>Perfil de estudo salvo na sua conta.</div>}
+          {salvo && <div role="status" style={{ fontSize: 11.5, color: '#355E35', marginTop: 10 }}>Perfil de estudo salvo na sua conta.</div>}
         </div>
       )}
 
@@ -72,7 +72,7 @@ export default function MeuPerfilDeEstudo({ theme, s, perfil, config, fase, salv
           </div>
 
           {aviso && (
-            <div role="alert" data-testid="perfil-estudo-aviso" style={{ fontSize: 12.5, color: '#B91C1C', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '9px 12px' }}>
+            <div role="alert" data-testid="perfil-estudo-aviso" style={{ fontSize: 12.5, color: '#8F2F29', background: '#FAF0EE', border: '1px solid #EBCBC6', borderRadius: 10, padding: '9px 12px' }}>
               {aviso}
             </div>
           )}

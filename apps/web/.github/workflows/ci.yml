@@ -60,10 +60,8 @@ jobs:
       # O dev server (porta 5173) é iniciado pelo webServer do playwright.config.js
       - name: Run E2E tests
         run: npm run test:e2e
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
-      # Roda ANTES de derrubar o backend: as rotas de IA exigem login
+      # Roda ANTES de derrubar o backend: as rotas de api/ exigem login
       # (api/_lib/auth.js), e o token do usuário de teste sai do gateway em
       # localhost:3000. VITE_API_URL aponta o dev-api para esse mesmo backend —
       # sem ela, a validação do token cairia na API de produção.
@@ -78,7 +76,6 @@ jobs:
           API_URL: http://localhost:3100
           GATEWAY_URL: http://localhost:3000
           VITE_API_URL: http://localhost:3000
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
       # Sem isto, uma falha de teste vira "elemento não encontrado" sem pista
       # de que a causa foi um serviço que não subiu.
@@ -160,4 +157,6 @@ jobs:
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # OPENROUTER_API_KEY não vai aqui: env do passo só chega ao processo
+          # da CLI, não às funções publicadas. A chave da IA (api/_lib/ia.js)
+          # mora nas variáveis de ambiente do projeto na Vercel.

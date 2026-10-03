@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { fileURLToPath, URL } from 'node:url';
 
 // Em dev convivem DUAS APIs sob o mesmo prefixo /api, e elas não são a mesma
 // coisa:
 //
-//   /api/gerar-questoes, /api/enriquecer-questao, /api/buscar-datajud
+//   /api/enriquecer-questao, /api/buscar-datajud
 //       → rotas serverless do próprio app (na Vercel em produção; aqui pelo
 //         `node server/dev-api.js`, que precisa subir com PORT=3100)
 //
@@ -20,12 +22,16 @@ const GATEWAY = `http://localhost:${process.env.GATEWAY_PORT || 3000}`;
 const DEV_API = `http://localhost:${process.env.DEV_API_PORT || 3100}`;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  // `@/` é o alias que os componentes do shadcn usam (ver components.json).
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   server: {
     proxy: {
       // As mais específicas primeiro: o Vite casa na ordem de declaração.
       // Sem a linha de /api/questoes aqui, o acervo cairia no DEV_API — o
-      // servidorzinho do gerador por IA, que não tem essa rota — e a tela
+      // servidorzinho das rotas serverless, que não tem essa rota — e a tela
       // mostraria "o acervo não carregou" com o backend inteiro no ar.
       '/api/auth': GATEWAY,
       '/api/tentativas': GATEWAY,

@@ -9,8 +9,11 @@ deste documento:
 
 - **Gateway da plataforma de microserviços** — login, perfil, tentativas e
   acervo de questões. Em produção fica em outro domínio (`VITE_API_URL`).
-- **Rotas serverless em `api/`** — geração de questões por IA, enriquecimento
-  de questão e consulta ao DataJud. Rodam na própria Vercel.
+- **Rotas serverless em `api/`** — enriquecimento de questão e consulta ao
+  DataJud, mais a camada de IA (`api/_lib/ia.js`). Rodam na própria Vercel.
+
+O app trabalha só com questões reais da OAB/FGV, do acervo. A IA não gera
+questão: ela vai explicar as do acervo, num chat que ainda não existe.
 
 ---
 
@@ -28,8 +31,7 @@ src/
 │   ├── Cronometro.jsx       # Contagem regressiva hh:mm:ss da barra do simulado
 │   ├── BotaoGoogle.jsx      # "Fazer login com o Google" (Login)
 │   ├── PassosDaFicha.jsx    # Os 4 passos da ficha de boas-vindas e o resumo das respostas
-│   ├── MeuPerfilDeEstudo.jsx  # Configurações: ver e editar a ficha (usa PassosDaFicha)
-│   └── GeradorQuestoes.jsx  # Gerador por IA — NÃO está em uso (ver Pendências)
+│   └── MeuPerfilDeEstudo.jsx  # Configurações: ver e editar a ficha (usa PassosDaFicha)
 └── lib/                  # Lógica sem tela; a maior parte roda no `node` (ver "Rodar e testar")
     ├── api/api.js        # Único cliente HTTP do gateway
     ├── api/paginas.js    # Laço de páginas e tradução array/envelope (puro, testado)
@@ -54,10 +56,9 @@ src/
     └── charts.jsx        # Sparkline, MiniBars, AreaLine, LabeledBars
 
 api/                      # Funções serverless (Vercel)
-├── gerar-questoes.js     # OpenRouter
 ├── enriquecer-questao.js
 ├── buscar-datajud.js     # DataJud (CNJ)
-└── _lib/                 # auth.js (exige login), datajud.js
+└── _lib/                 # auth.js (exige login), datajud.js, ia.js (OpenRouter, só modelos gratuitos)
 
 server/dev-api.js         # Serve as rotas de api/ em dev (o Vite não serve)
 scripts/testes-lib.js     # Roda os testes de lib/ (npm run test:lib)
@@ -492,9 +493,30 @@ erro do acervo aparece na própria tela de Questões, com botão de recarregar.
 
 ### Rotas serverless
 
-As três rotas de `api/` exigem login: `_lib/auth.js` valida o token contra o
+As duas rotas de `api/` exigem login: `_lib/auth.js` valida o token contra o
 gateway (`POST /api/auth/verify`) em vez de duplicar o segredo do JWT na
 Vercel. Hoje nenhuma tela do app as chama.
+
+### Camada de IA (`api/_lib/ia.js`)
+
+Único lugar que fala com modelo de linguagem, pela OpenRouter, e só com
+modelos gratuitos (id `:free` e preço zero de entrada e saída). Ainda nenhuma
+rota a usa; é a base do chat.
+
+- **Modelos descobertos, não fixados.** Os ids somem — a lista fixa já quebrou
+  duas vezes. `listarModelosGratuitos()` lê `GET /api/v1/models` (público,
+  sem chave) com cache de 1 h, e usa o último cache se a rede falhar. Dos
+  `PREFERIDOS` (ou da env `IA_MODELOS`, separada por vírgula, que os
+  substitui) só entram os que existem; se nenhum existir, vão os gratuitos
+  de maior contexto.
+- **`completar({ sistema, mensagens, json })`** tenta até 4 modelos: 429,
+  5xx, 404, 400 e timeout passam ao próximo; 401/403 param na hora
+  (`IaChaveInvalida`, status 500 — não 401, que o front leria como sessão
+  expirada). Tudo falhando: `IaIndisponivel`, status 503. Com `json: true`,
+  JSON inválido também passa ao próximo modelo.
+- **Cota:** a chave gratuita tem 20 pedidos/min e 50/dia (1000/dia depois de
+  US$ 10 em créditos). `OPENROUTER_API_KEY` fica em `.env.local` (dev) e
+  nas variáveis do projeto na Vercel.
 
 O gateway que ele consulta vem de `VITE_API_URL` **no ambiente do processo
 das funções** — e, sem ela, cai no gateway de **produção**. Em dev isso
@@ -540,9 +562,9 @@ npm run dev
 | `npm run lint` | ESLint | sim |
 | `npm run build` | build de produção | sim |
 | `npm run test:e2e` | Playwright contra `npm run dev` + backend do script acima | sim |
-| `npm run test:api` | rotas de `api/`: recusam pedido sem token e com token inválido; com login no gateway, chamam de verdade a OpenRouter e o DataJud | sim |
+| `npm run test:api` | rotas de `api/`: recusam pedido sem token e com token inválido; com login no gateway, chamam de verdade o DataJud | sim |
 | `npm run test:lib` | todo `tests/*.test.js` menos `api.test.js`, cada um em UTC e em America/Sao_Paulo | sim (job `lint` do ci.yml; job `check-code` do pr.yml) |
-| `npm run test:estado`, `test:questoes`, `test:paginas` | um arquivo de `test:lib` só, para rodar à mão — no fuso da máquina, sem a segunda rodada em São Paulo | via `test:lib` |
+| `npm run test:estado`, `test:questoes`, `test:paginas`, `test:ia` | um arquivo de `test:lib` só, para rodar à mão — no fuso da máquina, sem a segunda rodada em São Paulo | via `test:lib` |
 | `npm run test:all` | test:e2e + test:api | nenhum workflow chama |
 | `npm run ci` | lint + test:lib + build — a verificação local, o mesmo que a CI roda sem backend | nenhum workflow chama |
 
@@ -559,8 +581,11 @@ fase simulam `/api/discursivas` no navegador, menos um, que usa o backend
 de verdade e se pula quando não há rota ou seed.
 
 `test:api` precisa de tudo no ar — backend na 3000, dev-api na 3100 com
-`VITE_API_URL` local — e de `OPENROUTER_API_KEY`. Rodado sem isso, falha com
-401 ou gasta cota paga.
+`VITE_API_URL` local. Rodado sem isso, falha com 401.
+
+`tests/ia.test.js` (entra no `test:lib`) usa uma OpenRouter de mentira: sem
+rede e sem chave. Com `IA_TESTE_REDE=1` ele também lista os modelos de
+verdade (endpoint público, sem gastar cota) e avisa se algum preferido sumiu.
 
 Os testes da `lib/` rodam no `node` puro, sem navegador. Valem para os módulos
 `.js` que não tocam `import.meta.env` — `lib/api/api.js` é a exceção, e é por
@@ -639,10 +664,6 @@ mostrou um dia a menos no Brasil com a CI verde.
 
 ### Limpeza
 
-- `GeradorQuestoes.jsx` não é importado por nenhuma tela; as rotas de `api/`
-  ficam sem uso no app até que algo o monte.
-- O e2e "Gerar questões com IA (API)" não tem asserção: acha o botão "Gerar
-  quiz", clica e espera 3 s. Passa sempre.
 - `simulados.running` e `simulados.resultados_historico` não são lidos (o
   histórico usado é o `resultados_historico` da raiz).
 - `Favoritos.jsx` recebe `favoritos` do `App` e não usa.
