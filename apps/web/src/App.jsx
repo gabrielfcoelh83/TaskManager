@@ -1149,7 +1149,14 @@ export default function App() {
           </div>
         </div>
 
-        <div style={s.content}>
+        {/* O dock do Kepy flutua no canto de baixo (52px de barra + 24px de
+            margem). Sem este respiro no fim, o que mora no rodapé da tela —
+            "Anterior"/"Próxima" do quiz, por exemplo — ficava embaixo dele,
+            sem como rolar para fora.
+            O `padding` vai inteiro, e não `paddingBottom` por cima do de
+            `s.content`: ao trocar de fase o React reaproveita este div, e
+            tirar só a parte de baixo de um atalho gera aviso no console. */}
+        <div style={{ ...s.content, padding: '0 32px 104px' }}>
           {faixaDeErro}
           {/* `key` na tela: a entrada escalonada (`.tela` no index.css) toca a cada
               navegação e não a cada render. */}

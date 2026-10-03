@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import AgentDock from './agent-dock';
+import KepyFace from './kepy-face';
 import { ASSISTENTE } from '../../lib/assistente';
 import { guiaDoDia, statusDoDia, responder, SUGESTOES } from '../../lib/kepy';
 
@@ -39,6 +40,14 @@ export default function Kepy({
   return (
     <AgentDock
       agentName={ASSISTENTE.nome}
+      // A expressão segue o momento: pensando enquanto responde, atento com
+      // o painel aberto, feliz com a meta batida.
+      avatar={({ modo, trabalhando }) => (
+        <KepyFace
+          cores={{ primarySoft: theme.primarySoft, primaryDark: theme.primaryDark, accent: theme.accent }}
+          humor={trabalhando ? 'pensando' : meta.batida ? 'feliz' : modo !== 'fechado' ? 'atento' : 'normal'}
+        />
+      )}
       status={statusDoDia(ctx)}
       cores={{ primarySoft: theme.primarySoft, primaryDark: theme.primaryDark, accent: theme.accent }}
       novo={visto !== sugestao}

@@ -31,19 +31,22 @@ const assinarEstreita = (mudou) => {
 
 const digitando = (alvo) => alvo && (alvo.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName));
 
-function Rosto({ cores, inicial, novo }) {
+// `avatar` (opcional) desenha o rosto; sem ele, a inicial do nome.
+function Rosto({ cores, inicial, novo, avatar }) {
   return (
     <span style={{ position: 'relative', flex: 'none' }}>
-      <span
-        aria-hidden="true"
-        style={{
-          width: 36, height: 36, borderRadius: 8, background: cores.primarySoft, color: cores.primaryDark,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: FONTE_TITULO, fontSize: 19, fontWeight: 500, lineHeight: 1,
-        }}
-      >
-        {inicial}
-      </span>
+      {avatar ?? (
+        <span
+          aria-hidden="true"
+          style={{
+            width: 36, height: 36, borderRadius: 8, background: cores.primarySoft, color: cores.primaryDark,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: FONTE_TITULO, fontSize: 19, fontWeight: 500, lineHeight: 1,
+          }}
+        >
+          {inicial}
+        </span>
+      )}
       {novo && (
         <span
           data-testid="kepy-novo"
@@ -109,6 +112,7 @@ const fala = { fontSize: 13, lineHeight: 1.5, color: 'rgba(255,255,255,.86)', ba
 
 export function AgentDock({
   agentName,
+  avatar,
   status,
   workingStatus = 'Pensando…',
   cores,
@@ -238,7 +242,12 @@ export function AgentDock({
     >
       {/* Barra: rosto, nome, status e os dois botões. */}
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Rosto cores={cores} inicial={agentName[0]} novo={novo && modo === 'fechado'} />
+        <Rosto
+          cores={cores}
+          inicial={agentName[0]}
+          novo={novo && modo === 'fechado'}
+          avatar={avatar?.({ modo, trabalhando })}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1 }}>{agentName}</div>
           <AnimatePresence initial={false} mode="popLayout">
