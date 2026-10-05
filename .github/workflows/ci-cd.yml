@@ -40,7 +40,7 @@ jobs:
       - name: Configurar Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
 
       # A imagem de produção instala apenas dependencies (`npm ci --omit=dev`).
       # As ferramentas de teste não devem bloquear a publicação da aplicação.
@@ -109,7 +109,7 @@ jobs:
       - name: Configurar Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: npm
           cache-dependency-path: ${{ matrix.service }}/package-lock.json
 

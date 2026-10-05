@@ -2,18 +2,27 @@ const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
+const { CircuitBreaker } = require('./circuit-breaker');
 require('dotenv').config();
 
 const app = express();
 const PORT = 3000;
 const requestContext = new AsyncLocalStorage();
 const http = axios.create({ timeout: 5000 });
+const breakers = new Map();
 
 http.interceptors.request.use((config) => {
   const requestId = requestContext.getStore()?.requestId;
   if (requestId) config.headers.set('X-Request-ID', requestId);
   return config;
 });
+
+function downstream(service, method, ...args) {
+  if (!breakers.has(service)) breakers.set(service, new CircuitBreaker());
+  // Deliberately no retry is performed here. In particular, repeating POST,
+  // PUT or PATCH could duplicate a mutation that reached the service.
+  return breakers.get(service).execute(service, () => http[method](...args));
+}
 
 // Sem `cors()` aqui de propósito: em produção o gateway não tem porta
 // publicada, então tudo chega pelo nginx, e é lá que a lista de origens
@@ -42,7 +51,17 @@ const services = {
 
 // Middleware para logging de requisições
 app.use((req, res, next) => {
-  console.log(`[Gateway] ${req.requestId} ${req.method} ${req.path}`);
+  const startedAt = process.hrtime.bigint();
+  res.on('finish', () => {
+    console.log(JSON.stringify({
+      component: 'gateway',
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+    }));
+  });
   next();
 });
 
@@ -54,7 +73,7 @@ app.get('/health', (req, res) => {
 // ===== ROTAS DE AUTENTICAÇÃO =====
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const response = await http.post(`${services.auth}/register`, req.body);
+    const response = await downstream('auth', 'post', `${services.auth}/register`, req.body);
     res.status(response.status).json(response.data);
   } catch (error) {
     res.status(error.response?.status || 500).json({
@@ -65,7 +84,7 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const response = await http.post(`${services.auth}/login`, req.body);
+    const response = await downstream('auth', 'post', `${services.auth}/login`, req.body);
     res.json(response.data);
   } catch (error) {
     res.status(error.response?.status || 500).json({
@@ -78,7 +97,7 @@ app.post('/api/auth/login', async (req, res) => {
 // o auth-service confere e devolve o JWT da plataforma, como no login.
 app.post('/api/auth/google', async (req, res) => {
   try {
-    const response = await http.post(`${services.auth}/google`, req.body);
+    const response = await downstream('auth', 'post', `${services.auth}/google`, req.body);
     // 201 quando a conta acabou de ser criada, 200 quando já existia.
     res.status(response.status).json(response.data);
   } catch (error) {
@@ -93,7 +112,9 @@ app.post('/api/auth/google', async (req, res) => {
 // o auth-service já tinha /verify, só não era alcançável de fora.
 app.post('/api/auth/verify', async (req, res) => {
   try {
-    const response = await http.post(
+    const response = await downstream(
+      'auth',
+      'post',
       `${services.auth}/verify`,
       {},
       { headers: { authorization: req.headers.authorization } }
@@ -109,7 +130,7 @@ app.post('/api/auth/verify', async (req, res) => {
 // ===== ROTAS DE USUÁRIOS =====
 app.get('/api/users/:id', async (req, res) => {
   try {
-    const response = await http.get(`${services.user}/users/${req.params.id}`, {
+    const response = await downstream('user', 'get', `${services.user}/users/${req.params.id}`, {
       headers: { authorization: req.headers.authorization },
     });
     res.json(response.data);
@@ -122,7 +143,7 @@ app.get('/api/users/:id', async (req, res) => {
 
 app.put('/api/users/:id', async (req, res) => {
   try {
-    const response = await http.put(`${services.user}/users/${req.params.id}`, req.body, {
+    const response = await downstream('user', 'put', `${services.user}/users/${req.params.id}`, req.body, {
       headers: { authorization: req.headers.authorization },
     });
     res.json(response.data);
@@ -136,7 +157,7 @@ app.put('/api/users/:id', async (req, res) => {
 // ===== ROTAS DE ESTUDO (MA Questões) =====
 app.post('/api/tentativas', async (req, res) => {
   try {
-    const response = await http.post(`${services.estudo}/tentativas`, req.body, {
+    const response = await downstream('estudo', 'post', `${services.estudo}/tentativas`, req.body, {
       headers: { authorization: req.headers.authorization },
     });
     res.status(response.status).json(response.data);
@@ -149,7 +170,7 @@ app.post('/api/tentativas', async (req, res) => {
 
 app.get('/api/tentativas', async (req, res) => {
   try {
-    const response = await http.get(`${services.estudo}/tentativas`, {
+    const response = await downstream('estudo', 'get', `${services.estudo}/tentativas`, {
       headers: { authorization: req.headers.authorization },
       // A query string precisa ser repassada explicitamente: `desde` e
       // `limite` vivem nela, e sem isto o serviço receberia a rota nua.
@@ -168,7 +189,9 @@ app.get('/api/tentativas', async (req, res) => {
 // do serviço; o corpo segue como veio.
 app.patch('/api/tentativas/:id', async (req, res) => {
   try {
-    const response = await http.patch(
+    const response = await downstream(
+      'estudo',
+      'patch',
       `${services.estudo}/tentativas/${encodeURIComponent(req.params.id)}`,
       req.body,
       { headers: { authorization: req.headers.authorization } }
@@ -189,7 +212,7 @@ app.patch('/api/tentativas/:id', async (req, res) => {
 // entrar no acervo, que é exatamente o que este serviço evita.
 app.get('/api/questoes', async (req, res) => {
   try {
-    const response = await http.get(`${services.questoes}/questoes`, {
+    const response = await downstream('questoes', 'get', `${services.questoes}/questoes`, {
       headers: { authorization: req.headers.authorization },
       // Sem isto, `disciplina`, `limite` e `aleatorio` somem no caminho e o
       // serviço recebe a rota nua — o mesmo detalhe de /api/tentativas.
@@ -207,7 +230,7 @@ app.get('/api/questoes', async (req, res) => {
 // "disciplinas" cairia no :id.
 app.get('/api/questoes/disciplinas', async (req, res) => {
   try {
-    const response = await http.get(`${services.questoes}/questoes/disciplinas`, {
+    const response = await downstream('questoes', 'get', `${services.questoes}/questoes/disciplinas`, {
       headers: { authorization: req.headers.authorization },
     });
     res.json(response.data);
@@ -220,7 +243,7 @@ app.get('/api/questoes/disciplinas', async (req, res) => {
 
 app.get('/api/questoes/:id', async (req, res) => {
   try {
-    const response = await http.get(`${services.questoes}/questoes/${req.params.id}`, {
+    const response = await downstream('questoes', 'get', `${services.questoes}/questoes/${req.params.id}`, {
       headers: { authorization: req.headers.authorization },
     });
     res.json(response.data);
@@ -242,7 +265,7 @@ app.get('/api/questoes/:id', async (req, res) => {
 // errado, que devolveria 400 de id inválido.
 app.post('/api/discursivas/respostas', async (req, res) => {
   try {
-    const response = await http.post(`${services.estudo}/discursivas/respostas`, req.body, {
+    const response = await downstream('estudo', 'post', `${services.estudo}/discursivas/respostas`, req.body, {
       headers: { authorization: req.headers.authorization },
     });
     res.status(response.status).json(response.data);
@@ -255,7 +278,7 @@ app.post('/api/discursivas/respostas', async (req, res) => {
 
 app.get('/api/discursivas/respostas', async (req, res) => {
   try {
-    const response = await http.get(`${services.estudo}/discursivas/respostas`, {
+    const response = await downstream('estudo', 'get', `${services.estudo}/discursivas/respostas`, {
       headers: { authorization: req.headers.authorization },
       params: req.query, // questao_id
     });
@@ -269,7 +292,7 @@ app.get('/api/discursivas/respostas', async (req, res) => {
 
 app.get('/api/discursivas', async (req, res) => {
   try {
-    const response = await http.get(`${services.questoes}/discursivas`, {
+    const response = await downstream('questoes', 'get', `${services.questoes}/discursivas`, {
       headers: { authorization: req.headers.authorization },
       params: req.query, // area
     });
@@ -283,7 +306,9 @@ app.get('/api/discursivas', async (req, res) => {
 
 app.get('/api/discursivas/:id', async (req, res) => {
   try {
-    const response = await http.get(
+    const response = await downstream(
+      'questoes',
+      'get',
       `${services.questoes}/discursivas/${encodeURIComponent(req.params.id)}`,
       { headers: { authorization: req.headers.authorization } }
     );
@@ -300,7 +325,7 @@ app.get('/health/services', async (req, res) => {
   const health = {};
   for (const [name, url] of Object.entries(services)) {
     try {
-      await http.get(`${url}/health`, { timeout: 2000 });
+      await downstream(name, 'get', `${url}/health`, { timeout: 2000 });
       health[name] = 'UP';
     } catch {
       health[name] = 'DOWN';
@@ -309,6 +334,10 @@ app.get('/health/services', async (req, res) => {
   res.json({ gateway: 'UP', services: health });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚪 API Gateway rodando em http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚪 API Gateway rodando em http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { app, http, breakers };

@@ -72,12 +72,17 @@ app.post('/register', async (req, res) => {
     // Grava o evento na fila. Fica lá até o consumidor confirmar a leitura,
     // mesmo que ninguém esteja rodando neste momento.
     try {
-      const msgId = await redis.xAdd(STREAM, '*', {
-        tipo: 'user.registered',
-        id: String(user.id),
-        email: user.email,
-        name: name || email.split('@')[0],
-      });
+      const msgId = await redis.xAdd(
+        STREAM,
+        '*',
+        {
+          tipo: 'user.registered',
+          id: String(user.id),
+          email: user.email,
+          name: name || emailNormalizado.split('@')[0],
+        },
+        { TRIM: { strategy: 'MAXLEN', threshold: 10000, limit: 1000 } }
+      );
       console.log(`📥 Evento gravado na fila (${msgId}) para ${user.email}`);
     } catch (err) {
       console.error('Não foi possível gravar o evento:', err.message);
@@ -241,12 +246,17 @@ app.post('/google', async (req, res) => {
     const user = rows[0];
 
     try {
-      const msgId = await redis.xAdd(STREAM, '*', {
-        tipo: 'user.registered',
-        id: String(user.id),
-        email: user.email,
-        name: dados.name || email.split('@')[0],
-      });
+      const msgId = await redis.xAdd(
+        STREAM,
+        '*',
+        {
+          tipo: 'user.registered',
+          id: String(user.id),
+          email: user.email,
+          name: dados.name || email.split('@')[0],
+        },
+        { TRIM: { strategy: 'MAXLEN', threshold: 10000, limit: 1000 } }
+      );
       console.log(`📥 Evento gravado na fila (${msgId}) para ${user.email} (Google)`);
     } catch (err) {
       console.error('Não foi possível gravar o evento:', err.message);
