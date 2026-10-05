@@ -86,15 +86,15 @@ Cada item abaixo é uma modificação real neste código. Faça na ordem.
 **4. Eventos assíncronos** — ✅ FEITO
 - O auth-service grava `user.registered` no Redis Stream `user-events` (`XADD`); o user-service consome via consumer group (`XREADGROUP` + `XACK`) e cria o perfil.
 - Passamos por pub/sub primeiro e o evento se perdeu com o consumidor offline — daí a migração para Streams. Compare `user_id=5` (nome perdido, veio do backfill) com `user_id=6` (nome intacto, recuperado da fila).
-- Pendente: limitar o tamanho da fila com `MAXLEN` no `XADD`, senão o histórico cresce sem fim.
+- O `user-events` usa `MAXLEN` aproximado de 10.000 mensagens; mensagens pendentes continuam protegidas pelo consumer group.
 
 **5. Resiliência**
 - Adicione timeout e retry nas chamadas entre serviços
-- Implemente circuit breaker (biblioteca `opossum`)
+- O gateway usa circuit breaker para chamadas de leitura aos serviços downstream.
 - Adicione `healthcheck` no docker-compose e `depends_on: condition: service_healthy`
 
 **6. Observabilidade**
-- Propague um `X-Request-ID` do gateway até os serviços e inclua nos logs
+- O gateway propaga `X-Request-ID` e registra logs estruturados com duração e status
 - Adicione métricas com `prom-client` e suba Prometheus + Grafana no compose
 
 **7. Escala**
@@ -105,9 +105,9 @@ Cada item abaixo é uma modificação real neste código. Faça na ordem.
 
 Estes são pontos de estudo, não bugs a corrigir cegamente:
 
-- Não há migrations, só `init.sql` que roda uma vez na criação do volume
-- `GET /users` não tem controle de acesso (qualquer autenticado lista todos)
-- Não há testes
+- Migrations versionadas rodam antes de cada serviço aceitar tráfego
+- `GET /users` exige um ID listado em `ADMIN_USER_IDS`
+- Há testes de integração dos serviços; o gateway também possui testes focados
 - Todos os bancos vivem na mesma instância PostgreSQL (isolamento lógico, não físico)
 
 ## Comandos úteis
@@ -120,3 +120,18 @@ docker compose logs -f <serviço>   # acompanhar logs
 docker compose ps                  # status
 docker compose exec <serviço> sh   # shell no container
 ```
+
+## Verificar um backup
+
+Os dumps ficam em `backups/`. Para testar um arquivo sem tocar nos bancos de
+produção, execute o verificador dentro de um container PostgreSQL com acesso
+ao servidor:
+
+```bash
+docker compose exec -T backup sh /scripts/verify-backup.sh \
+  /backups/auth_db-YYYYmmdd-HHMMSS.sql.gz
+```
+
+O script cria um banco temporário, restaura o dump com `ON_ERROR_STOP` e o
+remove ao terminar. Ele falha quando o arquivo não existe, não é `.sql.gz` ou
+não contém tabelas públicas.

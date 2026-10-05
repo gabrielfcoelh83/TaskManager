@@ -305,15 +305,15 @@ node migrate.js --rollback 001     # Reverter uma
 
 ### Curto Prazo (1-2 semanas)
 - [x] Centralizar `verifyToken` em `shared/`
-- [ ] Adicionar MAXLEN ao Redis Streams (1 linha)
+- [x] Adicionar MAXLEN ao Redis Streams
 - [ ] Padronizar validação (Zod/Yup)
 
 ### Médio Prazo (1 mês)
-- [ ] Request tracing (X-Request-ID)
-- [ ] Logging centralizado (Winston/Pino)
-- [ ] Circuit breaker (Opossum)
+- [x] Request tracing (X-Request-ID)
+- [x] Logging estruturado no gateway
+- [x] Circuit breaker no gateway
 - [ ] Rate limiting por usuário
-- [ ] Índices faltantes em BD
+- [x] Índices operacionais principais em BD
 
 ### Longo Prazo (2-3 meses)
 - [ ] Monitoring (Prometheus + Grafana)
@@ -321,6 +321,12 @@ node migrate.js --rollback 001     # Reverter uma
 - [ ] S3 replication de backups
 - [ ] Denylist de tokens revogados
 - [ ] Paginação em listas
+
+### Operação
+- [x] Migrations executadas antes de aceitar tráfego
+- [x] Índices operacionais versionados por migration
+- [x] Verificação de restauração de backups em banco temporário
+- [x] Runtime Node 22 no CI e nas imagens
 
 ---
 
