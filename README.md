@@ -86,6 +86,14 @@ APP_BASE_URL=https://api.mlkoab.tech
 variáveis de ambiente. O domínio remetente precisa estar verificado no Resend
 com SPF/DKIM configurados.
 
+### Esqueci minha senha
+
+O endpoint `POST /api/auth/forgot-password` aceita um e-mail e sempre retorna
+uma resposta genérica, sem revelar se a conta existe. Para contas com senha,
+envia um link de redefinição pelo Resend; o token expira em uma hora, é
+armazenado apenas como hash e pode ser usado uma única vez. O frontend deve
+enviar o token recebido e a nova senha para `POST /api/auth/reset-password`.
+
 ### Revalidação de contas existentes
 
 Contas criadas antes da confirmação de e-mail não são consideradas verificadas

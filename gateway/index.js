@@ -93,6 +93,28 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const response = await downstream('auth', 'post', `${services.auth}/forgot-password`, req.body);
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao solicitar redefinição de senha',
+    });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const response = await downstream('auth', 'post', `${services.auth}/reset-password`, req.body);
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao redefinir senha',
+    });
+  }
+});
+
 // Login com o Google: o navegador manda o ID token que recebeu do Google, e
 // o auth-service confere e devolve o JWT da plataforma, como no login.
 app.post('/api/auth/google', async (req, res) => {
