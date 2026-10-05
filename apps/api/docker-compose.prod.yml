@@ -68,8 +68,8 @@ services:
       DB_PORT: 5432
       DB_NAME: auth_db
       DB_USER: postgres
-      DB_PASSWORD: ${DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       REDIS_URL: redis://redis:6379
     depends_on:
@@ -89,8 +89,8 @@ services:
       DB_PORT: 5432
       DB_NAME: user_db
       DB_USER: postgres
-      DB_PASSWORD: ${DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -110,8 +110,8 @@ services:
       DB_PORT: 5432
       DB_NAME: questoes_db
       DB_USER: postgres
-      DB_PASSWORD: ${DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,8 +127,8 @@ services:
       DB_PORT: 5432
       DB_NAME: estudo_db
       DB_USER: postgres
-      DB_PASSWORD: ${DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,7 +169,7 @@ services:
     environment:
       PGHOST: postgres
       PGUSER: postgres
-      PGPASSWORD: ${DB_PASSWORD}
+      PGPASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       RETENCAO_DIAS: 7
     volumes:
       - ./backups:/backups
@@ -196,7 +196,7 @@ services:
     # Sem `ports:` — o banco só é alcançável pela rede interna do compose.
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       POSTGRES_DB: microservices_db
     volumes:
       - postgres_data:/var/lib/postgresql/data

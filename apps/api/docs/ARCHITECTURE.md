@@ -94,6 +94,58 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 
 ---
 
+## 📚 Objetivas: disciplina e tema
+
+Enunciado, alternativas, gabarito e anulação são copiados da prova e do
+gabarito definitivo da FGV. Disciplina e tema são enriquecimento, e cada um
+guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004):
+
+- **disciplina** vem da posição da questão na prova (`'prova'`): a FGV monta
+  a 1ª fase em blocos fixos por disciplina. A tabela fica em
+  `questoes-service/disciplinas.js`, por exame e tipo de prova, e só tem
+  exames conferidos (hoje 44º e 45º). Exame fora da tabela fica sem
+  disciplina e a IA escolhe de uma lista fechada (`'ia'`).
+- **tema** vem da IA (`'ia'`), que recebe a disciplina pronta quando ela existe.
+- `'humano'` nunca é sobrescrito por carga, backfill ou IA.
+
+**Carga do acervo** (fora do serviço)
+1. `importador/importar.py --exame N --tipo 1 --prova ... --gabarito ... --saida oabN.json`
+2. `node carregar.js oabN.json` — upsert idempotente; grava a disciplina pela
+   posição quando a tabela conhece (exame, tipo).
+3. `node aplicar_disciplina_posicao.js [--exame N] [--aplicar]` — só para o
+   acervo carregado antes da tabela, ou depois de a tabela mudar. Sem
+   `--aplicar`, só mostra o que mudaria.
+4. `OPENROUTER_API_KEY=... node classificar.js [--aplicar]` — preenche o tema
+   (e a disciplina, onde a tabela não chega).
+5. `OPENROUTER_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia]`
+   — escreve a **explicação** a partir do gabarito oficial (`explicacao_fonte = 'ia'`,
+   `revisada = false`). O modelo recebe a letra oficial e devolve, junto do texto,
+   a letra que considera correta; se ela divergir do gabarito, a explicação é
+   recusada (um modelo que discorda do gabarito não o explica). Também recusa
+   texto vazio, curto/longo demais, com cerca markdown ou que afirme outra
+   alternativa como correta. **Número de dispositivo é proibido**: o prompt
+   veda número de artigo, parágrafo, inciso, alínea, súmula, lei, decreto, MP,
+   tema/tese, enunciado e julgado (REsp, RE, HC, ADI...) — o modelo nomeia o
+   diploma ou o tribunal sem número ("o Código Civil", "a Lei do Inquilinato",
+   "a jurisprudência do STJ") — e `citacaoNumerada` recusa o texto que trouxer
+   um ("cita dispositivo numerado: <trecho>"). Motivo: na primeira rodada (42
+   questões do 45º, 9 conferidas), 3 dos 4 erros jurídicos eram citações
+   numeradas erradas escritas com "certeza" (Súmula 37 no lugar da 387; Lei
+   9.514/97 como de bens móveis; art. 112 do ECA para procuração oral).
+   Número solto não é citação e passa (prazos, valores, idades, "CF/88",
+   "Constituição de 1988"); "§" é sempre recusado; "parágrafo único" por
+   extenso passa. Erro de conteúdo sem número nenhum o filtro não pega — por
+   isso `revisada = false`. Anuladas ficam de fora (não há resposta oficial
+   para explicar); `'humano'` nunca entra na fila nem é sobrescrito, e o UPDATE
+   repete as condições (vazia / `'ia'` não revisada, não anulada, mesmo
+   gabarito) para não gravar sobre o que mudou no meio. `--refazer-ia` refaz
+   só as `'ia'` ainda não revisadas. Padrão: lotes de 3, 30 questões por
+   rodada — a cota gratuita é de 50 pedidos/dia, e a conferência (sem
+   `--aplicar`) gasta cota igual. Se todos os modelos devolverem 429, a rodada
+   para. Lotes recusados ou com JSON quebrado voltam na próxima execução.
+
+---
+
 ## ✍️ Discursivas da 2ª fase
 
 Questões discursivas da prova prático-profissional (só as 4 questões; a peça
