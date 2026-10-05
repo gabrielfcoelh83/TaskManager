@@ -46,7 +46,17 @@ jobs:
       # As ferramentas de teste não devem bloquear a publicação da aplicação.
       - name: Auditar dependências
         working-directory: ${{ matrix.service }}
-        run: npm audit --omit=dev --audit-level=high
+        run: |
+          set -eu
+          for attempt in 1 2 3; do
+            if timeout 120s npm audit --omit=dev --audit-level=high \
+              --fetch-timeout=30000 --fetch-retries=1; then
+              exit 0
+            fi
+            echo "npm audit falhou ou expirou (tentativa ${attempt}/3)"
+            sleep 5
+          done
+          exit 1
 
       # Relatório legível mesmo quando o passo acima falha.
       - name: Relatório de vulnerabilidades
