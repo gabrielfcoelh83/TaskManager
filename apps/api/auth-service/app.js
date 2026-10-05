@@ -26,15 +26,12 @@ if (!JWT_SECRET || JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET ausente ou muito curto (mínimo de 32 caracteres)');
 }
 
-const ALLOWED_EMAILS = new Set(
-  (process.env.ALLOWED_EMAILS || '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean)
-);
-const allowAllTestEmails = process.env.NODE_ENV === 'test' && ALLOWED_EMAILS.has('*');
-const emailAutorizado = (email) => allowAllTestEmails || ALLOWED_EMAILS.has(email);
 const acessoNegado = (res) => res.status(403).json({ error: 'Acesso não autorizado' });
+const emailValido = (email) => (
+  typeof email === 'string'
+  && email.length <= 254
+  && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+);
 
 // Fila de eventos: o que é gravado aqui fica guardado até alguém confirmar a leitura
 const STREAM = 'user-events';
@@ -61,7 +58,9 @@ app.post('/register', async (req, res) => {
   // mesma caixa postal. Com o login do Google — que grava em minúsculas — a
   // diferença virava duas contas para a mesma pessoa.
   const emailNormalizado = String(email).trim().toLowerCase();
-  if (!emailAutorizado(emailNormalizado)) return acessoNegado(res);
+  if (!emailValido(emailNormalizado)) {
+    return res.status(400).json({ error: 'Informe um e-mail válido' });
+  }
 
   try {
     // Verificar se usuário já existe
@@ -146,7 +145,9 @@ app.post('/login', async (req, res) => {
   }
 
   const emailNormalizado = String(email).trim().toLowerCase();
-  if (!emailAutorizado(emailNormalizado)) return acessoNegado(res);
+  if (!emailValido(emailNormalizado)) {
+    return res.status(400).json({ error: 'Informe um e-mail válido' });
+  }
 
   try {
     // Buscar usuário — sem distinção de maiúsculas, como no cadastro. Contas
@@ -245,8 +246,6 @@ app.post('/google', async (req, res) => {
   }
 
   const email = String(dados.email).toLowerCase();
-  if (!emailAutorizado(email)) return acessoNegado(res);
-
   try {
     // 1. Já entrou pelo Google antes.
     let { rows } = await pool.query('SELECT id, email, status FROM users WHERE google_sub = $1', [dados.sub]);

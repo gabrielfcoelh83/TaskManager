@@ -66,22 +66,15 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
 curl http://localhost:3000/api/questoes -H "Authorization: Bearer $TOKEN"
 ```
 
-## Controle de acesso por lista fechada
+## Cadastro e confirmação de e-mail
 
-O auth-service aceita acesso somente para os e-mails listados em
-`ALLOWED_EMAILS`, separados por vírgulas:
+O cadastro é automático para qualquer e-mail com formato válido. O acesso não
+é liberado apenas por informar o endereço: novos cadastros ficam `pending` e
+precisam confirmar o link único enviado pelo Resend. Assim, a confirmação
+comprova que a pessoa controla a caixa postal sem exigir uma lista manual.
 
-```env
-ALLOWED_EMAILS=ana@exemplo.com.br,bruno@exemplo.com.br
-```
-
-A regra vale para cadastro, login por senha e login com Google. Usuários
-existentes que não estiverem na lista também recebem `403`, e uma lista
-ausente bloqueia o acesso por segurança. Configure a variável como secret
-`ALLOWED_EMAILS` no GitHub Actions e no `.env` de produção. Não existe rota
-pública para alterar essa lista.
-
-Novos cadastros ficam `pending` até confirmarem o e-mail. O envio usa Resend:
+Novos cadastros por senha ficam `pending` até confirmarem o e-mail. O envio usa
+Resend:
 
 ```env
 RESEND_API_KEY=re_...
