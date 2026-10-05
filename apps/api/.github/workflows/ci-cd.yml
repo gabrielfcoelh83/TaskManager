@@ -131,6 +131,9 @@ jobs:
           DB_USER: postgres
           DB_PASSWORD: teste
           JWT_SECRET: segredo-de-teste-com-32-caracteres-minimo
+          ALLOWED_EMAILS: '*'
+          NODE_ENV: test
+          RESEND_API_KEY: test-placeholder
           REDIS_URL: redis://localhost:6379
         run: npm test
 
@@ -239,6 +242,10 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           # Variável, não secret: o Client ID do Google é público (vai no
           # bundle do front). Vazia, a rota /google responde 503.
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
@@ -252,6 +259,10 @@ jobs:
             IMAGE_TAG="$IMAGE_TAG" \
             DB_PASSWORD="$DB_PASSWORD" \
             JWT_SECRET="$JWT_SECRET" \
+            ALLOWED_EMAILS="$ALLOWED_EMAILS" \
+            RESEND_API_KEY="$RESEND_API_KEY" \
+            EMAIL_FROM="${EMAIL_FROM:-noreply@api.mlkoab.tech}" \
+            APP_BASE_URL="${APP_BASE_URL:-https://api.mlkoab.tech}" \
             GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
             'bash -s' <<'REMOTE'
           set -euo pipefail
@@ -266,6 +277,10 @@ jobs:
           IMAGE_TAG=${IMAGE_TAG}
           DB_PASSWORD=${DB_PASSWORD}
           JWT_SECRET=${JWT_SECRET}
+          ALLOWED_EMAILS=${ALLOWED_EMAILS}
+          RESEND_API_KEY=${RESEND_API_KEY}
+          EMAIL_FROM=${EMAIL_FROM}
+          APP_BASE_URL=${APP_BASE_URL}
           GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
           EOF
 

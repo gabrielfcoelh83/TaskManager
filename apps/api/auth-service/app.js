@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { createClient } = require('redis');
 const { OAuth2Client } = require('google-auth-library');
+const { criarToken, enviarConfirmacao } = require('./email');
 require('dotenv').config();
 
 const app = express();
@@ -24,6 +25,16 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET ausente ou muito curto (mínimo de 32 caracteres)');
 }
+
+const ALLOWED_EMAILS = new Set(
+  (process.env.ALLOWED_EMAILS || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+const allowAllTestEmails = process.env.NODE_ENV === 'test' && ALLOWED_EMAILS.has('*');
+const emailAutorizado = (email) => allowAllTestEmails || ALLOWED_EMAILS.has(email);
+const acessoNegado = (res) => res.status(403).json({ error: 'Acesso não autorizado' });
 
 // Fila de eventos: o que é gravado aqui fica guardado até alguém confirmar a leitura
 const STREAM = 'user-events';
@@ -50,6 +61,7 @@ app.post('/register', async (req, res) => {
   // mesma caixa postal. Com o login do Google — que grava em minúsculas — a
   // diferença virava duas contas para a mesma pessoa.
   const emailNormalizado = String(email).trim().toLowerCase();
+  if (!emailAutorizado(emailNormalizado)) return acessoNegado(res);
 
   try {
     // Verificar se usuário já existe
@@ -62,12 +74,31 @@ app.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Inserir usuário
+    const exigirConfirmacao = process.env.NODE_ENV !== 'test';
     const result = await pool.query(
-      'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
-      [emailNormalizado, hashedPassword]
+      `INSERT INTO users (email, password_hash, status)
+       VALUES ($1, $2, $3) RETURNING id, email`,
+      [emailNormalizado, hashedPassword, exigirConfirmacao ? 'pending' : 'active']
     );
 
     const user = result.rows[0];
+    let token;
+    if (exigirConfirmacao) {
+      const confirmacao = criarToken();
+      await pool.query(
+        `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '24 hours')`,
+        [user.id, confirmacao.hash]
+      );
+      try {
+        await enviarConfirmacao({ email: user.email, token: confirmacao.token });
+      } catch (emailError) {
+        await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
+        throw emailError;
+      }
+    } else {
+      token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    }
 
     // Grava o evento na fila. Fica lá até o consumidor confirmar a leitura,
     // mesmo que ninguém esteja rodando neste momento.
@@ -88,15 +119,12 @@ app.post('/register', async (req, res) => {
       console.error('Não foi possível gravar o evento:', err.message);
     }
 
-    // Gerar token JWT
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: '7d',
-    });
-
     res.status(201).json({
-      message: 'Usuário registrado com sucesso',
+      message: exigirConfirmacao
+        ? 'Cadastro criado. Confirme seu e-mail para ativar o acesso.'
+        : 'Usuário registrado com sucesso',
       user: { id: user.id, email: user.email },
-      token,
+      ...(token ? { token } : {}),
     });
   } catch (error) {
     // Unicidade recusou: o mesmo e-mail entrou ao mesmo tempo (pelo Google,
@@ -117,6 +145,9 @@ app.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email e senha são obrigatórios' });
   }
 
+  const emailNormalizado = String(email).trim().toLowerCase();
+  if (!emailAutorizado(emailNormalizado)) return acessoNegado(res);
+
   try {
     // Buscar usuário — sem distinção de maiúsculas, como no cadastro. Contas
     // antigas gravadas com maiúsculas continuam achadas.
@@ -124,12 +155,16 @@ app.post('/login', async (req, res) => {
       // Se houver duas contas antigas que só diferem na caixa, a de grafia
       // exata vem primeiro — senão o dono da segunda ficaria trancado fora.
       'SELECT * FROM users WHERE lower(email) = $1 ORDER BY (email = $2) DESC, id LIMIT 1',
-      [String(email).trim().toLowerCase(), String(email).trim()]
+      [emailNormalizado, String(email).trim()]
     );
     const user = result.rows[0];
 
     if (!user) {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
+    }
+    if (user.status === 'blocked') return acessoNegado(res);
+    if (user.status !== 'active') {
+      return res.status(403).json({ error: 'Confirme seu e-mail antes de entrar' });
     }
 
     // Conta criada pelo Google não tem senha: `bcrypt.compare` com hash nulo
@@ -210,11 +245,16 @@ app.post('/google', async (req, res) => {
   }
 
   const email = String(dados.email).toLowerCase();
+  if (!emailAutorizado(email)) return acessoNegado(res);
 
   try {
     // 1. Já entrou pelo Google antes.
-    let { rows } = await pool.query('SELECT id, email FROM users WHERE google_sub = $1', [dados.sub]);
+    let { rows } = await pool.query('SELECT id, email, status FROM users WHERE google_sub = $1', [dados.sub]);
     if (rows[0]) {
+      if (rows[0].status === 'blocked') return acessoNegado(res);
+      if (rows[0].status !== 'active') {
+        return res.status(403).json({ error: 'Confirme seu e-mail antes de entrar' });
+      }
       return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
     }
 
@@ -235,6 +275,7 @@ app.post('/google', async (req, res) => {
           ? 'Este e-mail já está ligado a outra conta do Google'
           : 'Este e-mail já tem conta com senha. Entre com e-mail e senha.',
       });
+
     }
 
     // 3. Primeira vez: cria o usuário sem senha e avisa o user-service, como
@@ -277,6 +318,38 @@ app.post('/google', async (req, res) => {
     }
     console.error('Erro no login com o Google:', error);
     return res.status(500).json({ error: 'Erro no login com o Google' });
+  }
+});
+
+app.get('/verify-email', async (req, res) => {
+  const { token } = req.query;
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) {
+    return res.status(400).json({ error: 'Token de confirmação inválido' });
+  }
+
+  const hash = require('crypto').createHash('sha256').update(token).digest('hex');
+  try {
+    const result = await pool.query(
+      `UPDATE users
+          SET status = 'active', email_verified_at = NOW()
+        WHERE id = (
+          SELECT user_id FROM email_verification_tokens
+           WHERE token_hash = $1
+             AND used_at IS NULL
+             AND expires_at > NOW()
+        )
+        RETURNING id, email`,
+      [hash]
+    );
+    if (result.rows.length === 0) return res.status(400).json({ error: 'Token expirado ou já utilizado' });
+    await pool.query(
+      'UPDATE email_verification_tokens SET used_at = NOW() WHERE token_hash = $1',
+      [hash]
+    );
+    return res.json({ message: 'E-mail confirmado. Você já pode entrar.', user: result.rows[0] });
+  } catch (error) {
+    console.error('Erro ao confirmar e-mail:', error);
+    return res.status(500).json({ error: 'Erro ao confirmar e-mail' });
   }
 });
 
