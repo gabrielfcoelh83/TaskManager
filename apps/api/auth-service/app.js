@@ -32,6 +32,18 @@ const emailValido = (email) => (
   && email.length <= 254
   && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
 );
+const exigirConfirmacao = process.env.NODE_ENV !== 'test';
+
+async function solicitarConfirmacao(user) {
+  const confirmacao = criarToken();
+  await pool.query('DELETE FROM email_verification_tokens WHERE user_id = $1 AND used_at IS NULL', [user.id]);
+  await pool.query(
+    `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+     VALUES ($1, $2, NOW() + INTERVAL '24 hours')`,
+    [user.id, confirmacao.hash]
+  );
+  await enviarConfirmacao({ email: user.email, token: confirmacao.token });
+}
 
 // Fila de eventos: o que é gravado aqui fica guardado até alguém confirmar a leitura
 const STREAM = 'user-events';
@@ -73,7 +85,6 @@ app.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Inserir usuário
-    const exigirConfirmacao = process.env.NODE_ENV !== 'test';
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, status)
        VALUES ($1, $2, $3) RETURNING id, email`,
@@ -83,14 +94,8 @@ app.post('/register', async (req, res) => {
     const user = result.rows[0];
     let token;
     if (exigirConfirmacao) {
-      const confirmacao = criarToken();
-      await pool.query(
-        `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
-         VALUES ($1, $2, NOW() + INTERVAL '24 hours')`,
-        [user.id, confirmacao.hash]
-      );
       try {
-        await enviarConfirmacao({ email: user.email, token: confirmacao.token });
+        await solicitarConfirmacao(user);
       } catch (emailError) {
         await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
         throw emailError;
@@ -181,6 +186,16 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
 
+    if (exigirConfirmacao && !user.email_verified_at) {
+      try {
+        await solicitarConfirmacao(user);
+      } catch (emailError) {
+        console.error('Erro ao reenviar confirmação:', emailError);
+        return res.status(503).json({ error: 'Não foi possível enviar o e-mail de confirmação' });
+      }
+      return res.status(403).json({ error: 'Confirme seu e-mail antes de entrar' });
+    }
+
     // Gerar token JWT
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
       expiresIn: '7d',
@@ -248,10 +263,21 @@ app.post('/google', async (req, res) => {
   const email = String(dados.email).toLowerCase();
   try {
     // 1. Já entrou pelo Google antes.
-    let { rows } = await pool.query('SELECT id, email, status FROM users WHERE google_sub = $1', [dados.sub]);
+    let { rows } = await pool.query(
+      'SELECT id, email, status, email_verified_at FROM users WHERE google_sub = $1',
+      [dados.sub]
+    );
     if (rows[0]) {
       if (rows[0].status === 'blocked') return acessoNegado(res);
-      if (rows[0].status !== 'active') {
+      if (rows[0].status !== 'active' || (exigirConfirmacao && !rows[0].email_verified_at)) {
+        if (exigirConfirmacao) {
+          try {
+            await solicitarConfirmacao(rows[0]);
+          } catch (emailError) {
+            console.error('Erro ao reenviar confirmação:', emailError);
+            return res.status(503).json({ error: 'Não foi possível enviar o e-mail de confirmação' });
+          }
+        }
         return res.status(403).json({ error: 'Confirme seu e-mail antes de entrar' });
       }
       return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
@@ -302,6 +328,14 @@ app.post('/google', async (req, res) => {
       console.error('Não foi possível gravar o evento:', err.message);
     }
 
+    if (exigirConfirmacao) {
+      await solicitarConfirmacao(user);
+      return res.status(201).json({
+        message: 'Cadastro criado. Confirme seu e-mail para ativar o acesso.',
+        user,
+        novo: true,
+      });
+    }
     return res.status(201).json({ message: 'Usuário registrado com sucesso', user, token: emitirToken(user), novo: true });
   } catch (error) {
     // Unicidade recusou o INSERT: ou foi um duplo clique (a outra chamada da

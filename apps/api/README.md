@@ -86,6 +86,14 @@ APP_BASE_URL=https://api.mlkoab.tech
 variáveis de ambiente. O domínio remetente precisa estar verificado no Resend
 com SPF/DKIM configurados.
 
+### Revalidação de contas existentes
+
+Contas criadas antes da confirmação de e-mail não são consideradas verificadas
+automaticamente. No próximo login, o sistema envia uma confirmação e não emite
+uma nova sessão até o link ser utilizado. Para invalidar sessões JWT já
+emitidas, altere o secret `JWT_SECRET` no GitHub antes do deploy; essa rotação
+encerra todas as sessões existentes.
+
 ## Roteiro de estudos
 
 Cada item abaixo é uma modificação real neste código. Faça na ordem.
