@@ -66,6 +66,33 @@ TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
 curl http://localhost:3000/api/questoes -H "Authorization: Bearer $TOKEN"
 ```
 
+## Controle de acesso por lista fechada
+
+O auth-service aceita acesso somente para os e-mails listados em
+`ALLOWED_EMAILS`, separados por vírgulas:
+
+```env
+ALLOWED_EMAILS=ana@exemplo.com.br,bruno@exemplo.com.br
+```
+
+A regra vale para cadastro, login por senha e login com Google. Usuários
+existentes que não estiverem na lista também recebem `403`, e uma lista
+ausente bloqueia o acesso por segurança. Configure a variável como secret
+`ALLOWED_EMAILS` no GitHub Actions e no `.env` de produção. Não existe rota
+pública para alterar essa lista.
+
+Novos cadastros ficam `pending` até confirmarem o e-mail. O envio usa Resend:
+
+```env
+RESEND_API_KEY=re_...
+EMAIL_FROM=noreply@api.mlkoab.tech
+APP_BASE_URL=https://api.mlkoab.tech
+```
+
+`RESEND_API_KEY` deve ser um secret; `EMAIL_FROM` e `APP_BASE_URL` podem ser
+variáveis de ambiente. O domínio remetente precisa estar verificado no Resend
+com SPF/DKIM configurados.
+
 ## Roteiro de estudos
 
 Cada item abaixo é uma modificação real neste código. Faça na ordem.

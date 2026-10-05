@@ -107,6 +107,19 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+app.get('/api/auth/verify-email', async (req, res) => {
+  try {
+    const response = await downstream('auth', 'get', `${services.auth}/verify-email`, {
+      params: req.query,
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({
+      error: error.response?.data?.error || 'Erro ao confirmar e-mail',
+    });
+  }
+});
+
 // Exposta para consumidores fora da rede interna (as rotas de IA do
 // MlDireito, na Vercel) validarem um token antes de chamar serviço pago —
 // o auth-service já tinha /verify, só não era alcançável de fora.
