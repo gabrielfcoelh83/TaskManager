@@ -20,7 +20,10 @@ const pool = new pg.Pool({
   password: process.env.DB_PASSWORD,
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'seu_jwt_secret';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET ausente ou muito curto (mínimo de 32 caracteres)');
+}
 
 // Fila de eventos: o que é gravado aqui fica guardado até alguém confirmar a leitura
 const STREAM = 'user-events';
