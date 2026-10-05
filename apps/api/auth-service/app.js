@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { createClient } = require('redis');
 const { OAuth2Client } = require('google-auth-library');
-const { criarToken, enviarConfirmacao } = require('./email');
+const { criarToken, enviarConfirmacao, enviarRedefinicaoSenha } = require('./email');
 require('dotenv').config();
 
 const app = express();
@@ -56,6 +56,82 @@ redis.connect()
 // Health Check
 app.get('/health', (req, res) => {
   res.json({ status: 'Auth Service is running', timestamp: new Date().toISOString() });
+});
+
+app.post('/forgot-password', async (req, res) => {
+  const emailNormalizado = typeof req.body?.email === 'string'
+    ? req.body.email.trim().toLowerCase()
+    : '';
+  const resposta = {
+    message: 'Se existir uma conta com esse e-mail, enviaremos instruções para redefinir a senha.',
+  };
+
+  if (!emailValido(emailNormalizado)) return res.json(resposta);
+
+  try {
+    const result = await pool.query(
+      'SELECT id, email FROM users WHERE lower(email) = $1 AND password_hash IS NOT NULL LIMIT 1',
+      [emailNormalizado]
+    );
+    const user = result.rows[0];
+    if (!user) return res.json(resposta);
+
+    const reset = criarToken();
+    await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL', [user.id]);
+    await pool.query(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+      [user.id, reset.hash]
+    );
+    await enviarRedefinicaoSenha({ email: user.email, token: reset.token });
+    return res.json(resposta);
+  } catch (error) {
+    console.error('Erro ao solicitar redefinição de senha:', error);
+    return res.json(resposta);
+  }
+});
+
+app.post('/reset-password', async (req, res) => {
+  const { token, password } = req.body || {};
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) {
+    return res.status(400).json({ error: 'Token de redefinição inválido' });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'A nova senha deve ter pelo menos 8 caracteres' });
+  }
+
+  const hash = require('crypto').createHash('sha256').update(token).digest('hex');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query(
+      `SELECT u.id
+         FROM users u
+         JOIN password_reset_tokens t ON t.user_id = u.id
+        WHERE t.token_hash = $1
+          AND t.used_at IS NULL
+          AND t.expires_at > NOW()
+        FOR UPDATE OF t`,
+      [hash]
+    );
+    if (found.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Token expirado ou já utilizado' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, found.rows[0].id]);
+    await client.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = $1', [hash]);
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL', [found.rows[0].id]);
+    await client.query('COMMIT');
+    return res.json({ message: 'Senha redefinida com sucesso. Faça login novamente.' });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Erro ao redefinir senha:', error);
+    return res.status(500).json({ error: 'Erro ao redefinir senha' });
+  } finally {
+    client.release();
+  }
 });
 
 // Registrar novo usuário

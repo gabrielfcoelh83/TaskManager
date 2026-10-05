@@ -8,23 +8,17 @@ function criarToken() {
   return { token, hash: crypto.createHash('sha256').update(token).digest('hex') };
 }
 
-async function enviarConfirmacao({ email, token, enviar = fetch }) {
+async function enviarEmail({ email, token, subject, html, enviar = fetch }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error('RESEND_API_KEY ausente');
 
-  const url = `${APP_BASE_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
   const response = await enviar('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
+      Authorization: ['Bearer', apiKey].join(' '),
     },
-    body: JSON.stringify({
-      from: EMAIL_FROM,
-      to: [email],
-      subject: 'Confirme seu acesso ao MA Questões',
-      html: `<p>Confirme seu e-mail para ativar seu acesso ao MA Questões.</p><p><a href="${url}">Confirmar e-mail</a></p><p>O link expira em 24 horas.</p>`,
-    }),
+    body: JSON.stringify({ from: EMAIL_FROM, to: [email], subject, html }),
   });
 
   if (!response.ok) {
@@ -33,4 +27,26 @@ async function enviarConfirmacao({ email, token, enviar = fetch }) {
   }
 }
 
-module.exports = { criarToken, enviarConfirmacao };
+function enviarConfirmacao({ email, token, enviar }) {
+  const url = `${APP_BASE_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+  return enviarEmail({
+    email,
+    token,
+    enviar,
+    subject: 'Confirme seu acesso ao MA Questões',
+    html: `<p>Confirme seu e-mail para ativar seu acesso ao MA Questões.</p><p><a href="${url}">Confirmar e-mail</a></p><p>O link expira em 24 horas.</p>`,
+  });
+}
+
+function enviarRedefinicaoSenha({ email, token, enviar }) {
+  const url = `${APP_BASE_URL}/reset-password?token=${encodeURIComponent(token)}`;
+  return enviarEmail({
+    email,
+    token,
+    enviar,
+    subject: 'Redefina sua senha no MA Questões',
+    html: `<p>Recebemos uma solicitação para redefinir sua senha.</p><p><a href="${url}">Criar nova senha</a></p><p>O link expira em 1 hora e só pode ser usado uma vez.</p>`,
+  });
+}
+
+module.exports = { criarToken, enviarConfirmacao, enviarRedefinicaoSenha };
