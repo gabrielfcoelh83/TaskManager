@@ -42,12 +42,11 @@ jobs:
         with:
           node-version: '18'
 
-      # Os package-lock.json são versionados, então `npm audit` roda direto,
-      # sem resolver nem instalar nada. A checagem de lockfile fora de
-      # sincronia com o package.json fica por conta do `npm ci` no build.
+      # A imagem de produção instala apenas dependencies (`npm ci --omit=dev`).
+      # As ferramentas de teste não devem bloquear a publicação da aplicação.
       - name: Auditar dependências
         working-directory: ${{ matrix.service }}
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
       # Relatório legível mesmo quando o passo acima falha.
       - name: Relatório de vulnerabilidades
@@ -131,7 +130,7 @@ jobs:
           DB_NAME: ${{ matrix.db }}
           DB_USER: postgres
           DB_PASSWORD: teste
-          JWT_SECRET: segredo-de-teste
+          JWT_SECRET: segredo-de-teste-com-32-caracteres-minimo
           REDIS_URL: redis://localhost:6379
         run: npm test
 
