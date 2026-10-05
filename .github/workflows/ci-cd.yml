@@ -29,8 +29,10 @@ jobs:
   audit:
     name: npm audit (${{ matrix.service }})
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         service: [gateway, auth-service, user-service, estudo-service, questoes-service]
 
