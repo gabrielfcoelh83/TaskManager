@@ -27,14 +27,9 @@ jobs:
   # 1. Verificação de vulnerabilidades
   # ────────────────────────────────────────────────────────────
   audit:
-    name: npm audit (${{ matrix.service }})
+    name: npm audit
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        service: [gateway, auth-service, user-service, estudo-service, questoes-service]
+    timeout-minutes: 12
 
     steps:
       - uses: actions/checkout@v4
@@ -47,31 +42,44 @@ jobs:
       # A imagem de produção instala apenas dependencies (`npm ci --omit=dev`).
       # As ferramentas de teste não devem bloquear a publicação da aplicação.
       - name: Auditar dependências
-        working-directory: ${{ matrix.service }}
         run: |
           set -eu
-          for attempt in 1 2 3; do
-            if timeout 120s npm audit --omit=dev --audit-level=high \
-              --fetch-timeout=30000 --fetch-retries=1; then
-              exit 0
-            fi
-            echo "npm audit falhou ou expirou (tentativa ${attempt}/3)"
-            sleep 5
+          failed=0
+          for service in gateway auth-service user-service estudo-service questoes-service; do
+            echo "::group::Audit ${service}"
+            mkdir -p audit-reports
+            (
+              cd "${service}"
+              for attempt in 1 2 3; do
+                if timeout 120s npm audit --omit=dev --audit-level=high \
+                  --fetch-timeout=30000 --fetch-retries=1; then
+                  exit 0
+                fi
+                echo "npm audit falhou ou expirou (tentativa ${attempt}/3)"
+                sleep 5
+              done
+              exit 1
+            ) > "audit-reports/${service}.log" 2>&1 || failed=1
+            cat "audit-reports/${service}.log"
+            echo "::endgroup::"
           done
-          exit 1
+          exit "${failed}"
 
       # Relatório legível mesmo quando o passo acima falha.
       - name: Relatório de vulnerabilidades
         if: always()
-        working-directory: ${{ matrix.service }}
-        run: npm audit --json > audit-${{ matrix.service }}.json || true
+        run: |
+          mkdir -p audit-reports
+          for service in gateway auth-service user-service estudo-service questoes-service; do
+            (cd "${service}" && timeout 120s npm audit --json > "../audit-reports/${service}.json" || true)
+          done
 
       - name: Publicar relatório
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: audit-${{ matrix.service }}
-          path: ${{ matrix.service }}/audit-${{ matrix.service }}.json
+          name: audit-reports
+          path: audit-reports
           retention-days: 14
 
   # ────────────────────────────────────────────────────────────
