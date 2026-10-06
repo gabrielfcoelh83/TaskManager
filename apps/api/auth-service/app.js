@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const { createClient } = require('redis');
 const { OAuth2Client } = require('google-auth-library');
 const { criarToken, enviarConfirmacao, enviarRedefinicaoSenha } = require('./email');
+const calendar = require('./google-calendar');
 require('dotenv').config();
 
 const app = express();
@@ -34,6 +35,20 @@ const emailValido = (email) => (
 );
 const exigirConfirmacao = process.env.NODE_ENV !== 'test';
 
+function usuarioDoToken(req, res) {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  if (!token) {
+    res.status(401).json({ error: 'Token não fornecido' });
+    return null;
+  }
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    res.status(401).json({ error: 'Token inválido' });
+    return null;
+  }
+}
+
 async function solicitarConfirmacao(user) {
   const confirmacao = criarToken();
   await pool.query('DELETE FROM email_verification_tokens WHERE user_id = $1 AND used_at IS NULL', [user.id]);
@@ -56,6 +71,91 @@ redis.connect()
 // Health Check
 app.get('/health', (req, res) => {
   res.json({ status: 'Auth Service is running', timestamp: new Date().toISOString() });
+});
+
+app.get('/calendar/google/start', (req, res) => {
+  const user = usuarioDoToken(req, res);
+  if (!user) return;
+  const error = calendar.configError();
+  if (error) return res.status(503).json({ error });
+  res.json({ url: calendar.authorizationUrl(calendar.createState(user.id)) });
+});
+
+app.get('/calendar/google/callback', async (req, res) => {
+  try {
+    const user = calendar.readState(req.query.state);
+    const error = calendar.configError();
+    if (error) return res.redirect(calendar.callbackUrl('error'));
+    const tokens = await calendar.exchangeCode(req.query.code);
+    await pool.query(
+      `INSERT INTO google_calendar_connections (user_id, refresh_token)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET refresh_token = EXCLUDED.refresh_token, updated_at = NOW()`,
+      [user.userId, calendar.encrypt(tokens.refresh_token)]
+    );
+    return res.redirect(calendar.callbackUrl('connected'));
+  } catch (error) {
+    console.error('Erro ao conectar Google Calendar:', error.message);
+    return res.redirect(calendar.callbackUrl('error'));
+  }
+});
+
+app.get('/calendar/google/status', async (req, res) => {
+  const user = usuarioDoToken(req, res);
+  if (!user) return;
+  const result = await pool.query(
+    'SELECT connected_at FROM google_calendar_connections WHERE user_id = $1',
+    [user.id]
+  );
+  res.json({ connected: result.rows.length > 0, connectedAt: result.rows[0]?.connected_at || null });
+});
+
+app.post('/calendar/google/sync', async (req, res) => {
+  const user = usuarioDoToken(req, res);
+  if (!user) return;
+  const events = req.body?.events;
+  if (!Array.isArray(events) || events.length > 60) return res.status(400).json({ error: 'Lista de eventos inválida' });
+  const connection = await pool.query(
+    'SELECT refresh_token, calendar_id FROM google_calendar_connections WHERE user_id = $1',
+    [user.id]
+  );
+  if (!connection.rows[0]) return res.status(409).json({ error: 'Google Calendar não conectado' });
+  try {
+    const refreshToken = calendar.decrypt(connection.rows[0].refresh_token);
+    const calendarId = encodeURIComponent(connection.rows[0].calendar_id);
+    const synced = [];
+    for (const event of events) {
+      if (!event?.id || !event?.start || !event?.end || !event?.summary) continue;
+      const data = await calendar.calendarRequest(refreshToken, `/calendars/${calendarId}/events`, {
+        method: 'POST',
+        body: JSON.stringify({
+          id: event.id.replace(/[^a-z0-9_-]/gi, '').slice(0, 100),
+          summary: event.summary,
+          description: event.description || 'Plano de estudos MA Questões',
+          start: { dateTime: event.start, timeZone: event.timeZone || 'America/Sao_Paulo' },
+          end: { dateTime: event.end, timeZone: event.timeZone || 'America/Sao_Paulo' },
+        }),
+      }).catch(async (error) => {
+        if (!/already exists/i.test(error.message)) throw error;
+        return calendar.calendarRequest(refreshToken, `/calendars/${calendarId}/events/${event.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ summary: event.summary, description: event.description, start: { dateTime: event.start, timeZone: event.timeZone || 'America/Sao_Paulo' }, end: { dateTime: event.end, timeZone: event.timeZone || 'America/Sao_Paulo' } }),
+        });
+      });
+      synced.push(data.id);
+    }
+    return res.json({ synced: synced.length });
+  } catch (error) {
+    console.error('Erro ao sincronizar Google Calendar:', error.message);
+    return res.status(502).json({ error: error.message });
+  }
+});
+
+app.delete('/calendar/google', async (req, res) => {
+  const user = usuarioDoToken(req, res);
+  if (!user) return;
+  await pool.query('DELETE FROM google_calendar_connections WHERE user_id = $1', [user.id]);
+  res.status(204).end();
 });
 
 app.post('/forgot-password', async (req, res) => {

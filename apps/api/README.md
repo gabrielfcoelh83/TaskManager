@@ -86,6 +86,30 @@ APP_BASE_URL=https://api.mlkoab.tech
 variáveis de ambiente. O domínio remetente precisa estar verificado no Resend
 com SPF/DKIM configurados.
 
+### Google Calendar
+
+O cronograma pode ser conectado ao Google Calendar pelo OAuth 2.0. Configure no
+Google Cloud a URI de redirecionamento:
+
+```text
+https://api.mlkoab.tech/api/calendar/google/callback
+```
+
+No ambiente do auth-service, use:
+
+```env
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_TOKEN_ENCRYPTION_KEY=<64 caracteres hexadecimais>
+GOOGLE_CALENDAR_REDIRECT_URI=https://api.mlkoab.tech/api/calendar/google/callback
+FRONTEND_BASE_URL=https://mlkoab.tech
+```
+
+O `GOOGLE_CLIENT_SECRET` e o `GOOGLE_TOKEN_ENCRYPTION_KEY` são secrets. O
+refresh token é criptografado antes de ser salvo no banco; ele nunca é enviado
+ao navegador. A tela do cronograma solicita consentimento, sincroniza os sete
+blocos sugeridos e permite desconectar a conta.
+
 ### Esqueci minha senha
 
 O endpoint `POST /api/auth/forgot-password` aceita um e-mail e sempre retorna

@@ -268,6 +268,8 @@ jobs:
           # Variável, não secret: o Client ID do Google é público (vai no
           # bundle do front). Vazia, a rota /google responde 503.
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_TOKEN_ENCRYPTION_KEY: ${{ secrets.GOOGLE_TOKEN_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
@@ -283,6 +285,8 @@ jobs:
             APP_BASE_URL="${APP_BASE_URL:-https://api.mlkoab.tech}" \
             FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-https://mlkoab.tech}" \
             GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
+            GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}" \
+            GOOGLE_TOKEN_ENCRYPTION_KEY="${GOOGLE_TOKEN_ENCRYPTION_KEY:-}" \
             'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /srv/projects/TaskManager
@@ -301,6 +305,8 @@ jobs:
           APP_BASE_URL=${APP_BASE_URL}
           FRONTEND_BASE_URL=${FRONTEND_BASE_URL}
           GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+          GOOGLE_TOKEN_ENCRYPTION_KEY=${GOOGLE_TOKEN_ENCRYPTION_KEY}
           EOF
 
           # Pacotes no ghcr.io nascem privados. O GITHUB_TOKEN desta execução
