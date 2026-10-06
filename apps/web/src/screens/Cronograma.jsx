@@ -4,18 +4,40 @@ import { diasAteProva } from '../lib/metrics';
 import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
 import { HaloBadge } from '@/components/ui/halo-badge';
 
-// O que esta tela mostrava antes: "Período do cronograma: 180 dias", "Início
-// do plano: 03/03/2025", "Término previsto: 09/08/2025", "65% do plano
-// concluído", "78 de 180 dias", "312h 45m estudadas", "4.312 questões
-// respondidas", um calendário de maio de 2025 com o dia 13 aceso, e sete dias
-// de plano fixos. Nenhum desses números existia em lugar nenhum — e o botão
-// "Iniciar estudo" só somava 40% numa barra local.
-//
-// O que ela mostra agora: uma SUGESTÃO de semana (derivada do que você erra
-// mais) e um REGISTRO do que você fez (derivado das tentativas). O botão abre
-// a disciplina do dia na tela de questões.
-
 const SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+function Stat({ label, value, accent }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 105 }}>
+      <span style={{ fontSize: 11, color: '#817b76', letterSpacing: '.03em' }}>{label}</span>
+      <strong style={{ color: accent || '#272226', fontSize: 15, fontWeight: 650 }}>{value}</strong>
+    </div>
+  );
+}
+
+function CalendarDay({ cell, theme }) {
+  if (cell.vazia) return <div aria-hidden="true" />;
+  const ativo = cell.respondidas > 0;
+  return (
+    <div
+      title={ativo ? `${cell.respondidas} ${cell.respondidas === 1 ? 'questão' : 'questões'}` : 'sem estudo'}
+      style={{
+        minHeight: 31,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 9,
+        fontSize: 11.5,
+        color: cell.hoje ? '#fff' : ativo ? theme.primaryDark : '#5d5755',
+        background: cell.hoje ? theme.primary : ativo ? theme.primarySoft : 'transparent',
+        boxShadow: cell.hoje ? `0 4px 10px ${theme.primary}30` : 'none',
+        fontWeight: cell.hoje || ativo ? 700 : 450,
+      }}
+    >
+      {cell.n}
+    </div>
+  );
+}
 
 export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, config, praticarDisciplina, go, dificuldades }) {
   const meta = Number(config?.meta) > 0 ? Number(config.meta) : 20;
@@ -23,150 +45,172 @@ export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, c
   const calendario = diasDoMes(usuarioTentativas);
   const resumo = resumoDoPlano({ tentativas: usuarioTentativas, disciplinas });
   const faltam = diasAteProva(config);
-
-  const cabecalho = [
-    { rotulo: 'Meta diária', valor: `${meta} questões` },
-    { rotulo: 'Respondidas hoje', valor: `${resumo.hojeRespondidas}` },
-    { rotulo: 'Dias com estudo', valor: `${resumo.diasAtivos}` },
-    { rotulo: 'Prova', valor: faltam != null ? `em ${faltam} dias` : 'sem data' },
-  ];
+  const hoje = plano[0];
+  const semanaRespondida = plano.reduce((total, dia) => total + dia.respondidas, 0);
+  const semanaMeta = plano.reduce((total, dia) => total + dia.meta, 0);
+  const progressoSemana = semanaMeta ? Math.min(100, Math.round((semanaRespondida / semanaMeta) * 100)) : 0;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1fr', gap: 18, alignItems: 'start' }}>
-      <div style={s.card}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'space-between', alignItems: 'center', paddingBottom: 16, borderBottom: '1px solid #e6e2da' }}>
-          {cabecalho.map((c) => (
-            <div key={c.rotulo} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div style={{ fontSize: 11.5, color: '#7a766f' }}>{c.rotulo}</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#1c1b19' }}>{c.valor}</div>
-            </div>
-          ))}
-          <button style={{ ...s.btnOutline, display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => go('configuracoes')}>
-            <Icon name="pencil" color={theme.primary} size={13} />Ajustar meta e data
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <section
+        style={{
+          ...s.card,
+          padding: 24,
+          background: `linear-gradient(135deg, #fff 0%, ${theme.primarySoft} 100%)`,
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ position: 'absolute', right: -36, top: -62, width: 190, height: 190, borderRadius: '50%', border: `1px solid ${theme.primary}20` }} />
+        <div style={{ position: 'absolute', right: 24, top: 24, width: 74, height: 74, borderRadius: '50%', border: `1px solid ${theme.primary}15` }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'flex-start', position: 'relative' }}>
+          <div>
+            <div style={{ fontSize: 11, color: theme.primary, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase' }}>Seu ritmo de estudo</div>
+            <h2 style={{ ...s.pageTitle, fontSize: 30, margin: '8px 0 4px', maxWidth: 520 }}>Uma semana possível, não perfeita.</h2>
+            <p style={{ ...s.pageSub, maxWidth: 500, lineHeight: 1.55, margin: 0 }}>
+              O cronograma combina sua meta com os assuntos que mais precisam de atenção.
+            </p>
+          </div>
+          <button type="button" style={{ ...s.btnOutline, display: 'flex', alignItems: 'center', gap: 7, background: '#ffffffb8' }} onClick={() => go('configuracoes')}>
+            <Icon name="settings" color={theme.primary} size={14} />
+            Ajustar plano
           </button>
         </div>
 
-        <div style={{ marginTop: 16, fontSize: 12.5, color: '#7a766f', lineHeight: 1.55 }}>
-          A ordem abaixo é uma <b style={{ color: '#4f4b45' }}>sugestão</b>, montada a
-          partir do seu desempenho: primeiro o que você erra mais, depois o que
-          ainda não respondeu. Não é um plano fechado — estude na ordem que
-          quiser.
-        </div>
-
-        {plano.every((d) => !d.disciplina) ? (
-          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#7a766f', fontSize: 13.5, lineHeight: 1.6 }}>
-            Nenhuma disciplina classificada no acervo ainda — sem isso não dá
-            para sugerir uma ordem de estudo.
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22, marginTop: 25, paddingTop: 18, borderTop: `1px solid ${theme.primary}18`, position: 'relative' }}>
+          <Stat label="Meta diária" value={`${meta} questões`} />
+          <Stat label="Hoje" value={`${hoje.respondidas}/${meta} respondidas`} accent={hoje.pct >= 100 ? '#4a7a4a' : theme.primaryDark} />
+          <Stat label="Prova" value={faltam != null ? `${faltam} dias` : 'sem data'} />
+          <div style={{ flex: 1, minWidth: 180, maxWidth: 330, marginLeft: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#817b76', marginBottom: 7 }}>
+              <span>Ritmo da semana</span>
+              <strong style={{ color: theme.primaryDark }}>{progressoSemana}%</strong>
+            </div>
+            <div style={{ height: 7, borderRadius: 8, background: '#ffffffa8', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${progressoSemana}%`, background: theme.primary, borderRadius: 8, transition: 'width 320ms var(--ease-out)' }} />
+            </div>
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
-            {plano.map((d) => (
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,.85fr)]" style={{ gap: 18, alignItems: 'start' }}>
+        <section style={{ ...s.card, padding: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, marginBottom: 17 }}>
+            <div>
+              <div style={{ ...s.sectionTitle, fontFamily: "'Newsreader', Georgia, serif", fontSize: 22, fontWeight: 500 }}>Próximos dias</div>
+              <div style={{ fontSize: 12, color: '#817b76', marginTop: 4 }}>Uma sugestão que se adapta ao seu desempenho.</div>
+            </div>
+            <span style={{ fontSize: 11, color: '#817b76' }}>7 dias</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {plano.map((dia) => (
               <div
-                key={d.chave}
-                data-testid={`dia-${d.chave}`}
-                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, borderRadius: 8, background: d.hoje ? theme.primarySoft : '#fff', border: `1px solid ${d.hoje ? 'transparent' : '#eeebe5'}`, flexWrap: 'wrap' }}
+                key={dia.chave}
+                data-testid={`dia-${dia.chave}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 13,
+                  padding: '12px 13px',
+                  borderRadius: 12,
+                  background: dia.hoje ? theme.primarySoft : '#fff',
+                  border: `1px solid ${dia.hoje ? `${theme.primary}22` : '#eeeae5'}`,
+                  flexWrap: 'wrap',
+                  transition: 'border-color 160ms ease, transform 160ms ease',
+                }}
               >
-                <div style={{ width: 52, textAlign: 'center', flex: 'none' }}>
-                  <div style={{ fontSize: 10.5, color: '#7a766f', fontWeight: 700 }}>{d.dow}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: '#1c1b19' }}>{d.dia}</div>
-                  {d.hoje && <HaloBadge live interactive={false} layout={false} style={{ marginTop: 4 }}>Hoje</HaloBadge>}
+                <div style={{ width: 43, textAlign: 'center', flex: 'none' }}>
+                  <div style={{ fontSize: 10, color: dia.hoje ? theme.primary : '#817b76', fontWeight: 700 }}>{dia.dow}</div>
+                  <div style={{ fontSize: 19, lineHeight: 1.25, fontWeight: 700, color: '#2c282b' }}>{dia.dia}</div>
+                  {dia.hoje && <HaloBadge live interactive={false} layout={false} style={{ marginTop: 3 }}>Hoje</HaloBadge>}
                 </div>
 
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: `${d.cor || '#9a958d'}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-                  <Icon name={ICONE_POR_DISCIPLINA[d.disciplina] || 'book-open'} color={d.cor || '#9a958d'} size={18} />
+                <div style={{ width: 36, height: 36, borderRadius: 11, background: `${dia.cor || theme.primary}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                  <Icon name={ICONE_POR_DISCIPLINA[dia.disciplina] || 'book-open'} color={dia.cor || theme.primary} size={18} />
                 </div>
 
-                <div style={{ flex: 1, minWidth: 180 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#1c1b19' }}>{d.disciplina || 'Livre'}</div>
-                  <div style={{ fontSize: 12, color: '#7a766f' }}>{d.motivo}</div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                    <span style={{ ...s.pill('#f1efea', '#7a766f'), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <Icon name="file-text" color="#7a766f" size={13} />{d.questoesDisponiveis} no acervo
-                    </span>
-                    <span style={{ ...s.pill('#f1efea', '#7a766f'), display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <Icon name="target" color="#7a766f" size={13} />meta {d.meta}
-                    </span>
-                  </div>
+                <div style={{ flex: 1, minWidth: 170 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#2c282b' }}>{dia.disciplina || 'Livre'}</div>
+                  <div style={{ fontSize: 11.5, color: '#817b76', marginTop: 2 }}>{dia.motivo || 'Nenhuma disciplina disponível ainda'}</div>
                 </div>
 
-                <div style={{ width: 150 }}>
-                  {d.futuro ? (
-                    <div style={{ fontSize: 11.5, color: '#7a766f' }}>planejado</div>
+                <div style={{ width: 118, minWidth: 105 }}>
+                  {dia.futuro ? (
+                    <div style={{ fontSize: 11.5, color: '#9a938e' }}>planejado</div>
                   ) : (
                     <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#7a766f', marginBottom: 5 }}>
-                        <span>Respondidas</span>
-                        <span style={{ fontWeight: 700, color: '#1c1b19' }}>{d.respondidas}/{d.meta}</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: '#817b76', marginBottom: 5 }}>
+                        <span>Progresso</span><strong style={{ color: '#4a4544' }}>{dia.respondidas}/{dia.meta}</strong>
                       </div>
-                      <div style={s.progressTrack}>
-                        <div style={{ width: d.pct + '%', height: '100%', background: d.pct >= 100 ? '#4A7A4A' : `linear-gradient(90deg, ${theme.gradA}, ${theme.gradB})`, borderRadius: 5, transition: 'width 320ms var(--ease-out)' }} />
+                      <div style={{ height: 6, borderRadius: 8, background: '#eeeae5', overflow: 'hidden' }}>
+                        <div style={{ width: `${dia.pct}%`, height: '100%', background: dia.pct >= 100 ? '#4a7a4a' : theme.primary, borderRadius: 8 }} />
                       </div>
                     </>
                   )}
                 </div>
 
                 <button
-                  style={{ ...(d.hoje ? s.btnPrimary : { ...s.btnOutline, display: 'flex', alignItems: 'center', gap: 6 }), flex: 'none' }}
-                  disabled={!d.disciplina}
-                  onClick={() => d.disciplina && praticarDisciplina(d.disciplina)}
+                  type="button"
+                  style={{ ...(dia.hoje ? s.btnPrimary : s.btnOutline), flex: 'none', padding: dia.hoje ? '8px 12px' : '7px 11px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5 }}
+                  disabled={!dia.disciplina}
+                  onClick={() => dia.disciplina && praticarDisciplina(dia.disciplina)}
                 >
-                  <Icon name="play" color={d.hoje ? '#fff' : '#1c1b19'} size={12} />
-                  {d.hoje ? 'Estudar agora' : 'Adiantar'}
+                  <Icon name="play" color={dia.hoje ? '#fff' : '#3f393c'} size={11} />
+                  {dia.hoje ? 'Estudar' : 'Adiantar'}
                 </button>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </section>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={s.card}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}><Icon name="calendar" color={theme.primary} size={20} />Calendário</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1b19' }}>{calendario.rotulo}</div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, marginTop: 14, textAlign: 'center' }}>
-            {SEMANA.map((w, i) => <div key={i} style={{ fontSize: 10.5, color: '#7a766f', fontWeight: 700 }}>{w}</div>)}
-            {calendario.celulas.map((c, i) => {
-              if (c.vazia) return <div key={`v${i}`} />;
-              const ativo = c.respondidas > 0;
-              return (
-                <div
-                  key={c.chave}
-                  title={ativo ? `${c.respondidas} ${c.respondidas === 1 ? 'questão' : 'questões'}` : 'sem estudo'}
-                  style={{
-                    fontSize: 11.5, padding: '6px 0', borderRadius: 8,
-                    color: c.hoje ? '#fff' : ativo ? theme.primaryDark : '#4f4b45',
-                    background: c.hoje ? theme.primary : ativo ? theme.primarySoft : 'transparent',
-                    fontWeight: c.hoje || ativo ? 700 : 400,
-                  }}
-                >
-                  {c.n}
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section style={{ ...s.card, padding: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ ...s.sectionTitle, fontSize: 14 }}><Icon name="calendar" color={theme.primary} size={17} />Calendário</div>
+              <span style={{ fontSize: 12, fontWeight: 650, color: '#3d373b' }}>{calendario.rotulo}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3, marginTop: 15, textAlign: 'center' }}>
+              {SEMANA.map((dia, i) => <div key={i} style={{ fontSize: 10, color: '#9a938e', fontWeight: 700, paddingBottom: 4 }}>{dia}</div>)}
+              {calendario.celulas.map((cell, i) => <CalendarDay key={cell.chave || `v${i}`} cell={cell} theme={theme} />)}
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 14, fontSize: 10.5, color: '#817b76' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: '50%', background: theme.primary, display: 'block' }} />Hoje</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><i style={{ width: 7, height: 7, borderRadius: '50%', background: theme.primarySoft, display: 'block' }} />Estudou</span>
+            </div>
+          </section>
+
+          <section style={{ ...s.card, padding: 20, background: theme.primaryDark, color: '#fff' }}>
+            <div style={{ fontSize: 10.5, color: '#eadde6', fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>Seu registro</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 15 }}>
+              <div style={{ width: 88, height: 88, borderRadius: '50%', background: `conic-gradient(${theme.accent} 0% ${resumo.cobertura}%, #ffffff20 ${resumo.cobertura}% 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                <div style={{ width: 67, height: 67, borderRadius: '50%', background: theme.primaryDark, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <strong style={{ fontSize: 16 }}>{resumo.cobertura}%</strong>
+                  <span style={{ fontSize: 9, color: '#eadde6' }}>do acervo</span>
                 </div>
-              );
-            })}
-          </div>
-          <div style={{ fontSize: 11, color: '#7a766f', marginTop: 10, lineHeight: 1.5 }}>
-            Dias destacados são dias em que você respondeu ao menos uma questão.
-          </div>
-        </div>
-
-        <div style={s.card}>
-          <div style={s.sectionTitle}>Seu registro</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 14 }}>
-            <div style={{ width: 96, height: 96, borderRadius: '50%', background: `conic-gradient(${theme.primary} 0% ${resumo.cobertura}%, #eeebe5 ${resumo.cobertura}% 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-              <div style={{ width: 72, height: 72, borderRadius: '50%', background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ fontSize: 17, fontWeight: 700, color: '#1c1b19' }}>{resumo.cobertura}%</div>
-                <div style={{ fontSize: 9.5, color: '#7a766f' }}>do acervo visto</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 11.5 }}>
+                <div><span style={{ color: '#cdbcc8' }}>Dias com estudo</span><strong style={{ display: 'block', fontSize: 14 }}>{resumo.diasAtivos}</strong></div>
+                <div><span style={{ color: '#cdbcc8' }}>Respostas registradas</span><strong style={{ display: 'block', fontSize: 14 }}>{resumo.respondidas}</strong></div>
               </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
-              <div><div style={{ color: '#7a766f' }}>Dias com estudo</div><div style={{ fontWeight: 700, color: '#1c1b19' }}>{resumo.diasAtivos}</div></div>
-              <div><div style={{ color: '#7a766f' }}>Respostas registradas</div><div style={{ fontWeight: 700, color: '#1c1b19' }}>{resumo.respondidas}</div></div>
-              <div><div style={{ color: '#7a766f' }}>Questões distintas</div><div style={{ fontWeight: 700, color: '#1c1b19' }}>{resumo.questoesTocadas} de {resumo.acervo}</div></div>
+          </section>
+
+          <section style={{ ...s.card, padding: 20, border: `1px dashed ${theme.primary}45`, background: '#fffdfb' }}>
+            <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: '#f1ece8', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
+                <Icon name="calendar" color={theme.primary} size={17} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#352e33' }}>Google Calendar</div>
+                <p style={{ margin: '4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: '#817b76' }}>
+                  Em breve você poderá levar seus blocos de estudo para a agenda que já usa.
+                </p>
+                <span style={{ display: 'inline-block', marginTop: 10, fontSize: 10.5, color: theme.primary, fontWeight: 700 }}>Sincronização em preparação</span>
+              </div>
             </div>
-          </div>
-        </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
