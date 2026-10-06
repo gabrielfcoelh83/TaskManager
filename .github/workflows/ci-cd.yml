@@ -17,7 +17,6 @@ on:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
-  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
