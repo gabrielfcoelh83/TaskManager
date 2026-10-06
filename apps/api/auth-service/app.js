@@ -120,7 +120,17 @@ app.post('/reset-password', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, found.rows[0].id]);
+    // O token só é enviado para o e-mail cadastrado. Usá-lo com sucesso prova
+    // a posse dessa caixa postal e permite ativar contas que ainda estavam
+    // pendentes de confirmação.
+    await client.query(
+      `UPDATE users
+          SET password_hash = $1,
+              status = 'active',
+              email_verified_at = COALESCE(email_verified_at, NOW())
+        WHERE id = $2`,
+      [passwordHash, found.rows[0].id]
+    );
     await client.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = $1', [hash]);
     await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL', [found.rows[0].id]);
     await client.query('COMMIT');
