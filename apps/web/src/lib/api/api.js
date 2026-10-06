@@ -166,6 +166,22 @@ export async function redefinirSenha(token, password) {
   });
 }
 
+export async function iniciarConexaoGoogleCalendar() {
+  return req('/api/calendar/google/start');
+}
+
+export async function statusGoogleCalendar() {
+  return req('/api/calendar/google/status');
+}
+
+export async function sincronizarGoogleCalendar(events) {
+  return req('/api/calendar/google/sync', { method: 'POST', body: { events } });
+}
+
+export async function desconectarGoogleCalendar() {
+  return req('/api/calendar/google', { method: 'DELETE' });
+}
+
 // Login com o Google: o navegador recebeu do Google um ID token
 // (`credential`), e o auth-service é quem confere assinatura e audiência e
 // devolve o JWT da plataforma — o mesmo que o login por senha. Conta nova é

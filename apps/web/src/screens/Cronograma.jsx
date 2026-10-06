@@ -1,8 +1,15 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { planoDaSemana, diasDoMes, resumoDoPlano } from '../lib/agenda';
 import { diasAteProva } from '../lib/metrics';
 import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
 import { HaloBadge } from '@/components/ui/halo-badge';
+import {
+  iniciarConexaoGoogleCalendar,
+  statusGoogleCalendar,
+  sincronizarGoogleCalendar,
+  desconectarGoogleCalendar,
+} from '../lib/api/api';
 
 const SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
@@ -40,6 +47,7 @@ function CalendarDay({ cell, theme }) {
 }
 
 export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, config, praticarDisciplina, go, dificuldades }) {
+  const [calendar, setCalendar] = useState({ connected: false, loading: true, syncing: false, error: null });
   const meta = Number(config?.meta) > 0 ? Number(config.meta) : 20;
   const plano = planoDaSemana({ disciplinas, tentativas: usuarioTentativas, meta, dificuldades });
   const calendario = diasDoMes(usuarioTentativas);
@@ -49,6 +57,62 @@ export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, c
   const semanaRespondida = plano.reduce((total, dia) => total + dia.respondidas, 0);
   const semanaMeta = plano.reduce((total, dia) => total + dia.meta, 0);
   const progressoSemana = semanaMeta ? Math.min(100, Math.round((semanaRespondida / semanaMeta) * 100)) : 0;
+  const eventos = useMemo(() => plano.map((dia, index) => {
+    const data = new Date();
+    data.setDate(data.getDate() + index);
+    const start = new Date(data);
+    start.setHours(8, 0, 0, 0);
+    const end = new Date(start);
+    end.setMinutes(end.getMinutes() + 90);
+    return {
+      id: `maquestoes-${dia.chave}-${(dia.disciplina || 'livre').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      summary: `Estudo — ${dia.disciplina || 'revisão livre'}`,
+      description: `Meta: ${dia.meta} questões. ${dia.motivo || ''}`.trim(),
+      start: start.toISOString(),
+      end: end.toISOString(),
+      timeZone: 'America/Sao_Paulo',
+    };
+  }), [plano]);
+
+  useEffect(() => {
+    let ativo = true;
+    statusGoogleCalendar()
+      .then((status) => ativo && setCalendar((atual) => ({ ...atual, ...status, loading: false })))
+      .catch((error) => ativo && setCalendar((atual) => ({ ...atual, loading: false, error: error.message })));
+    return () => { ativo = false; };
+  }, []);
+
+  useEffect(() => {
+    const resultado = new URLSearchParams(window.location.search).get('calendar');
+    if (resultado === 'connected') setCalendar((atual) => ({ ...atual, connected: true, loading: false }));
+    if (resultado === 'error') setCalendar((atual) => ({ ...atual, loading: false, error: 'Não foi possível conectar o Google Calendar.' }));
+  }, []);
+
+  const conectarCalendar = async () => {
+    setCalendar((atual) => ({ ...atual, error: null }));
+    try {
+      const { url } = await iniciarConexaoGoogleCalendar();
+      window.location.assign(url);
+    } catch (error) {
+      setCalendar((atual) => ({ ...atual, error: error.message }));
+    }
+  };
+
+  const sincronizarCalendar = async () => {
+    setCalendar((atual) => ({ ...atual, syncing: true, error: null }));
+    try {
+      await sincronizarGoogleCalendar(eventos);
+    } catch (error) {
+      setCalendar((atual) => ({ ...atual, error: error.message }));
+    } finally {
+      setCalendar((atual) => ({ ...atual, syncing: false }));
+    }
+  };
+
+  const desconectarCalendar = async () => {
+    await desconectarGoogleCalendar();
+    setCalendar((atual) => ({ ...atual, connected: false }));
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -204,9 +268,23 @@ export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, c
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#352e33' }}>Google Calendar</div>
                 <p style={{ margin: '4px 0 0', fontSize: 11.5, lineHeight: 1.5, color: '#817b76' }}>
-                  Em breve você poderá levar seus blocos de estudo para a agenda que já usa.
+                  Leve os blocos da sua semana para a agenda que já usa.
                 </p>
-                <span style={{ display: 'inline-block', marginTop: 10, fontSize: 10.5, color: theme.primary, fontWeight: 700 }}>Sincronização em preparação</span>
+                {calendar.error && <div role="alert" style={{ marginTop: 9, fontSize: 11, color: '#9a3f3f' }}>{calendar.error}</div>}
+                {calendar.loading ? (
+                  <span style={{ display: 'inline-block', marginTop: 10, fontSize: 10.5, color: '#817b76' }}>Verificando conexão...</span>
+                ) : calendar.connected ? (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                    <button type="button" style={{ ...s.btnPrimary, padding: '7px 10px', fontSize: 10.5 }} onClick={sincronizarCalendar} disabled={calendar.syncing}>
+                      {calendar.syncing ? 'Sincronizando...' : 'Sincronizar plano'}
+                    </button>
+                    <button type="button" style={{ ...s.btnOutline, padding: '6px 9px', fontSize: 10.5 }} onClick={desconectarCalendar}>Desconectar</button>
+                  </div>
+                ) : (
+                  <button type="button" style={{ ...s.btnPrimary, marginTop: 10, padding: '7px 10px', fontSize: 10.5 }} onClick={conectarCalendar}>
+                    Conectar Google Calendar
+                  </button>
+                )}
               </div>
             </div>
           </section>
