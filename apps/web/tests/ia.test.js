@@ -70,7 +70,7 @@ function httpFalso({ catalogo = CATALOGO, aoPost = () => ({ data: resposta('ok')
 const resposta = (texto) => ({ choices: [{ message: { content: texto } }] });
 const erroHttp = (status) => Object.assign(new Error(`HTTP ${status}`), { response: { status } });
 const silencioso = { warn() {} };
-const ENV = { OPENROUTER_API_KEY: 'sk-or-teste' };
+const ENV = { OPENROUTER_API_KEY: 'test-openrouter-key' };
 const MSG = [{ role: 'user', content: 'Explique a questão.' }];
 
 async function rejeita(promessa) {
@@ -145,7 +145,7 @@ async function rejeita(promessa) {
 
   const enviado = http.chamadas.post[0];
   exigir(enviado.corpo.messages[0].role === 'system', 'a mensagem de sistema tem de ir na frente');
-  exigir(enviado.config.headers.Authorization === 'Bearer sk-or-teste', 'Authorization Bearer não enviado');
+  exigir(enviado.config.headers.Authorization === 'Bearer test-openrouter-key', 'Authorization Bearer não enviado');
 }
 {
   // 404 (id que sumiu), 503 e timeout: todos caem para o próximo; todos

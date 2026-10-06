@@ -52,7 +52,7 @@ async function concluirFichaPelaApi(page) {
     const id = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).id;
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     let perfil = null;
-    for (let i = 0; i < 30 && !perfil; i++) {
+    for (let i = 0; i < 120 && !perfil; i++) {
       const res = await fetch(`/api/users/${id}`, { headers });
       if (res.ok) perfil = await res.json();
       else await new Promise((r) => setTimeout(r, 500));

@@ -146,10 +146,24 @@ export async function criarConta({ nome, email, password }) {
     auth: false,
   });
 
-  if (!dados?.token) throw new ApiError('Conta criada, mas sem token — entre novamente', 502);
+  if (dados?.token) setToken(dados.token);
+  return { ...dados.user, confirmacaoPendente: !dados?.token };
+}
 
-  setToken(dados.token);
-  return dados.user;
+export async function solicitarRedefinicaoSenha(email) {
+  return req('/api/auth/forgot-password', {
+    method: 'POST',
+    body: { email },
+    auth: false,
+  });
+}
+
+export async function redefinirSenha(token, password) {
+  return req('/api/auth/reset-password', {
+    method: 'POST',
+    body: { token, password },
+    auth: false,
+  });
 }
 
 // Login com o Google: o navegador recebeu do Google um ID token

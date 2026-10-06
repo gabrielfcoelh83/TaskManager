@@ -1,25 +1,30 @@
 import { useState } from 'react';
 import { Icon } from '../lib/icons';
-import { login, criarConta, entrarComGoogle } from '../lib/api/api';
+import {
+  login, criarConta, entrarComGoogle, solicitarRedefinicaoSenha, redefinirSenha,
+} from '../lib/api/api';
 import BotaoGoogle from '../components/ui/BotaoGoogle';
 
 // Entrar e criar conta na mesma tela, alternados por um botão. Duas telas
 // separadas custariam rota, estado de navegação e um caminho de volta — para
 // dois formulários que diferem em dois campos.
 //
-// Continua sem "esqueci a senha": ele exige e-mail transacional, que esta
-// plataforma não tem. Enquanto não existir, a confirmação de senha no cadastro
-// é o que impede alguém de ficar trancado para fora por um erro de digitação.
 export default function Login({ theme, s, onEntrar }) {
-  const [modo, setModo] = useState('entrar'); // 'entrar' | 'criar'
+  const parametros = new URLSearchParams(window.location.search);
+  const tokenRedefinicao = parametros.get('token') || '';
+  const caminhoRedefinicao = window.location.pathname === '/reset-password';
+  const [modo, setModo] = useState(caminhoRedefinicao ? 'redefinir' : 'entrar'); // entrar | criar | esqueci | redefinir
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [confirmacao, setConfirmacao] = useState('');
+  const [mensagem, setMensagem] = useState(null);
   const [erro, setErro] = useState(null);
   const [enviando, setEnviando] = useState(false);
 
   const criando = modo === 'criar';
+  const esquecendo = modo === 'esqueci';
+  const redefinindo = modo === 'redefinir';
 
   const trocarModo = () => {
     setModo(criando ? 'entrar' : 'criar');
@@ -27,6 +32,7 @@ export default function Login({ theme, s, onEntrar }) {
     // faria "este e-mail já tem conta" aparecer sobre a tela de entrar, onde
     // ele não faz sentido nenhum.
     setErro(null);
+    setMensagem(null);
     setConfirmacao('');
   };
 
@@ -36,7 +42,7 @@ export default function Login({ theme, s, onEntrar }) {
 
     // Comparação antes de sair do navegador: o servidor não recebe a
     // confirmação e não teria como recusar por isso.
-    if (criando && senha !== confirmacao) {
+    if ((criando || redefinindo) && senha !== confirmacao) {
       setErro('As senhas não são iguais.');
       return;
     }
@@ -44,9 +50,31 @@ export default function Login({ theme, s, onEntrar }) {
     setErro(null);
     setEnviando(true);
     try {
+      if (esquecendo) {
+        await solicitarRedefinicaoSenha(email.trim());
+        setMensagem('Se existir uma conta com esse e-mail, enviaremos as instruções para redefinir a senha.');
+        setEnviando(false);
+        return;
+      }
+      if (redefinindo) {
+        await redefinirSenha(tokenRedefinicao, senha);
+        window.history.replaceState({}, '', '/');
+        setModo('entrar');
+        setSenha('');
+        setConfirmacao('');
+        setMensagem('Senha redefinida. Você já pode entrar com a nova senha.');
+        setEnviando(false);
+        return;
+      }
       const usuario = criando
         ? await criarConta({ nome: nome.trim(), email: email.trim(), password: senha })
         : await login(email.trim(), senha);
+      if (criando && usuario.confirmacaoPendente) {
+        setMensagem('Conta criada. Confirme o link enviado ao seu e-mail antes de entrar.');
+        setModo('entrar');
+        setEnviando(false);
+        return;
+      }
       onEntrar(usuario);
     } catch (err) {
       // 409 é o único erro aqui com um próximo passo óbvio, então ele ganha
@@ -140,10 +168,14 @@ export default function Login({ theme, s, onEntrar }) {
         </div>
 
         <div style={{ ...s.pageTitle, fontSize: 26, marginBottom: 6 }}>
-          {criando ? 'Criar conta' : 'Entrar'}
+          {criando ? 'Criar conta' : esquecendo ? 'Recuperar senha' : redefinindo ? 'Criar nova senha' : 'Entrar'}
         </div>
         <div style={{ ...s.pageSub, marginBottom: 18 }}>
-          Suas respostas ficam guardadas na sua conta.
+          {esquecendo
+            ? 'Informe seu e-mail e enviaremos um link seguro.'
+            : redefinindo
+              ? 'Escolha uma nova senha para sua conta.'
+              : 'Suas respostas ficam guardadas na sua conta.'}
         </div>
 
         {criando && (
@@ -164,10 +196,10 @@ export default function Login({ theme, s, onEntrar }) {
           </>
         )}
 
-        <label style={rotulo} htmlFor="campo-email">
+        {!redefinindo && <label style={rotulo} htmlFor="campo-email">
           E-mail
-        </label>
-        <input
+        </label>}
+        {!redefinindo && <input
           id="campo-email"
           type="email"
           value={email}
@@ -175,12 +207,12 @@ export default function Login({ theme, s, onEntrar }) {
           autoComplete="email"
           required
           style={{ ...campo, marginBottom: 13 }}
-        />
+        />}
 
-        <label style={rotulo} htmlFor="campo-senha">
+        {!esquecendo && <label style={rotulo} htmlFor="campo-senha">
           Senha
-        </label>
-        <input
+        </label>}
+        {!esquecendo && <input
           id="campo-senha"
           type="password"
           value={senha}
@@ -188,13 +220,13 @@ export default function Login({ theme, s, onEntrar }) {
           // O gerenciador de senhas do navegador se comporta de formas
           // diferentes nos dois casos: oferecer a senha salva ao entrar,
           // propor uma nova ao cadastrar.
-          autoComplete={criando ? 'new-password' : 'current-password'}
+          autoComplete={criando || redefinindo ? 'new-password' : 'current-password'}
           required
-          minLength={criando ? 8 : undefined}
-          style={{ ...campo, marginBottom: criando ? 13 : 18 }}
-        />
+          minLength={criando || redefinindo ? 8 : undefined}
+          style={{ ...campo, marginBottom: criando || redefinindo ? 13 : 18 }}
+        />}
 
-        {criando && (
+        {(criando || redefinindo) && (
           <>
             <label style={rotulo} htmlFor="campo-confirmacao">
               Repita a senha
@@ -228,6 +260,11 @@ export default function Login({ theme, s, onEntrar }) {
             {erro}
           </div>
         )}
+        {mensagem && (
+          <div role="status" style={{ background: '#EEF7F0', color: '#24613A', border: '1px solid #C7E2CD', borderRadius: 10, padding: '9px 12px', fontSize: 12.5, marginBottom: 14 }}>
+            {mensagem}
+          </div>
+        )}
 
         <button
           type="submit"
@@ -242,31 +279,39 @@ export default function Login({ theme, s, onEntrar }) {
           }}
         >
           {enviando
-            ? criando
+            ? esquecendo
+              ? 'Enviando…'
+              : redefinindo
+                ? 'Salvando…'
+                : criando
               ? 'Criando…'
               : 'Entrando…'
-            : criando
-              ? 'Criar conta'
-              : 'Entrar'}
+            : esquecendo
+              ? 'Enviar link'
+              : redefinindo
+                ? 'Salvar nova senha'
+                : criando
+                  ? 'Criar conta'
+                  : 'Entrar'}
         </button>
 
         {/* Serve para entrar e para criar conta: na primeira vez, o
             auth-service cria a conta com o nome e o e-mail do Google. */}
-        {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+        {!esquecendo && !redefinindo && import.meta.env.VITE_GOOGLE_CLIENT_ID && (
           <div style={{ marginTop: 14 }}>
             <div style={{ ...s.pageSub, textAlign: 'center', fontSize: 12, marginBottom: 10 }}>ou</div>
             <BotaoGoogle onCredencial={entrarGoogle} />
           </div>
         )}
 
-        <div style={{ ...s.pageSub, textAlign: 'center', marginTop: 16, fontSize: 12.5 }}>
-          {criando ? 'Já tem conta?' : 'Primeira vez por aqui?'}{' '}
+        {!redefinindo && <div style={{ ...s.pageSub, textAlign: 'center', marginTop: 16, fontSize: 12.5 }}>
+          {criando ? 'Já tem conta?' : esquecendo ? 'Lembrou a senha?' : 'Primeira vez por aqui?'}{' '}
           {/* type="button" é obrigatório: dentro de um <form>, um botão sem
               type é submit, e alternar o modo enviaria o formulário. */}
           <button
             type="button"
             data-testid="trocar-modo"
-            onClick={trocarModo}
+            onClick={() => { setModo(esquecendo ? 'entrar' : criando ? 'entrar' : 'criar'); setErro(null); setMensagem(null); }}
             style={{
               background: 'none',
               border: 'none',
@@ -277,9 +322,14 @@ export default function Login({ theme, s, onEntrar }) {
               cursor: 'pointer',
             }}
           >
-            {criando ? 'Entrar' : 'Criar conta'}
+            {criando || esquecendo ? 'Entrar' : esquecendo ? 'Entrar' : 'Criar conta'}
           </button>
-        </div>
+        </div>}
+        {!criando && !esquecendo && !redefinindo && (
+          <button type="button" onClick={() => { setModo('esqueci'); setErro(null); setMensagem(null); }} style={{ display: 'block', margin: '14px auto 0', background: 'none', border: 'none', padding: 0, font: 'inherit', color: theme.primary, fontSize: 12.5, cursor: 'pointer' }}>
+            Esqueci minha senha
+          </button>
+        )}
       </form>
       </div>
     </div>
