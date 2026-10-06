@@ -3,6 +3,7 @@ name: CI/CD
 on:
   push:
     branches: [main]
+  workflow_dispatch:
     # Mudança só de documentação não justifica rebuildar as imagens nem
     # reiniciar a stack em produção. workflow_dispatch continua disponível
     # para forçar uma execução quando necessário.
