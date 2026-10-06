@@ -59,6 +59,8 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:-noreply@api.mlkoab.tech}
       APP_BASE_URL: ${APP_BASE_URL:-https://api.mlkoab.tech}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_TOKEN_ENCRYPTION_KEY: ${GOOGLE_TOKEN_ENCRYPTION_KEY:-}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
