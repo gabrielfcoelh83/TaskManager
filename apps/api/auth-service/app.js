@@ -192,7 +192,7 @@ app.post('/register', async (req, res) => {
           email: user.email,
           name: name || emailNormalizado.split('@')[0],
         },
-        { TRIM: { strategy: 'MAXLEN', threshold: 10000, limit: 1000 } }
+        { TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: 10000, limit: 1000 } }
       );
       console.log(`📥 Evento gravado na fila (${msgId}) para ${user.email}`);
     } catch (err) {
@@ -397,7 +397,7 @@ app.post('/google', async (req, res) => {
           email: user.email,
           name: dados.name || email.split('@')[0],
         },
-        { TRIM: { strategy: 'MAXLEN', threshold: 10000, limit: 1000 } }
+        { TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: 10000, limit: 1000 } }
       );
       console.log(`📥 Evento gravado na fila (${msgId}) para ${user.email} (Google)`);
     } catch (err) {
