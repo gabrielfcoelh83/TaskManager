@@ -70,7 +70,7 @@ export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, c
       description: `Meta: ${dia.meta} questões. ${dia.motivo || ''}`.trim(),
       start: start.toISOString(),
       end: end.toISOString(),
-      timeZone: 'America/Sao_Paulo',
+      timeZone: 'UTC',
     };
   }), [plano]);
 
