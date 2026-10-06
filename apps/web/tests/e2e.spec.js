@@ -1208,7 +1208,7 @@ test.describe('Simulados com o acervo fora do ar', () => {
 test.describe('Todas as telas', () => {
   const TELAS = [
     ['dashboard', 'Vamos continuar rumo'],
-    ['cronograma', 'Uma sugestão de semana'],
+    ['cronograma', 'Uma semana possível'],
     ['questoes', 'gabarito oficial da FGV'],
     ['simulados', 'condições reais de prova'],
     ['revisoes', 'O que você errou'],

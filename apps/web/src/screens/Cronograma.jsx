@@ -75,11 +75,15 @@ export default function Cronograma({ theme, s, usuarioTentativas, disciplinas, c
   }), [plano]);
 
   useEffect(() => {
-    let ativo = true;
-    statusGoogleCalendar()
-      .then((status) => ativo && setCalendar((atual) => ({ ...atual, ...status, loading: false })))
-      .catch((error) => ativo && setCalendar((atual) => ({ ...atual, loading: false, error: error.message })));
-    return () => { ativo = false; };
+    const resultado = new URLSearchParams(window.location.search).get('calendar');
+    if (resultado === 'connected') {
+      statusGoogleCalendar()
+        .then((status) => setCalendar((atual) => ({ ...atual, ...status, loading: false })))
+        .catch(() => setCalendar((atual) => ({ ...atual, connected: true, loading: false })));
+      return undefined;
+    }
+    setCalendar((atual) => ({ ...atual, loading: false }));
+    return undefined;
   }, []);
 
   useEffect(() => {
