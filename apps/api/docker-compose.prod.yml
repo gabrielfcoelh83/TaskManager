@@ -73,6 +73,7 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:?RESEND_API_KEY is required}
       EMAIL_FROM: ${EMAIL_FROM:-noreply@api.mlkoab.tech}
       APP_BASE_URL: ${APP_BASE_URL:-https://api.mlkoab.tech}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-https://mlkoab.tech}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       REDIS_URL: redis://redis:6379
     depends_on:

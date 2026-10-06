@@ -2,6 +2,7 @@ const crypto = require('crypto');
 
 const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@api.mlkoab.tech';
 const APP_BASE_URL = process.env.APP_BASE_URL || 'https://api.mlkoab.tech';
+const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'https://mlkoab.tech';
 
 function criarToken() {
   const token = crypto.randomBytes(32).toString('hex');
@@ -39,7 +40,7 @@ function enviarConfirmacao({ email, token, enviar }) {
 }
 
 function enviarRedefinicaoSenha({ email, token, enviar }) {
-  const url = `${APP_BASE_URL}/reset-password?token=${encodeURIComponent(token)}`;
+  const url = `${FRONTEND_BASE_URL}/reset-password?token=${encodeURIComponent(token)}`;
   return enviarEmail({
     email,
     token,
