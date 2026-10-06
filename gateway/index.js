@@ -134,40 +134,40 @@ app.get('/api/auth/verify-email', async (req, res) => {
     const response = await downstream('auth', 'get', `${services.auth}/verify-email`, {
       params: req.query,
     });
-
-    for (const method of ['get', 'post', 'delete']) {
-      app[method](`/api/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, async (req, res) => {
-        try {
-          const response = await downstream('auth', method, `${services.auth}/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, ...(method === 'post' ? [req.body] : []), { headers: { authorization: req.headers.authorization } });
-          res.status(response.status).json(response.data);
-        } catch (error) {
-          res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
-        }
-      });
-    }
-
-    app.get('/api/calendar/google/start', async (req, res) => {
-      try {
-        const response = await downstream('auth', 'get', `${services.auth}/calendar/google/start`, { headers: { authorization: req.headers.authorization } });
-        res.json(response.data);
-      } catch (error) {
-        res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
-      }
-    });
-
-    app.get('/api/calendar/google/callback', async (req, res) => {
-      try {
-        const response = await downstream('auth', 'get', `${services.auth}/calendar/google/callback`, { params: req.query, maxRedirects: 0, validateStatus: (status) => status < 400 });
-        res.redirect(response.headers.location || '/?calendar=error');
-      } catch (error) {
-        res.redirect('/?calendar=error');
-      }
-    });
     res.status(response.status).json(response.data);
   } catch (error) {
     res.status(error.response?.status || 500).json({
       error: error.response?.data?.error || 'Erro ao confirmar e-mail',
     });
+  }
+});
+
+for (const method of ['get', 'post', 'delete']) {
+  app[method](`/api/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, async (req, res) => {
+    try {
+      const response = await downstream('auth', method, `${services.auth}/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, ...(method === 'post' ? [req.body] : []), { headers: { authorization: req.headers.authorization } });
+      res.status(response.status).json(response.data);
+    } catch (error) {
+      res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
+    }
+  });
+}
+
+app.get('/api/calendar/google/start', async (req, res) => {
+  try {
+    const response = await downstream('auth', 'get', `${services.auth}/calendar/google/start`, { headers: { authorization: req.headers.authorization } });
+    res.json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
+  }
+});
+
+app.get('/api/calendar/google/callback', async (req, res) => {
+  try {
+    const response = await downstream('auth', 'get', `${services.auth}/calendar/google/callback`, { params: req.query, maxRedirects: 0, validateStatus: (status) => status < 400 });
+    res.redirect(response.headers.location || '/?calendar=error');
+  } catch (error) {
+    res.redirect('/?calendar=error');
   }
 });
 
