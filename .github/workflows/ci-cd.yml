@@ -270,6 +270,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_TOKEN_ENCRYPTION_KEY: ${{ secrets.GOOGLE_TOKEN_ENCRYPTION_KEY }}
+          GOOGLE_CALENDAR_REDIRECT_URI: ${{ vars.GOOGLE_CALENDAR_REDIRECT_URI }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "${SSH_PORT:-22}" "$SSH_USER@$SSH_HOST" \
@@ -287,6 +288,7 @@ jobs:
             GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
             GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}" \
             GOOGLE_TOKEN_ENCRYPTION_KEY="${GOOGLE_TOKEN_ENCRYPTION_KEY:-}" \
+            GOOGLE_CALENDAR_REDIRECT_URI="${GOOGLE_CALENDAR_REDIRECT_URI:-https://api.mlkoab.tech/api/calendar/google/callback}" \
             'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /srv/projects/TaskManager
@@ -307,6 +309,7 @@ jobs:
           GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
           GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
           GOOGLE_TOKEN_ENCRYPTION_KEY=${GOOGLE_TOKEN_ENCRYPTION_KEY}
+          GOOGLE_CALENDAR_REDIRECT_URI=${GOOGLE_CALENDAR_REDIRECT_URI}
           EOF
 
           # Pacotes no ghcr.io nascem privados. O GITHUB_TOKEN desta execução
