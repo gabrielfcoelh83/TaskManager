@@ -166,16 +166,33 @@ export async function redefinirSenha(token, password) {
   });
 }
 
+// Google Agenda (rotas do auth-service, pelo gateway).
+//
+// A conexão é um OAuth em duas pernas: `start` devolve a URL do Google; depois
+// de autorizar, o servidor manda o navegador de volta para
+// `/?calendar=confirmar&codigo=…`, e é o `confirm` — autenticado, com o token
+// da sessão — que liga a conta do Google à conta do app. Sem esse segundo
+// passo, quem tivesse o link de retorno ligaria a agenda dele em conta alheia.
 export async function iniciarConexaoGoogleCalendar() {
   return req('/api/calendar/google/start');
 }
 
+export async function confirmarGoogleCalendar(codigo) {
+  return req('/api/calendar/google/confirm', { method: 'POST', body: { codigo } });
+}
+
+/** `{ connected, connectedAt }`. */
 export async function statusGoogleCalendar() {
   return req('/api/calendar/google/status');
 }
 
-export async function sincronizarGoogleCalendar(events) {
-  return req('/api/calendar/google/sync', { method: 'POST', body: { events } });
+/**
+ * Um evento por dia de estudo (`eventosDoPlano`), sem id: o servidor gera o
+ * id pelo dia e APAGA os eventos dos dias de `intervalo` (`{ de, ate }`,
+ * 'YYYY-MM-DD') que não vierem na lista. Devolve `{ sincronizados, removidos }`.
+ */
+export async function sincronizarGoogleCalendar({ events, intervalo }) {
+  return req('/api/calendar/google/sync', { method: 'POST', body: { events, intervalo } });
 }
 
 export async function desconectarGoogleCalendar() {

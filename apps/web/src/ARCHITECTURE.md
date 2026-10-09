@@ -44,7 +44,7 @@ src/
     ├── metrics.js        # Meta diária, sequência, taxas, evolução, estatísticas
     ├── revisao.js        # O que está errado / não respondido / favoritado
     ├── disciplinas.js    # Disciplinas derivadas do acervo, cores, prioridade
-    ├── agenda.js         # Plano da semana e calendário do Cronograma
+    ├── agenda.js         # Plano da semana (folga, ritmo, bloco de estudo), calendário e eventos do Google Agenda
     ├── perfil.js         # Payload do JWT, nome de exibição, saudação
     ├── ficha.js          # Ficha de boas-vindas: opções, validação dos passos, meta sugerida, montagem
     ├── preferencias.js   # Fila dos PUT de profile_data (só as chaves que mudaram) e leitura de meta/data
@@ -178,7 +178,7 @@ recarregar a página volta para ela — mas não há URL por tela.
 |---|---|---|---|
 | — | `Login.jsx` | Entrar e criar conta | só `theme`, `s` e `onEntrar` — não recebe as comuns |
 | `dashboard` | `Dashboard.jsx` | Resumo do dia, próximo passo, evolução | `dash`, `setDash`, `acervo` |
-| `cronograma` | `Cronograma.jsx` | Sugestão de semana e calendário do mês | — |
+| `cronograma` | `Cronograma.jsx` | Sugestão de semana, calendário e Google Agenda (ver "Cronograma") | `diasDeEstudo`, `bloco`, `salvarAgenda`, `perfilCarregado`, `sessaoExpirou` |
 | `questoes` | `Questoes.jsx` | Escolha de fonte e quiz | `quest`, `setQuest`, `registrar`, `acervo`, `recarregarAcervo` |
 | `simulados` | `Simulados.jsx` | Hub, formulário, prova e resultado do simulado (ver "Simulados") | `sim`, `setSim`, `setResultadosHistorico`, `registrarRespostas`, `acervo`, `recarregarAcervo` |
 | `revisoes` | `Revisoes.jsx` | Erradas, favoritas, menor desempenho | `rev`, `setRev`, `favoritos`, `toggleFavorito` |
@@ -187,7 +187,7 @@ recarregar a página volta para ela — mas não há URL por tela.
 | `favoritos` | `Favoritos.jsx` | Questões marcadas com estrela | `toggleFavorito` (recebe `favoritos` mas não usa; lê de `revisao`) |
 | `disciplinas` | `Disciplinas.jsx` | Aproveitamento por matéria e tema | `disc`, `setDisc`, `simularDisciplina` |
 | `anotacoes` | `Anotacoes.jsx` | Notas com pastas e tags | `notas`, `setNotas` |
-| `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, "Meu perfil de estudo", tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme`, `salvarFicha`, `fase`, `opcoesDeDificuldade`, `acervoCarregando` |
+| `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, "Meu perfil de estudo", tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme`, `salvarFicha`, `fase`, `opcoesDeDificuldade`, `acervoCarregando`, `ancora`/`ancoraUsada` |
 | — (perfil sem ficha) | `FichaDeBoasVindas.jsx` | Ficha obrigatória antes do app (ver "Ficha de boas-vindas") | não recebe as comuns: `theme`, `s`, `email`, `iniciais`, `opcoesDeDificuldade`, `acervoCarregando`, `onSalvar`, `onEntrar`, `onSair` |
 | — (`state.fase`) | `SegundaFase.jsx` | 2ª fase: questões discursivas (ver "Fases") | não recebe as comuns: `theme`, `s`, `fase`, `estado`/`setEstado` (`state.segundaFase`), `gravarResposta`, `sessaoExpirou` |
 
@@ -232,9 +232,83 @@ A origem de cada questão ("45º Exame de Ordem · questão 7 · FGV") vem de
 "PROVA-FGV-BR/undefined" com questão sem ano.
 
 Props comuns (`screenProps`): `theme`, `s` (estilos de `buildStyles`), `data`
-(`{ QUESTOES, DISCIPLINAS }`), `go`, `usuarioTentativas`, `disciplinas`,
+(`{ QUESTOES, DISCIPLINAS }`), `go` (`go(tela, { ancora })`: a âncora, só em
+memória, faz a tela de destino rolar até um ponto — hoje só
+`'meu-perfil-de-estudo'` nas Configurações), `usuarioTentativas`, `disciplinas`,
 `revisao`, `resultados_historico`, `config`, `revisarQuestoes`,
 `praticarDisciplina`, `dificuldades` (as matérias marcadas na ficha).
+
+### Cronograma
+
+Uma **sugestão** (próximos 7 dias) e um **registro** (calendário). Tudo
+calculado em `lib/agenda.js`, puro e testado em `tests/agenda.test.js` (em
+UTC e em São Paulo).
+
+- **Dias de estudo da ficha.** `diasDeEstudoDaFicha(ficha)` lê
+  `ficha.diasDaSemana`; sem ficha ou lista vazia → `null`, e todo dia é de
+  estudo (o comportamento de antes). O `App` passa `diasDeEstudo` ao
+  Cronograma e usa o mesmo plano no "Foco de hoje".
+- **Folga.** Dia fora da ficha: sem matéria, meta 0, sem barra e **sem botão**
+  (não há matéria para "Adiantar"; quem quer estudar numa folga adianta o
+  próximo dia de estudo, no botão dele). Resposta dada na folga aparece na
+  linha, como bônus. Folga hoje: o foco do `App` diz que é folga e oferece a
+  matéria do próximo dia de estudo (o Questões e o Kepy usam essa), e o aviso
+  "Faltam N para a meta de hoje" do sino não aparece.
+- **Rotação.** `prioridadeDeEstudo` sem repetir enquanto houver matéria,
+  andando só nos dias de estudo — a folga não "gasta" a matéria seguinte.
+- **Meta do dia.** `config.meta` (que a ficha deriva do tempo por dia) nos
+  dias de estudo; 0 na folga.
+- **"Esta semana, até hoje"** (`ritmoDaSemana`): respondidas nos dias de
+  estudo de domingo (como o calendário) até hoje ÷ soma das metas desses
+  dias. O que foi respondido na folga não entra. Sem dia de estudo ainda na
+  semana (domingo de folga), mostra "—", não 0%. Antes dividia pela meta dos
+  próximos 7 dias e começava em ~14% para quem batia a meta de hoje.
+- **Bloco de estudo** (`blocoDeEstudo`): `profile_data.agenda.horario`
+  ('HH:MM', padrão 19:00) e `ficha.minutosPorDia` (padrão 90). Aparece em
+  cada dia de estudo ("19:00 · 1 h 30") e é editável no campo "Horário do
+  estudo" de "Próximos dias". Grava por `salvarAgenda` no `App`: mesma fila
+  de preferências, PUT só com a chave `agenda` (o objeto `agenda` inteiro,
+  com o que já havia nele, porque a mescla do servidor é só no 1º nível),
+  sessão que acabou não grava, 401 volta ao login, falha volta ao valor
+  anterior e aparece junto do campo.
+- **Calendário.** `diasDoMes(tentativas, { hoje, ano, mes, planejados })`.
+  Setas ‹ › vão até 12 meses para trás e, para a frente, só até o mês do
+  último dia do plano (hoje + 6) — depois dele não há registro nem plano.
+  Os próximos dias de estudo aparecem com borda tracejada ("Planejado").
+- **"Ajustar plano"** leva a Configurações e rola até "Meu perfil de estudo"
+  (dias e tempo por dia), com foco no título.
+
+**Google Agenda.** Rotas do auth-service pelo gateway (`/api/calendar` tem
+linha própria no proxy do Vite):
+
+- O status é consultado **sempre** ao abrir a tela (com "Verificando
+  conexão…" e, se falhar, o erro e "Tentar de novo"). Antes só era consultado
+  com `?calendar=connected` na URL, e em qualquer outra visita a tela
+  oferecia "Conectar" a quem já estava conectado.
+- **OAuth.** "Conectar" pede a URL (`start`) e vai ao Google. O servidor
+  devolve o navegador para `/?calendar=confirmar&codigo=…` (ou
+  `/?calendar=error`). Com a sessão ativa, o `App` abre o Cronograma; a tela
+  lê o retorno uma vez (`retornoDoGoogle`), limpa a URL com
+  `history.replaceState` (recarregar não reprocessa) e chama
+  `confirmarGoogleCalendar(codigo)` — autenticado. A promessa fica guardada
+  por código no módulo: o StrictMode monta o efeito duas vezes, e o segundo
+  POST voltaria "código já usado".
+- **Sincronizar** monta os eventos na hora do clique (`eventosDoPlano`): um
+  por **dia de estudo** dos próximos 7, sem id (o servidor gera um por dia),
+  `start`/`end` em hora local sem "Z" ('YYYY-MM-DDTHH:MM:SS', conta feita
+  como relógio, sem pular hora em horário de verão), `timeZone` do navegador
+  (padrão America/Sao_Paulo) e a marca "mlkoab" na descrição. Vai com
+  `intervalo: { de: hoje, ate: hoje + 6 }`: o servidor apaga os eventos dos
+  dias do intervalo que não vieram (folga, plano que mudou). O resultado
+  aparece como "7 dias sincronizados, 2 removidos.".
+- **Erros** (`mensagemDoCalendario`): 409 no sync = o Google revogou o acesso
+  e o servidor já apagou a conexão — a tela volta a "Conectar" e pede a
+  reconexão; 504 = demorou demais, a frase do servidor aparece e o botão
+  fica para tentar de novo (o sync é idempotente); 503 (ex.: `start` sem os
+  segredos no servidor) mostra a frase do servidor como está; 401 passa por
+  `encerrarSessao`, como o resto.
+- **Desconectar** pede confirmação na própria tela ("Sim, desconectar" /
+  "Cancelar") e mostra o erro se o DELETE falhar.
 
 ### Ficha de boas-vindas
 
@@ -259,7 +333,8 @@ Não há tour nem checklist de primeiros passos.
 **Onde fica.** Em `profile_data`, no servidor: `meta` e `dataProva` são as de
 sempre (sem cópia), e `ficha = { versao: 1, concluidaEm, fase, jaFez,
 diasDaSemana, minutosPorDia, dificuldades }` (mais `atualizadaEm` quando
-editada). `diasDaSemana` usa o `getDay()` (0 = domingo). O PUT leva só
+editada). O horário do bloco de estudo fica à parte, em `agenda = { horario }`
+(ver "Cronograma"). `diasDaSemana` usa o `getDay()` (0 = domingo). O PUT leva só
 `{ meta, dataProva, ficha }` e o nome; o user-service mescla com o resto.
 
 **Obrigatória.** O `App` decide antes de qualquer tela, nas duas fases:
@@ -497,6 +572,11 @@ erro do acervo aparece na própria tela de Questões, com botão de recarregar.
 | `buscarDiscursiva(id)` | `GET /api/discursivas/:id` | enunciado, `fonte` e `itens: [{letra, pergunta, valor, gabarito, distribuicao?}]`; item sem letra é descartado |
 | `salvarRespostaDiscursiva` | `POST /api/discursivas/respostas` | `{questao_id, respostas: {A: '…'}, fundamentos: {citados, esperados}}`; até 6000 caracteres por item, e `fundamentos` só com esses dois inteiros |
 | `listarRespostasDiscursivas(id)` | `GET /api/discursivas/respostas?questao_id=N` | só as da própria conta, mais recente primeiro |
+| `iniciarConexaoGoogleCalendar` | `GET /api/calendar/google/start` | `{ url }` do Google; 503 com a frase do servidor quando faltam os segredos |
+| `confirmarGoogleCalendar(codigo)` | `POST /api/calendar/google/confirm` | `{ codigo }` que veio na URL de retorno; conclui a conexão |
+| `statusGoogleCalendar` | `GET /api/calendar/google/status` | `{ connected, connectedAt }` |
+| `sincronizarGoogleCalendar({ events, intervalo })` | `POST /api/calendar/google/sync` | eventos sem id, um por dia; devolve `{ sincronizados, removidos }`; 409 = reconectar, 504 = tentar de novo |
+| `desconectarGoogleCalendar` | `DELETE /api/calendar/google` | |
 | `listarQuestoes` → `buscarPaginaDeQuestoes` | `GET /api/questoes?limite=200&paginado=1[&offset=N]` | percorre as páginas até somar `total`, com teto de 60 páginas (passando dele, a lista vem cortada e o aviso vai só para o console); com `aleatorio`, uma página só; aceita também o formato antigo (array) |
 
 ### Rotas serverless
@@ -540,7 +620,7 @@ importa: ver "Rodar e testar".
 - **Dev:** `VITE_API_URL` fica vazia e o proxy do `vite.config.js` separa os
   dois backends que dividem o prefixo `/api`:
   - `/api/auth`, `/api/tentativas`, `/api/questoes`, `/api/users`,
-    `/api/discursivas` → gateway
+    `/api/discursivas`, `/api/calendar` → gateway
     em `localhost:3000` (`GATEWAY_PORT`)
   - resto de `/api` → `server/dev-api.js` em `localhost:3100` (`DEV_API_PORT`)
 
@@ -581,6 +661,12 @@ para o usuário semeado (`concluirFichaPelaApi`, PUT só de `{ ficha }`, uma vez
 por execução). Conta criada pela tela passa por ela pela tela, na mesma aba e
 sem recarregar (`passarDaFicha`): testes como a troca de conta e o nome que
 chega com atraso medem justamente o que acontece sem reload.
+
+Os e2e do Cronograma usam o backend de verdade para login e perfil, mas
+trocam `ficha.diasDaSemana` na resposta do GET do perfil (todos os dias
+menos hoje, para a folga cair num dia conhecido em qualquer dia da semana)
+e simulam o Google Agenda no navegador (`simularGoogleAgenda`): a CI não tem
+conta do Google. O status de verdade é consultado no teste "Todas as telas".
 
 O `e2e-backend.sh` semeia também `tests/e2e-discursivas.sql` (exame 99,
 textos reais do 43º e 44º Exame) — mas só se a tabela
@@ -661,9 +747,10 @@ mostrou um dia a menos no Brasil com a CI verde.
     estado local de `Simulados.jsx`; clicar noutro item do menu (ou
     recarregar) descarta as respostas marcadas sem perguntar e sem enviar
     nada ao servidor.
-16. **Parte da ficha ainda não é usada** — `diasDaSemana`, `jaFez` e
-    `minutosPorDia` só aparecem no resumo; a meta diária vale igual para
-    todos os dias (o plano da semana não pula os dias sem estudo).
+16. **Folga só no plano** — `diasDaSemana` faz a folga no Cronograma, no
+    "Foco de hoje" e no aviso da meta do sino, mas `metaDiaria` (barra do
+    Kepy, Dashboard) ainda cobra a meta num dia de folga. `jaFez` só aparece
+    no resumo da ficha.
 17. **O servidor não valida a ficha** — `profile_data` é JSON livre no
     user-service; o formato é garantido só pelo front (`montarFicha`).
 18. **Aba parada na ficha não sabe que outra a concluiu** — o perfil não

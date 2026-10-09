@@ -44,7 +44,7 @@ export default function MeuPerfilDeEstudo({ theme, s, perfil, config, fase, salv
   return (
     <section style={s.card} aria-labelledby="meu-perfil-titulo" data-testid="meu-perfil-de-estudo">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h2 id="meu-perfil-titulo" style={{ ...s.sectionTitle, margin: 0 }}>Meu perfil de estudo</h2>
+        <h2 id="meu-perfil-titulo" tabIndex={-1} style={{ ...s.sectionTitle, margin: 0, outline: 'none' }}>Meu perfil de estudo</h2>
         {!editando && pronto && (
           <button type="button" data-testid="editar-perfil-estudo" onClick={abrir} style={s.btnOutline}>Editar respostas</button>
         )}

@@ -1882,3 +1882,243 @@ test.describe('Card de questão', () => {
     await expect(page.locator('[data-testid="historico-da-questao"]')).toHaveCount(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cronograma: folga pela ficha e Google Agenda
+// ---------------------------------------------------------------------------
+//
+// A ficha do usuário semeado é trocada na RESPOSTA do GET do perfil (o banco
+// fica como está): todos os dias são de estudo menos o de hoje, para a folga
+// cair num dia conhecido em qualquer dia da semana em que a CI rodar. O
+// Google Agenda é simulado no navegador — a CI não tem conta do Google, e o
+// que se mede aqui é o contrato que a tela manda e o que ela faz com a
+// resposta.
+
+const chaveLocal = (page, somarDias = 0) => page.evaluate((n) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}, somarDias);
+
+async function folgaHoje(page) {
+  await page.route('**/api/users/*', async (rota) => {
+    if (rota.request().method() !== 'GET') return rota.fallback();
+    const resposta = await rota.fetch();
+    const json = await resposta.json();
+    const hoje = new Date().getDay();
+    const ficha = { ...(json.profile_data?.ficha || {}) };
+    ficha.diasDaSemana = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== hoje);
+    return rota.fulfill({ response: resposta, json: { ...json, profile_data: { ...json.profile_data, ficha } } });
+  });
+}
+
+// Status do Google Agenda simulado; devolve os pedidos que chegaram.
+async function simularGoogleAgenda(page, { conectado = false, sync, confirmar, desconectar, start } = {}) {
+  const pedidos = { sync: [], confirm: [], status: 0, delete: 0, start: 0 };
+  let estado = conectado;
+  await page.route('**/api/calendar/google/**', async (rota) => {
+    const url = new URL(rota.request().url());
+    const json = (status, corpo) => rota.fulfill({ status, contentType: 'application/json', body: JSON.stringify(corpo) });
+    if (url.pathname.endsWith('/status')) {
+      pedidos.status += 1;
+      return json(200, { connected: estado, connectedAt: estado ? '2026-10-01T12:00:00.000Z' : null });
+    }
+    if (url.pathname.endsWith('/sync')) {
+      pedidos.sync.push(rota.request().postDataJSON());
+      return sync ? sync(json, pedidos.sync.length) : json(200, { sincronizados: 0, removidos: 0 });
+    }
+    if (url.pathname.endsWith('/start')) {
+      pedidos.start += 1;
+      return start ? start(json) : json(503, { error: 'Google Calendar não está configurado no servidor' });
+    }
+    if (url.pathname.endsWith('/confirm')) {
+      pedidos.confirm.push(rota.request().postDataJSON());
+      if (confirmar) return confirmar(json);
+      estado = true;
+      return json(200, { connected: true });
+    }
+    return rota.fallback();
+  });
+  await page.route('**/api/calendar/google', async (rota) => {
+    if (rota.request().method() !== 'DELETE') return rota.fallback();
+    pedidos.delete += 1;
+    if (desconectar) return desconectar((status, corpo) => rota.fulfill({ status, contentType: 'application/json', body: JSON.stringify(corpo) }));
+    estado = false;
+    return rota.fulfill({ status: 204, body: '' });
+  });
+  return pedidos;
+}
+
+test.describe('Cronograma', () => {
+  test('dia fora da ficha aparece como Folga, sem matéria, meta nem botão', async ({ page }) => {
+    await folgaHoje(page);
+    await simularGoogleAgenda(page);
+    await entrar(page);
+    await page.click('[data-testid="nav-cronograma"]');
+
+    const hoje = await chaveLocal(page);
+    const linha = page.locator(`[data-testid="dia-${hoje}"]`);
+    await expect(linha).toHaveAttribute('data-folga', 'sim');
+    await expect(linha).toContainText('Folga');
+    await expect(linha.locator('button')).toHaveCount(0);
+    await expect(linha.locator('[data-testid="bloco-do-dia"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="stat-hoje"]')).toContainText('Folga');
+
+    // Os outros seis são dias de estudo, com o bloco "HH:MM · duração".
+    await expect(page.locator('[data-folga="sim"]')).toHaveCount(1);
+    const amanha = page.locator(`[data-testid="dia-${await chaveLocal(page, 1)}"]`);
+    await expect(amanha).toHaveAttribute('data-folga', 'nao');
+    await expect(amanha.locator('[data-testid="bloco-do-dia"]')).toHaveText(/^\d{2}:\d{2} · \d/);
+    await expect(page.locator('[data-testid="ritmo-semana"]')).toContainText('Esta semana, até hoje');
+  });
+
+  test('Google Agenda: conectado ao abrir, e sincronizar manda o corpo do contrato', async ({ page }) => {
+    await folgaHoje(page);
+    const pedidos = await simularGoogleAgenda(page, {
+      conectado: true,
+      sync: (json) => json(200, { sincronizados: 6, removidos: 1 }),
+    });
+    await entrar(page);
+    await page.click('[data-testid="nav-cronograma"]');
+
+    // Antes, sem `?calendar=connected` na URL, a tela oferecia "Conectar".
+    await expect(page.locator('[data-testid="google-sincronizar"]')).toBeVisible();
+    await expect(page.locator('[data-testid="google-conectar"]')).toHaveCount(0);
+
+    await page.click('[data-testid="google-sincronizar"]');
+    await expect(page.locator('[data-testid="google-aviso"]')).toHaveText('6 dias sincronizados, 1 removido.');
+
+    expect(pedidos.sync).toHaveLength(1);
+    const { events, intervalo } = pedidos.sync[0];
+    const hoje = await chaveLocal(page);
+    expect(intervalo).toEqual({ de: hoje, ate: await chaveLocal(page, 6) });
+    // Um evento por dia de estudo: a folga (hoje) fica de fora.
+    expect(events).toHaveLength(6);
+    expect(events.map((e) => e.dia)).not.toContain(hoje);
+    expect(new Set(events.map((e) => e.dia)).size).toBe(6);
+    for (const e of events) {
+      expect(e).not.toHaveProperty('id');
+      expect(e.start).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00$/);
+      expect(e.end).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00$/);
+      expect(e.start.slice(0, 10)).toBe(e.dia);
+      expect(e.timeZone).toBeTruthy();
+      expect(e.summary).toBeTruthy();
+      expect(e.description).toContain('mlkoab');
+    }
+  });
+
+  test('o retorno do Google com código confirma a conexão uma vez e limpa a URL', async ({ page }) => {
+    const pedidos = await simularGoogleAgenda(page);
+    await entrar(page);
+
+    // O servidor devolve para a raiz: o app vai sozinho para o Cronograma.
+    await page.goto('/?calendar=confirmar&codigo=codigo-de-teste');
+    await expect(page.locator('[data-testid="google-aviso"]')).toContainText('Google Agenda conectado');
+    await expect(page.locator('[data-testid="google-sincronizar"]')).toBeVisible();
+    expect(pedidos.confirm).toEqual([{ codigo: 'codigo-de-teste' }]);
+    await expect.poll(() => page.evaluate(() => window.location.search)).toBe('');
+
+    // Recarregar não confirma de novo.
+    await page.reload();
+    await expect(page.locator('[data-testid="google-sincronizar"]')).toBeVisible();
+    expect(pedidos.confirm).toHaveLength(1);
+  });
+
+  test('retorno de erro do Google e falha ao desconectar viram aviso legível', async ({ page }) => {
+    const pedidos = await simularGoogleAgenda(page, {
+      conectado: true,
+      desconectar: (json) => json(500, { error: 'falha no servidor' }),
+    });
+    await entrar(page);
+    await page.goto('/?calendar=error');
+    await expect(page.locator('[data-testid="google-erro"]')).toContainText('não foi conectado');
+    await expect.poll(() => page.evaluate(() => window.location.search)).toBe('');
+
+    // Desconectar pede confirmação antes.
+    await page.click('[data-testid="google-desconectar"]');
+    expect(pedidos.delete).toBe(0);
+    await page.click('[data-testid="google-confirmar-desconexao"]');
+    await expect(page.locator('[data-testid="google-erro"]')).toContainText('Não foi possível desconectar o Google Agenda: falha no servidor');
+    await expect(page.locator('[data-testid="google-sincronizar"]')).toBeVisible();
+    expect(pedidos.delete).toBe(1);
+  });
+
+  test('sync 409 (acesso revogado) volta a "desconectado"; 504 deixa tentar de novo', async ({ page }) => {
+    // 1º sync: 504; 2º: certo; 3º: 409, com a conexão já apagada no servidor.
+    const pedidos = await simularGoogleAgenda(page, {
+      conectado: true,
+      sync: (json, n) => (n === 1
+        ? json(504, { error: 'A sincronização demorou demais; tente de novo' })
+        : n === 2 ? json(200, { sincronizados: 7, removidos: 0 })
+          : json(409, { error: 'Reconecte o Google Agenda' })),
+    });
+    await entrar(page);
+    await page.click('[data-testid="nav-cronograma"]');
+
+    await page.click('[data-testid="google-sincronizar"]');
+    await expect(page.locator('[data-testid="google-erro"]')).toHaveText('A sincronização demorou demais; tente de novo');
+    await expect(page.locator('[data-testid="google-sincronizar"]')).toBeEnabled();
+
+    await page.click('[data-testid="google-sincronizar"]');
+    await expect(page.locator('[data-testid="google-aviso"]')).toHaveText('7 dias sincronizados.');
+    await expect(page.locator('[data-testid="google-erro"]')).toHaveCount(0);
+    // A repetição manda o mesmo corpo: o servidor trata como idempotente.
+    expect(pedidos.sync[1]).toEqual(pedidos.sync[0]);
+
+    await page.click('[data-testid="google-sincronizar"]');
+    await expect(page.locator('[data-testid="google-erro"]')).toContainText('Reconecte o Google Agenda');
+    await expect(page.locator('[data-testid="google-conectar"]')).toBeVisible();
+    await expect(page.locator('[data-testid="google-sincronizar"]')).toHaveCount(0);
+  });
+
+  test('conectar com o servidor sem configuração mostra a frase dele, e a tela segue de pé', async ({ page }) => {
+    const pedidos = await simularGoogleAgenda(page);
+    await entrar(page);
+    await page.click('[data-testid="nav-cronograma"]');
+
+    await page.click('[data-testid="google-conectar"]');
+    await expect(page.locator('[data-testid="google-erro"]')).toHaveText('Google Calendar não está configurado no servidor');
+    expect(pedidos.start).toBe(1);
+    await expect(page.locator('[data-testid="google-conectar"]')).toBeVisible();
+    await expect(page.locator('[data-folga]').first()).toBeVisible();
+    await expect(page).toHaveURL(/localhost:5173\/$/);
+  });
+
+  test('o horário do bloco vai para profile_data.agenda, sozinho, e aparece nos dias', async ({ page }) => {
+    await simularGoogleAgenda(page);
+    const puts = [];
+    page.on('request', (r) => {
+      if (r.method() === 'PUT' && /\/api\/users\/\w+$/.test(new URL(r.url()).pathname)) puts.push(r.postDataJSON());
+    });
+    await entrar(page);
+    await page.click('[data-testid="nav-cronograma"]');
+
+    // Um horário diferente do atual, seja ele qual for.
+    const campo = page.locator('[data-testid="horario-do-bloco"]');
+    const novo = (await campo.inputValue()) === '07:30' ? '06:45' : '07:30';
+    await campo.fill(novo);
+    await page.click('[data-testid="salvar-horario"]');
+    await expect(page.locator('[data-testid="bloco-do-dia"]').first()).toContainText(`${novo} ·`);
+
+    await expect.poll(() => puts.length).toBe(1);
+    expect(puts[0].profile_data).toEqual({ agenda: expect.objectContaining({ horario: novo }) });
+    expect(Object.keys(puts[0].profile_data)).toEqual(['agenda']);
+  });
+
+  test('"Ajustar plano" leva a Meu perfil de estudo e o calendário volta um mês', async ({ page }) => {
+    await simularGoogleAgenda(page);
+    await entrar(page);
+    await page.click('[data-testid="nav-cronograma"]');
+
+    const rotulo = page.locator('[data-testid="mes-do-calendario"]');
+    const atual = await rotulo.innerText();
+    await page.click('[data-testid="mes-anterior"]');
+    await expect(rotulo).not.toHaveText(atual);
+    await page.click('[data-testid="mes-seguinte"]');
+    await expect(rotulo).toHaveText(atual);
+
+    await page.click('[data-testid="ajustar-plano"]');
+    await expect(page.locator('[data-testid="meu-perfil-de-estudo"]')).toBeInViewport();
+  });
+});

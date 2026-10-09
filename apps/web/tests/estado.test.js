@@ -258,7 +258,7 @@ const t = (correta, data = '2026-08-10T10:00:00Z', tempo = null) => ({ correta, 
   // este alinhamento quebrar, o calendário mostra cada data embaixo do dia da
   // semana errado — pior que não ter calendário.
   const hoje = new Date('2026-08-12T09:00:00');
-  const cal = diasDoMes({ '1': tent(t(true, '2026-08-10T08:00:00')) }, hoje);
+  const cal = diasDoMes({ '1': tent(t(true, '2026-08-10T08:00:00')) }, { hoje });
 
   const vazias = cal.celulas.filter((c) => c.vazia).length;
   const dias = cal.celulas.filter((c) => !c.vazia);

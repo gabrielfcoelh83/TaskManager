@@ -10,7 +10,8 @@ import { fileURLToPath, URL } from 'node:url';
 //       → rotas serverless do próprio app (na Vercel em produção; aqui pelo
 //         `node server/dev-api.js`, que precisa subir com PORT=3100)
 //
-//   /api/auth/*, /api/tentativas, /api/questoes, /api/users, /api/discursivas
+//   /api/auth/*, /api/tentativas, /api/questoes, /api/users, /api/discursivas,
+//   /api/calendar
 //       → gateway da plataforma de microserviços, na porta 3000
 //
 // Em produção não há ambiguidade: as primeiras são relativas à Vercel e as
@@ -43,6 +44,10 @@ export default defineConfig({
       '/api/users': GATEWAY,
       // Questões discursivas da 2ª fase e as respostas a elas.
       '/api/discursivas': GATEWAY,
+      // Google Agenda (status, conectar, confirmar, sincronizar). Sem esta
+      // linha o Cronograma — que consulta o status ao abrir — cairia no
+      // DEV_API, que nem sobe antes do e2e na CI: 500 no console.
+      '/api/calendar': GATEWAY,
       '/api': DEV_API,
     },
   },

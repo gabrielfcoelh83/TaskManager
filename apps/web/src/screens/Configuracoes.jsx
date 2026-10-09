@@ -16,7 +16,7 @@ import MeuPerfilDeEstudo from '../components/ui/MeuPerfilDeEstudo';
 
 export default function Configuracoes({
   theme, s, config, atualizarConfig, perfil, nome, atualizarNome, themeKey, setTheme,
-  salvarFicha, fase, opcoesDeDificuldade, acervoCarregando,
+  salvarFicha, fase, opcoesDeDificuldade, acervoCarregando, ancora, ancoraUsada,
 }) {
   const [nomeLocal, setNomeLocal] = useState(nome || '');
   const [salvando, setSalvando] = useState(false);
@@ -25,6 +25,20 @@ export default function Configuracoes({
   // O perfil chega depois do primeiro render: sem isto o campo ficaria vazio
   // até a pessoa digitar algo.
   useEffect(() => { setNomeLocal(nome || ''); }, [nome]);
+
+  // Quem chega pelo "Ajustar plano" do Cronograma quer os dias e o tempo de
+  // estudo, que ficam em "Meu perfil de estudo", no meio da tela: rola até
+  // lá e leva o foco ao título (leitor de tela anuncia onde a pessoa caiu).
+  useEffect(() => {
+    if (ancora !== 'meu-perfil-de-estudo') return;
+    const alvo = document.querySelector('[data-testid="meu-perfil-de-estudo"]');
+    // Perfil ainda carregando: a seção não existe. Guarda a âncora e tenta de
+    // novo quando o perfil chegar.
+    if (!alvo) return;
+    alvo.scrollIntoView({ block: 'start' });
+    document.getElementById('meu-perfil-titulo')?.focus({ preventScroll: true });
+    ancoraUsada?.();
+  }, [ancora, ancoraUsada, perfil]);
 
   const label = { fontSize: 12, color: '#7a766f', marginBottom: 5 };
   const input = { width: '100%', fontSize: 13.5, border: '1px solid rgba(0,0,0,.1)', borderRadius: 9, padding: '9px 12px', color: '#1c1b19', fontFamily: 'inherit' };

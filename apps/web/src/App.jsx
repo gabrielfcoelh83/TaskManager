@@ -8,7 +8,7 @@ import {
 } from './lib/storage';
 import { diasAteProva, metaDiaria, sequenciaAtual } from './lib/metrics';
 import { montarDisciplinas } from './lib/disciplinas';
-import { planoDaSemana } from './lib/agenda';
+import { planoDaSemana, diasDeEstudoDaFicha, blocoDeEstudo, retornoDoGoogle } from './lib/agenda';
 import { tamanhoDoQuiz, sortearQuiz } from './lib/quiz';
 import { classificarRevisao } from './lib/revisao';
 import { mesclarTentativas } from './lib/historico';
@@ -149,6 +149,10 @@ export default function App() {
   // tela de Simulados, e sair dela já o descarta; trocar a tela no meio dele
   // pela ficha perderia a prova sem a pessoa ter pedido nada.
   const [fichaAdiada, setFichaAdiada] = useState(false);
+  // Um ponto da tela de destino para rolar até ele depois da troca de tela
+  // (o "Ajustar plano" do Cronograma leva a "Meu perfil de estudo", que fica
+  // no meio das Configurações). Só em memória: vale para uma navegação.
+  const [ancora, setAncora] = useState(null);
   const perfilEstado = useRef('carregando');
 
   // O acervo é do servidor, não do bundle. Guardar o estado do carregamento
@@ -220,6 +224,15 @@ export default function App() {
     window.addEventListener('beforeunload', avisar);
     return () => window.removeEventListener('beforeunload', avisar);
   }, []);
+
+  // O Google devolve o navegador para a raiz (`/?calendar=confirmar&codigo=…`
+  // ou `/?calendar=error`), e o app abre na tela que estava salva — que pode
+  // não ser o Cronograma, onde o retorno é tratado (e a URL limpa). Com a
+  // sessão ativa, a tela vai para lá; sem sessão, a URL espera o login.
+  useEffect(() => {
+    if (sessao !== 'ativa' || !retornoDoGoogle(window.location.search)) return;
+    setState((st) => ({ ...st, fase: FASE_PADRAO, screen: 'cronograma' }));
+  }, [sessao]);
 
   // Quem esta aba mostra e se ela está logada, para o ouvinte de `storage`
   // abaixo, que é registrado uma vez só e não enxerga o render atual.
@@ -416,8 +429,9 @@ export default function App() {
     [acervo.questoes, disciplinas]
   );
 
-  const goTo = (screen) => {
+  const goTo = (screen, opcoes = {}) => {
     setFichaAdiada(false);
+    setAncora(opcoes.ancora || null);
     setState((st) => ({ ...st, screen }));
   };
   const updateSlice = (key, partial) =>
@@ -470,6 +484,39 @@ export default function App() {
         if (err.status === 401) { encerrarSessao(); return; }
         setErroSync(`Preferência não salva no servidor: ${err.message}`);
       });
+  };
+
+  // O horário do bloco de estudo (`profile_data.agenda`), editado no
+  // Cronograma. Mesma fila e mesmas regras da meta: só a chave `agenda` vai
+  // no PUT (o user-service mescla o primeiro nível), a sessão que acabou não
+  // grava, e 401 volta ao login. A tela muda na hora; se o PUT falhar, volta
+  // ao valor anterior — se ninguém o trocou de novo nesse meio-tempo — e o
+  // erro sobe para o Cronograma mostrar junto do campo. Devolve `false` se a
+  // sessão acabou.
+  const salvarAgenda = async (parcial) => {
+    if (perfil.id == null) throw new Error('seu perfil ainda não carregou');
+    const epoch = sessaoEpoch.current;
+    const anterior = perfil.preferencias?.agenda;
+    // A mescla do servidor é só no primeiro nível: `agenda` vai inteira, com
+    // o que já existia nela, para um campo futuro não ser apagado pelo horário.
+    const agenda = { ...(anterior && typeof anterior === 'object' ? anterior : {}), ...parcial };
+    setPerfil((atual) => ({ ...atual, preferencias: { ...(atual.preferencias || {}), agenda } }));
+    try {
+      const resposta = await filaDePreferencias.current.gravar(
+        { agenda },
+        { continuar: () => sessaoEpoch.current === epoch, extra: { id: perfil.id } },
+      );
+      if (!resposta || sessaoEpoch.current !== epoch) return false;
+      setPerfil((atual) => ({ ...atual, preferencias: resposta.preferencias }));
+      return true;
+    } catch (err) {
+      if (sessaoEpoch.current !== epoch) return false;
+      if (err.status === 401) { encerrarSessao(); return false; }
+      setPerfil((atual) => (atual.preferencias?.agenda === agenda
+        ? { ...atual, preferencias: { ...atual.preferencias, agenda: anterior } }
+        : atual));
+      throw err;
+    }
   };
 
   // A ficha de boas-vindas (e a edição dela em Configurações). Vai pela mesma
@@ -769,6 +816,10 @@ export default function App() {
   }
 
   const dificuldades = perfil.preferencias?.ficha?.dificuldades || [];
+  // A rotina da ficha: dias de estudo (o resto é folga) e o bloco de estudo
+  // (horário de `agenda` + tempo por dia) que o Cronograma manda ao Google.
+  const diasDeEstudo = diasDeEstudoDaFicha(perfil.preferencias?.ficha);
+  const bloco = blocoDeEstudo(perfil.preferencias);
 
   const nome = nomeDeExibicao(perfil, perfil.email);
   const fase = faseValida(state.fase);
@@ -895,10 +946,35 @@ export default function App() {
     ? { title: saudacao(nome), sub: PAGE_META.dashboard.sub }
     : PAGE_META[state.screen];
 
+  // A matéria de hoje sai do MESMO plano que o Cronograma desenha. Calcular
+  // aqui por outro caminho — "a primeira da lista de prioridade", que era o
+  // que este bloco fazia — dá certo hoje e diverge no dia em que o plano
+  // mudar de regra, com a sidebar mandando estudar uma matéria e o cronograma
+  // outra.
+  // Sem useMemo de propósito: este trecho roda depois do early return do
+  // Login, e hook após return condicional quebra a ordem entre renders — o
+  // ESLint barrou a primeira versão. `planoDaSemana` percorre sete dias sobre
+  // listas já derivadas, então o custo não justifica mover tudo para cima.
+  const planoDaTela = planoDaSemana({
+    disciplinas,
+    tentativas: usuarioTentativas,
+    meta: state.configuracoes.meta,
+    dificuldades,
+    diasDeEstudo,
+  });
+  const diaDeHoje = planoDaTela.find((d) => d.hoje) || null;
+  const folgaHoje = Boolean(diaDeHoje?.folga);
+  // Na folga, a matéria "de hoje" é a do próximo dia de estudo: é o que o
+  // Questões pré-seleciona e o Kepy oferece a quem quiser adiantar. O foco
+  // diz que é folga (abaixo), e o aviso da meta do dia não aparece.
+  const materiaDeHoje = folgaHoje
+    ? planoDaTela.find((d) => !d.folga && d.disciplina) || null
+    : diaDeHoje;
+
   // O sino mostrava um "3" fixo e abria coisa nenhuma. Estes avisos saem do
   // estado real e cada um leva para a tela onde dá para resolver o assunto.
   const notificacoes = [];
-  if (!meta.batida) {
+  if (!meta.batida && !folgaHoje) {
     notificacoes.push({
       icone: 'flag', cor: '#B07A1F',
       titulo: `Faltam ${meta.faltam} ${meta.faltam === 1 ? 'questão' : 'questões'} para a meta de hoje`,
@@ -945,27 +1021,15 @@ export default function App() {
     });
   }
 
-  // A matéria de hoje sai do MESMO plano que o Cronograma desenha. Calcular
-  // aqui por outro caminho — "a primeira da lista de prioridade", que era o
-  // que este bloco fazia — dá certo hoje e diverge no dia em que o plano
-  // mudar de regra, com a sidebar mandando estudar uma matéria e o cronograma
-  // outra.
-  // Sem useMemo de propósito: este trecho roda depois do early return do
-  // Login, e hook após return condicional quebra a ordem entre renders — o
-  // ESLint barrou a primeira versão. `planoDaSemana` percorre sete dias sobre
-  // listas já derivadas, então o custo não justifica mover tudo para cima.
-  const materiaDeHoje = planoDaSemana({
-    disciplinas,
-    tentativas: usuarioTentativas,
-    meta: state.configuracoes.meta,
-    dificuldades,
-  }).find((d) => d.hoje) || null;
-
   // O foco dizia "faltam 12 questões" sem dizer de quê, e não levava a lugar
   // nenhum: para começar era preciso adivinhar a matéria, abrir Questões e
   // filtrar na mão. Agora ele nomeia a matéria em todos os estados e o cartão
   // inteiro abre o quiz já filtrado nela.
-  const foco = meta.batida
+  const foco = folgaHoje && !meta.batida
+    ? materiaDeHoje?.disciplina
+      ? `Hoje é folga no seu plano. Se quiser adiantar, a próxima matéria é ${materiaDeHoje.disciplina}.`
+      : 'Hoje é folga no seu plano de estudo. Descansar também faz parte.'
+    : meta.batida
     ? `Meta batida: ${meta.respondidas} ${meta.respondidas === 1 ? 'questão' : 'questões'} hoje. O que vier agora é lucro.`
     : materiaDeHoje?.disciplina
       ? meta.respondidas === 0
@@ -1164,7 +1228,16 @@ export default function App() {
           {state.screen === 'dashboard' && (
             <Dashboard {...screenProps} dash={state.dashboard} setDash={(p) => updateSlice('dashboard', p)} acervo={acervo} />
           )}
-          {state.screen === 'cronograma' && <Cronograma {...screenProps} />}
+          {state.screen === 'cronograma' && (
+            <Cronograma
+              {...screenProps}
+              diasDeEstudo={diasDeEstudo}
+              bloco={bloco}
+              salvarAgenda={salvarAgenda}
+              perfilCarregado={perfil.id != null}
+              sessaoExpirou={encerrarSessao}
+            />
+          )}
           {state.screen === 'questoes' && (
             <Questoes
               {...screenProps}
@@ -1223,6 +1296,8 @@ export default function App() {
               nome={nome}
               atualizarNome={atualizarNome}
               salvarFicha={salvarFicha}
+              ancora={ancora}
+              ancoraUsada={() => setAncora(null)}
               fase={state.fase}
               opcoesDeDificuldade={(marcadas) => opcoesDeDificuldade(acervo.questoes, marcadas)}
               acervoCarregando={acervo.estado === 'carregando'}
