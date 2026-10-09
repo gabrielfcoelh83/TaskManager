@@ -1007,7 +1007,7 @@ export default function App() {
         {/* Recolhida, a barra fica só com a marca: trocar de fase pede o
             seletor inteiro, então é preciso abrir o menu para isso. */}
         {recolhida ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0 12px' }} title="ma. questões">
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0 12px' }} title="mlkoab">
             <div style={{ ...s.logoMark, width: 30, height: 30 }} aria-hidden="true">
               <Icon name="scale" color="#ffffff" size={16} />
             </div>

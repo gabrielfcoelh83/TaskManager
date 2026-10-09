@@ -20,7 +20,7 @@ export default function SeletorDeFase({ theme, s, fase, onTrocar, compacto = fal
         <div style={{ ...s.logoMark, width: 26, height: 26, borderRadius: 8 }} aria-hidden="true">
           <Icon name="scale" color="#ffffff" size={15} />
         </div>
-        <div style={{ ...s.logoText, fontSize: 17 }}>ma.</div>
+        <div style={{ ...s.logoText, fontSize: 17 }}>mlkoab</div>
         <HaloBadge aria-hidden="true" variant="secondary" interactive={false} layout={false} style={{ marginLeft: 'auto' }}>
           {fase.grupo}
         </HaloBadge>

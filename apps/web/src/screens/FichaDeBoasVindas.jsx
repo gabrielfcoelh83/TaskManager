@@ -69,7 +69,7 @@ export default function FichaDeBoasVindas({
       <main data-testid="ficha" style={{ width: '100%', maxWidth: 680, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ ...s.logoMark, width: 30, height: 30 }} aria-hidden="true"><Icon name="scale" color="#fff" size={16} /></div>
-          <div style={{ ...s.logoText, fontSize: 18 }}>ma.</div>
+          <div style={{ ...s.logoText, fontSize: 18 }}>mlkoab</div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
             {email && <span style={{ fontSize: 12, color: '#7a766f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>}
             <button type="button" data-testid="sair" onClick={onSair} style={{ background: 'none', border: 'none', color: theme.primary, fontWeight: 600, fontSize: 12.5, padding: 4 }}>

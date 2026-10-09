@@ -132,27 +132,28 @@ export default function Login({ theme, s, onEntrar }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Icon name="scale" color="#f4efe8" size={20} />
-          <span style={{ ...s.logoText, color: '#f4efe8' }}>ma.</span>
-          <span style={{ ...s.logoSub, color: 'rgba(244,239,232,.6)' }}>questões</span>
+          <span style={{ ...s.logoText, color: '#f4efe8' }}>mlkoab</span>
         </div>
         <div style={{ maxWidth: 460 }}>
+          <span style={{ display: 'inline-block', marginBottom: 16, padding: '4px 10px', borderRadius: 999, border: '1px solid rgba(244,239,232,.35)', fontSize: 11.5, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase', color: 'rgba(244,239,232,.85)' }}>
+            Versão beta
+          </span>
           <div style={{ fontFamily: s.pageTitle.fontFamily, fontSize: 40, lineHeight: 1.12, letterSpacing: '-0.02em', fontWeight: 400 }}>
-            As questões que a FGV cobra, com o gabarito que a FGV publicou.
+            Plataforma de estudos para a OAB
           </div>
           <div style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 0, borderTop: '1px solid rgba(244,239,232,.18)' }}>
             {[
-              ['Acervo', 'Questões dos Exames de Ordem, prova a prova'],
-              ['Revisão', 'O que você errou volta até você acertar'],
-              ['Simulados', 'Tempo e formato da prova real'],
+              ['Acervo', 'Questões oficiais e simulados dos Exames de Ordem, da 1ª e da 2ª fase'],
+              ['Organização', 'Pensada, desenvolvida e metrificada para organizar seus estudos: plano, metas e desempenho'],
             ].map(([t, d]) => (
               <div key={t} style={{ display: 'flex', gap: 16, padding: '12px 0', borderBottom: '1px solid rgba(244,239,232,.18)', fontSize: 13.5 }}>
-                <span style={{ width: 84, flex: 'none', color: 'rgba(244,239,232,.6)' }}>{t}</span>
+                <span style={{ width: 96, flex: 'none', color: 'rgba(244,239,232,.6)' }}>{t}</span>
                 <span>{d}</span>
               </div>
             ))}
           </div>
         </div>
-        <div style={{ fontSize: 12, color: 'rgba(244,239,232,.55)' }}>Exame de Ordem Unificado · 1ª e 2ª fase</div>
+        <div style={{ fontSize: 12, color: 'rgba(244,239,232,.55)' }}>Versão beta</div>
       </aside>
 
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -162,21 +163,21 @@ export default function Login({ theme, s, onEntrar }) {
             <Icon name="scale" color="#ffffff" size={17} />
           </div>
           <div>
-            <div style={s.logoText}>ma.</div>
-            <div style={s.logoSub}>questões</div>
+            <div style={s.logoText}>mlkoab</div>
+            <div style={s.logoSub}>versão beta</div>
           </div>
         </div>
 
         <div style={{ ...s.pageTitle, fontSize: 26, marginBottom: 6 }}>
           {criando ? 'Criar conta' : esquecendo ? 'Recuperar senha' : redefinindo ? 'Criar nova senha' : 'Entrar'}
         </div>
-        <div style={{ ...s.pageSub, marginBottom: 18 }}>
-          {esquecendo
-            ? 'Informe seu e-mail e enviaremos um link seguro.'
-            : redefinindo
-              ? 'Escolha uma nova senha para sua conta.'
-              : 'Suas respostas ficam guardadas na sua conta.'}
-        </div>
+        {(esquecendo || redefinindo) ? (
+          <div style={{ ...s.pageSub, marginBottom: 18 }}>
+            {esquecendo ? 'Informe seu e-mail e enviaremos um link seguro.' : 'Escolha uma nova senha para sua conta.'}
+          </div>
+        ) : (
+          <div style={{ marginBottom: 18 }} />
+        )}
 
         {criando && (
           <>

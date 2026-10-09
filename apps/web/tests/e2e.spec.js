@@ -155,7 +155,7 @@ test.describe('MA Questões E2E', () => {
   test('Fluxo completo: selecionar → responder → desempenho', async ({ page }) => {
     // 1. Ir para Questões
     await page.click('[data-testid="nav-questoes"]');
-    await expect(page).toHaveTitle(/quest/i);
+    await expect(page).toHaveTitle(/mlkoab/i);
 
     // 2. O botão só aparece com o acervo do servidor carregado: esperar por
     //    ele é esperar o GET /api/questoes. O quiz tem o tamanho da meta do
