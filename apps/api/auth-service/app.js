@@ -170,7 +170,9 @@ app.post('/forgot-password', async (req, res) => {
 
   try {
     const result = await pool.query(
-      'SELECT id, email FROM users WHERE lower(email) = $1 AND password_hash IS NOT NULL LIMIT 1',
+      // Inclui conta só com Google: o link vai para a caixa postal, e usá-lo
+      // é o jeito de essa pessoa criar uma senha.
+      "SELECT id, email FROM users WHERE lower(email) = $1 AND status <> 'blocked' ORDER BY id LIMIT 1",
       [emailNormalizado]
     );
     const user = result.rows[0];
@@ -211,6 +213,7 @@ app.post('/reset-password', async (req, res) => {
         WHERE t.token_hash = $1
           AND t.used_at IS NULL
           AND t.expires_at > NOW()
+          AND u.status <> 'blocked'
         FOR UPDATE OF t`,
       [hash]
     );
@@ -420,6 +423,11 @@ function definirVerificadorGoogle(fn) {
   verificarTokenGoogle = fn;
 }
 
+// Ver o caso 2 do POST /google. Testes podem antecipar com a variável.
+const assumirNaoConfirmadaDesde = () => Date.parse(
+  process.env.GOOGLE_ASSUME_NAO_CONFIRMADA_DESDE || '2026-10-14T00:00:00Z'
+);
+
 const emitirToken = (user) => jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
 app.post('/google', async (req, res) => {
@@ -469,24 +477,72 @@ app.post('/google', async (req, res) => {
       return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
     }
 
-    // 2. Já existe conta com esse e-mail. NÃO liga automaticamente.
-    //    O cadastro por senha não confirma o e-mail: quem o criou pode não
-    //    ser o dono. Ligar deixaria o atacante que cadastrou o e-mail da
-    //    vítima dentro da conta que ela passaria a usar — e apagar a senha
-    //    não basta, porque o token que ele já tem vale 7 dias e os serviços
-    //    o conferem sozinhos. Ligar o Google a uma conta com senha fica para
-    //    um fluxo com a pessoa já logada pela senha.
+    // 2. Já existe conta com esse e-mail, ainda sem Google: liga e entra.
+    //    O Google acabou de provar que esta pessoa controla a caixa postal
+    //    (`email_verified`). Dois casos:
+    //    - a conta já confirmou o e-mail: o dono dela provou a MESMA caixa
+    //      postal. Liga o Google e mantém a senha;
+    //    - a conta nunca confirmou: quem a criou pode não ser o dono do
+    //      e-mail (pré-sequestro). O login por senha recusa conta não
+    //      confirmada, então essa pessoa nunca recebeu token. O dono real
+    //      assume a conta pelo Google: a senha desconhecida é apagada, os
+    //      links pendentes de confirmação/redefinição são invalidados e o
+    //      e-mail fica confirmado. Quem quiser senha depois usa "Esqueci
+    //      minha senha" (que vai para a caixa postal confirmada).
     const existente = await pool.query(
-      'SELECT google_sub FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1',
+      `SELECT id, email, status, email_verified_at, google_sub
+         FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1`,
       [email]
     );
-    if (existente.rows[0]) {
-      return res.status(409).json({
-        error: existente.rows[0].google_sub
-          ? 'Este e-mail já está ligado a outra conta do Google'
-          : 'Este e-mail já tem conta com senha. Entre com e-mail e senha.',
-      });
+    const conta = existente.rows[0];
+    if (conta) {
+      if (conta.google_sub) {
+        return res.status(409).json({ error: 'Este e-mail já está ligado a outra conta do Google' });
+      }
+      if (conta.status === 'blocked') return acessoNegado(res);
 
+      const confirmada = Boolean(conta.email_verified_at);
+      // Conta não confirmada só é assumida depois que nenhum token antigo
+      // pode estar valendo: antes da migration 004 o /register emitia JWT de
+      // 7 dias sem confirmar o e-mail, e os serviços conferem o JWT só pela
+      // assinatura — apagar a senha não o revogaria. A 004 foi publicada até
+      // 2026-10-06; 7 dias depois, com folga, esses tokens já expiraram.
+      if (!confirmada && Date.now() < assumirNaoConfirmadaDesde()) {
+        return res.status(409).json({ error: 'Este e-mail já tem conta com senha. Entre com e-mail e senha.' });
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const ligada = await client.query(
+          `UPDATE users
+              SET google_sub = $1,
+                  status = 'active',
+                  email_verified_at = COALESCE(email_verified_at, NOW()),
+                  password_hash = CASE WHEN $3 THEN password_hash ELSE NULL END
+            WHERE id = $2 AND google_sub IS NULL AND status <> 'blocked'
+            RETURNING id, email`,
+          [dados.sub, conta.id, confirmada]
+        );
+        // Outra chamada ligou um Google a esta conta (ou ela foi bloqueada)
+        // entre o SELECT e o UPDATE.
+        if (ligada.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'Este e-mail já está ligado a outra conta do Google' });
+        }
+        if (!confirmada) {
+          await client.query('DELETE FROM email_verification_tokens WHERE user_id = $1', [conta.id]);
+          await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL', [conta.id]);
+        }
+        await client.query('COMMIT');
+        const user = ligada.rows[0];
+        return res.json({ message: 'Login realizado com sucesso', user, token: emitirToken(user), novo: false, ligada: true });
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
     }
 
     // 3. Primeira vez: cria o usuário sem senha e avisa o user-service, como
