@@ -331,6 +331,14 @@ export default function Login({ theme, s, onEntrar }) {
             Esqueci minha senha
           </button>
         )}
+        {/* Links públicos: o Google exige que a página inicial do app leve à
+            política de privacidade, e quem chega aqui pela primeira vez quer
+            saber o que é o app antes de criar conta. */}
+        <nav aria-label="Sobre o mlkoab" style={{ display: 'flex', justifyContent: 'center', gap: 14, marginTop: 22, fontSize: 11.5 }}>
+          <a href="/sobre.html" style={{ color: '#6b6472' }}>Sobre</a>
+          <a href="/privacidade.html" style={{ color: '#6b6472' }}>Privacidade</a>
+          <a href="/termos.html" style={{ color: '#6b6472' }}>Termos</a>
+        </nav>
       </form>
       </div>
     </div>

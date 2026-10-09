@@ -24,7 +24,7 @@
 <main>
   <p><a href="/">← mlkoab</a></p>
   <h1>Política de Privacidade</h1>
-  <p class="data">Atualizada em 25 de setembro de 2026</p>
+  <p class="data">Atualizada em 9 de outubro de 2026</p>
 
   <p>O <strong>mlkoab</strong> é um app de estudo com questões de Direito. Esta
   página explica quais dados pessoais o app guarda, para quê, e o que você pode
@@ -51,6 +51,40 @@
       cadastro. Servem para diagnosticar falhas e abusos.</li>
   </ul>
 
+  <h2>Google Agenda (opcional)</h2>
+  <p>Se você escolher <strong>Conectar Google Agenda</strong> no Cronograma, o app pede
+  ao Google a permissão <code>calendar.events</code> e a usa só para isto: criar,
+  atualizar e apagar na sua agenda principal os <strong>blocos de estudo do seu
+  plano</strong> — no máximo um evento por dia de estudo, com título como
+  "Estudo OAB — Direito Civil", descrição com a meta do dia e o motivo da matéria
+  sugerida, e o horário e a duração que você escolheu.</p>
+  <ul>
+    <li><strong>O que o app não faz:</strong> não lê, não lista, não copia e não altera
+      nenhum outro evento da sua agenda. Só mexe nos eventos que ele mesmo criou.</li>
+    <li><strong>O que guardamos:</strong> o token de autorização que o Google entrega
+      (para sincronizar sem pedir permissão de novo), criptografado (AES-256-GCM) no
+      nosso banco de dados, ligado à sua conta. Não guardamos conteúdo da sua
+      agenda.</li>
+    <li><strong>Com quem compartilhamos:</strong> com ninguém. Os dados recebidos do
+      Google não são vendidos, não são usados para publicidade, não são usados para
+      treinar modelos de inteligência artificial e não são lidos por pessoas, salvo
+      com seu consentimento, para investigar um problema de segurança, ou quando a
+      lei exigir.</li>
+    <li><strong>Como desligar:</strong> no Cronograma, <strong>Desconectar</strong> apaga o
+      token do nosso banco e pede ao Google a revogação da permissão. Você também pode revogá-la
+      a qualquer momento em
+      <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
+      Os blocos já criados ficam na sua agenda até você apagá-los.</li>
+  </ul>
+  <p>O uso e a transferência, pelo mlkoab, de informações recebidas das APIs do Google
+  seguem a <a href="https://developers.google.com/terms/api-services-user-data-policy">Política
+  de Dados do Usuário dos Serviços de API do Google</a>, incluindo os requisitos de
+  Uso Limitado.</p>
+  <p lang="en"><em>mlkoab's use and transfer to any other app of information received from
+  Google APIs will adhere to the
+  <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API
+  Services User Data Policy</a>, including the Limited Use requirements.</em></p>
+
   <h2>Para que usamos</h2>
   <p>Só para o app funcionar: identificar você no login, mostrar seu histórico, suas
   estatísticas, sua meta e as questões para revisar. Não vendemos, não alugamos e não
@@ -66,7 +100,8 @@
     <li><strong>Google:</strong> as fontes do site vêm do Google Fonts, e a tela de login
       carrega o botão do Google. Nos dois casos o Google recebe dados técnicos da
       visita, como o IP. Se você escolher entrar com o Google, ele também confirma
-      sua identidade para nós.</li>
+      sua identidade para nós; se conectar o Google Agenda, os blocos de estudo
+      vão para a sua agenda (veja "Google Agenda" acima).</li>
     <li><strong>Inteligência artificial e jurisprudência:</strong> as questões do site
       são as reais do Exame de Ordem; a IA não cria questões. Quando você usar um
       recurso de IA (como pedir uma explicação), o texto enviado — a questão e o que
@@ -87,7 +122,10 @@
   <h2>Seus direitos</h2>
   <p>Você pode pedir a qualquer momento acesso aos seus dados, correção ou a exclusão
   da sua conta e de tudo o que está ligado a ela. Basta escrever para o contato abaixo;
-  respondemos em até 15 dias. Os dados que ficam só no seu navegador você apaga
+  respondemos em até 15 dias. Ao excluir a conta, o token do Google Agenda também é
+  apagado; para garantir, revogue a permissão em
+  <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
+  Os dados que ficam só no seu navegador você apaga
   limpando os dados do site nas configurações do navegador.</p>
 
   <h2>Segurança</h2>
