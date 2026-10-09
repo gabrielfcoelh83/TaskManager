@@ -198,21 +198,106 @@ describe('POST /google', () => {
     expect(rows[0].n).toBe(1);
   });
 
-  it('não liga a conta do Google a um cadastro por senha — responde 409 e a senha segue valendo', async () => {
-    // Cadastro por senha não confirma e-mail: ligar entregaria a conta a quem
-    // cadastrou o e-mail de outra pessoa (pré-sequestro).
+  it('conta com senha e e-mail confirmado: o Google liga, entra, e a senha continua valendo', async () => {
     const e = email();
     await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    await pool.query('UPDATE users SET email_verified_at = NOW() WHERE lower(email) = $1', [e]);
     payload = { sub: sub(), email: e.toUpperCase(), email_verified: true };
     const res = await request(app).post('/google').send({ credential: 'ok' });
 
-    expect(res.status).toBe(409);
-    expect(res.body.error).toMatch(/senha/);
-    const { rows } = await pool.query('SELECT google_sub FROM users WHERE lower(email) = $1', [e]);
+    expect(res.status).toBe(200);
+    expect(res.body.novo).toBe(false);
+    expect(jwt.verify(res.body.token, process.env.JWT_SECRET || 'seu_jwt_secret').email).toBe(e);
+    const { rows } = await pool.query('SELECT google_sub, password_hash FROM users WHERE lower(email) = $1', [e]);
     expect(rows).toHaveLength(1);
+    expect(rows[0].google_sub).toBe(payload.sub);
+    expect(rows[0].password_hash).not.toBeNull();
+    expect((await request(app).post('/login').send({ email: e, password: 'senha-forte-123' })).status).toBe(200);
+    // E da próxima vez o Google entra direto pela ligação.
+    const denovo = await request(app).post('/google').send({ credential: 'ok' });
+    expect(denovo.status).toBe(200);
+    expect(denovo.body.user.id).toBe(res.body.user.id);
+  });
+
+  it('conta com senha NÃO confirmada: o Google assume a conta e a senha de quem a criou deixa de valer', async () => {
+    process.env.GOOGLE_ASSUME_NAO_CONFIRMADA_DESDE = '2000-01-01T00:00:00Z';
+    // Pré-sequestro: alguém cadastrou o e-mail de outra pessoa com uma senha
+    // e nunca confirmou. O dono real entra pelo Google.
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-do-atacante' });
+    await pool.query('UPDATE users SET email_verified_at = NULL WHERE lower(email) = $1', [e]);
+    payload = { sub: sub(), email: e, email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+
+    expect(res.status).toBe(200);
+    const { rows } = await pool.query(
+      'SELECT google_sub, password_hash, email_verified_at, status FROM users WHERE lower(email) = $1', [e]
+    );
+    expect(rows[0].google_sub).toBe(payload.sub);
+    expect(rows[0].password_hash).toBeNull();
+    expect(rows[0].email_verified_at).not.toBeNull();
+    expect(rows[0].status).toBe('active');
+    expect((await request(app).post('/login').send({ email: e, password: 'senha-do-atacante' })).status).toBe(401);
+    // Links pendentes de quem criou a conta também deixam de valer.
+    const id = (await pool.query('SELECT id FROM users WHERE lower(email) = $1', [e])).rows[0].id;
+    const pend = await pool.query(
+      `SELECT (SELECT count(*) FROM email_verification_tokens WHERE user_id = $1)::int AS conf,
+              (SELECT count(*) FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL)::int AS reset`, [id]
+    );
+    expect(pend.rows[0]).toEqual({ conf: 0, reset: 0 });
+    delete process.env.GOOGLE_ASSUME_NAO_CONFIRMADA_DESDE;
+  });
+
+  it('conta NÃO confirmada antes da data de corte continua 409 (token antigo ainda pode valer)', async () => {
+    process.env.GOOGLE_ASSUME_NAO_CONFIRMADA_DESDE = '2999-01-01T00:00:00Z';
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    await pool.query('UPDATE users SET email_verified_at = NULL WHERE lower(email) = $1', [e]);
+    payload = { sub: sub(), email: e, email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+    delete process.env.GOOGLE_ASSUME_NAO_CONFIRMADA_DESDE;
+
+    expect(res.status).toBe(409);
+    const { rows } = await pool.query('SELECT google_sub, password_hash FROM users WHERE lower(email) = $1', [e]);
     expect(rows[0].google_sub).toBeNull();
-    const login = await request(app).post('/login').send({ email: e, password: 'senha-forte-123' });
-    expect(login.status).toBe(200);
+    expect(rows[0].password_hash).not.toBeNull();
+  });
+
+  it('e-mail já ligado a outro Google continua 409', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    await pool.query('UPDATE users SET email_verified_at = NOW(), google_sub = $2 WHERE lower(email) = $1', [e, sub()]);
+    payload = { sub: sub(), email: e, email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+    expect(res.status).toBe(409);
+  });
+
+  it('"Esqueci minha senha" atende conta só com Google e não atende conta bloqueada', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    await request(app).post('/forgot-password').send({ email: e });
+    const conta = (await pool.query('SELECT id FROM users WHERE lower(email) = $1', [e])).rows[0].id;
+    const n = async () => (await pool.query(
+      'SELECT count(*)::int AS n FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL', [conta]
+    )).rows[0].n;
+    expect(await n()).toBe(1);
+
+    await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [conta]);
+    await pool.query(`UPDATE users SET status = 'blocked' WHERE id = $1`, [conta]);
+    await request(app).post('/forgot-password').send({ email: e });
+    expect(await n()).toBe(0);
+  });
+
+  it('conta bloqueada não é ligada nem entra pelo Google', async () => {
+    const e = email();
+    await request(app).post('/register').send({ email: e, password: 'senha-forte-123' });
+    await pool.query(`UPDATE users SET status = 'blocked' WHERE lower(email) = $1`, [e]);
+    payload = { sub: sub(), email: e, email_verified: true };
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+    expect(res.status).toBe(403);
+    const { rows } = await pool.query('SELECT google_sub FROM users WHERE lower(email) = $1', [e]);
+    expect(rows[0].google_sub).toBeNull();
   });
 
   it('cadastro por senha depois do Google, com o mesmo e-mail, é recusado', async () => {
