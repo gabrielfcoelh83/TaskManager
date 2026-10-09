@@ -142,32 +142,50 @@ app.get('/api/auth/verify-email', async (req, res) => {
   }
 });
 
-for (const method of ['get', 'post', 'delete']) {
-  app[method](`/api/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, async (req, res) => {
+// Google Agenda. As rotas usam um circuit breaker próprio ('auth-calendar'):
+// uma falha do Google vira 502 no auth-service e não pode abrir o circuito do
+// 'auth', que derrubaria o login junto.
+const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL || 'https://mlkoab.tech').replace(/\/+$/, '');
+const calendarErro = `${FRONTEND_BASE_URL}/?calendar=error`;
+// O sync faz várias chamadas ao Google; o nginx espera até 30s.
+const SYNC_TIMEOUT_MS = 25000;
+
+function calendarProxy(method, path, { comCorpo = false, timeout } = {}) {
+  return async (req, res) => {
     try {
-      const response = await downstream('auth', method, `${services.auth}/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, ...(method === 'post' ? [req.body] : []), { headers: { authorization: req.headers.authorization } });
+      const config = { headers: { authorization: req.headers.authorization } };
+      if (timeout) config.timeout = timeout;
+      const args = comCorpo ? [req.body, config] : [config];
+      const response = await downstream('auth-calendar', method, `${services.auth}/calendar/google${path}`, ...args);
+      if (response.status === 204) return res.status(204).end();
       res.status(response.status).json(response.data);
     } catch (error) {
       res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
     }
-  });
+  };
 }
 
-app.get('/api/calendar/google/start', async (req, res) => {
-  try {
-    const response = await downstream('auth', 'get', `${services.auth}/calendar/google/start`, { headers: { authorization: req.headers.authorization } });
-    res.json(response.data);
-  } catch (error) {
-    res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
-  }
-});
+app.get('/api/calendar/google/status', calendarProxy('get', '/status'));
+app.get('/api/calendar/google/start', calendarProxy('get', '/start'));
+app.post('/api/calendar/google/sync', calendarProxy('post', '/sync', { comCorpo: true, timeout: SYNC_TIMEOUT_MS }));
+app.post('/api/calendar/google/confirm', calendarProxy('post', '/confirm', { comCorpo: true }));
+app.delete('/api/calendar/google', calendarProxy('delete', ''));
 
 app.get('/api/calendar/google/callback', async (req, res) => {
   try {
-    const response = await downstream('auth', 'get', `${services.auth}/calendar/google/callback`, { params: req.query, maxRedirects: 0, validateStatus: (status) => status < 400 });
-    res.redirect(response.headers.location || '/?calendar=error');
+    const response = await downstream('auth-calendar', 'get', `${services.auth}/calendar/google/callback`, {
+      params: req.query,
+      maxRedirects: 0,
+      validateStatus: (status) => status < 400,
+    });
+    const location = response.headers.location;
+    // Só segue redirecionamento para o próprio front.
+    const destino = typeof location === 'string' && location.startsWith(`${FRONTEND_BASE_URL}/`)
+      ? location
+      : calendarErro;
+    res.redirect(destino);
   } catch (error) {
-    res.redirect('/?calendar=error');
+    res.redirect(calendarErro);
   }
 });
 

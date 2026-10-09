@@ -81,81 +81,148 @@ app.get('/calendar/google/start', (req, res) => {
   res.json({ url: calendar.authorizationUrl(calendar.createState(user.id)) });
 });
 
+// O callback NÃO conecta a agenda: guarda uma pendência e manda o navegador
+// para o front com um código de uso único. A conexão só vale depois que a
+// conta logada no front confirma (POST /calendar/google/confirm) e for a mesma
+// que iniciou o fluxo — assim ninguém liga a agenda de outra pessoa à própria
+// conta mandando a ela um link de autorização.
 app.get('/calendar/google/callback', async (req, res) => {
   try {
-    const user = calendar.readState(req.query.state);
-    const error = calendar.configError();
-    if (error) return res.redirect(calendar.callbackUrl('error'));
+    if (req.query.error || typeof req.query.code !== 'string' || !req.query.code) {
+      return res.redirect(calendar.callbackUrl('error'));
+    }
+    if (calendar.configError()) return res.redirect(calendar.callbackUrl('error'));
+    const state = calendar.readState(req.query.state);
     const tokens = await calendar.exchangeCode(req.query.code);
+    const { codigo, hash } = calendar.novoCodigo();
+    await pool.query('DELETE FROM google_calendar_pending_connections WHERE expires_at < NOW()');
     await pool.query(
+      `INSERT INTO google_calendar_pending_connections (codigo_hash, user_id, refresh_token, expires_at)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')`,
+      [hash, state.userId, calendar.encrypt(tokens.refresh_token)]
+    );
+    return res.redirect(calendar.callbackUrl('confirmar', { codigo }));
+  } catch (error) {
+    console.error('Erro no retorno do Google Calendar:', error.message);
+    return res.redirect(calendar.callbackUrl('error'));
+  }
+});
+
+app.post('/calendar/google/confirm', async (req, res) => {
+  const user = usuarioDoToken(req, res);
+  if (!user) return;
+  const error = calendar.configError();
+  if (error) return res.status(503).json({ error });
+  const codigo = req.body?.codigo;
+  if (typeof codigo !== 'string' || !/^[a-f0-9]{64}$/.test(codigo)) {
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
+  }
+  const client = await pool.connect().catch(() => null);
+  if (!client) return res.status(500).json({ error: 'Erro ao confirmar conexão' });
+  try {
+    await client.query('BEGIN');
+    // Uso único: a pendência é apagada no mesmo comando que a lê. Mesmo uma
+    // tentativa da conta errada a consome — o token é de outra pessoa.
+    const { rows } = await client.query(
+      `DELETE FROM google_calendar_pending_connections WHERE codigo_hash = $1
+       RETURNING user_id, refresh_token, expires_at > NOW() AS valida`,
+      [calendar.hashCodigo(codigo)]
+    );
+    await client.query('DELETE FROM google_calendar_pending_connections WHERE expires_at < NOW()');
+    const pendente = rows[0];
+    if (!pendente || !pendente.valida) {
+      await client.query('COMMIT');
+      return res.status(400).json({ error: 'Código inválido ou expirado' });
+    }
+    if (pendente.user_id !== user.id) {
+      await client.query('COMMIT');
+      console.warn('Confirmação do Google Calendar recusada: conta diferente da que iniciou o fluxo');
+      // A autorização não pertence a ninguém agora: devolve ao Google.
+      try {
+        calendar.revokeToken(calendar.decrypt(pendente.refresh_token));
+      } catch { /* melhor esforço */ }
+      return res.status(403).json({ error: 'Não foi possível confirmar a conexão' });
+    }
+    await client.query(
       `INSERT INTO google_calendar_connections (user_id, refresh_token)
        VALUES ($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET refresh_token = EXCLUDED.refresh_token, updated_at = NOW()`,
-      [user.userId, calendar.encrypt(tokens.refresh_token)]
+       ON CONFLICT (user_id) DO UPDATE
+         SET refresh_token = EXCLUDED.refresh_token, connected_at = NOW(), updated_at = NOW()`,
+      [user.id, pendente.refresh_token]
     );
-    return res.redirect(calendar.callbackUrl('connected'));
-  } catch (error) {
-    console.error('Erro ao conectar Google Calendar:', error.message);
-    return res.redirect(calendar.callbackUrl('error'));
+    await client.query('COMMIT');
+    return res.json({ connected: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Erro ao confirmar Google Calendar:', err.message);
+    return res.status(500).json({ error: 'Erro ao confirmar conexão' });
+  } finally {
+    client.release();
   }
 });
 
 app.get('/calendar/google/status', async (req, res) => {
   const user = usuarioDoToken(req, res);
   if (!user) return;
-  const result = await pool.query(
-    'SELECT connected_at FROM google_calendar_connections WHERE user_id = $1',
-    [user.id]
-  );
-  res.json({ connected: result.rows.length > 0, connectedAt: result.rows[0]?.connected_at || null });
+  try {
+    const result = await pool.query(
+      'SELECT connected_at FROM google_calendar_connections WHERE user_id = $1',
+      [user.id]
+    );
+    return res.json({ connected: result.rows.length > 0, connectedAt: result.rows[0]?.connected_at || null });
+  } catch (error) {
+    console.error('Erro ao consultar Google Calendar:', error.message);
+    return res.status(500).json({ error: 'Erro ao consultar conexão' });
+  }
 });
 
 app.post('/calendar/google/sync', async (req, res) => {
   const user = usuarioDoToken(req, res);
   if (!user) return;
-  const events = req.body?.events;
-  if (!Array.isArray(events) || events.length > 60) return res.status(400).json({ error: 'Lista de eventos inválida' });
-  const connection = await pool.query(
-    'SELECT refresh_token, calendar_id FROM google_calendar_connections WHERE user_id = $1',
-    [user.id]
-  );
-  if (!connection.rows[0]) return res.status(409).json({ error: 'Google Calendar não conectado' });
+  const configError = calendar.configError();
+  if (configError) return res.status(503).json({ error: configError });
+  const validacao = calendar.validarSync(req.body);
+  if (validacao.erro) return res.status(400).json({ error: validacao.erro });
   try {
-    const refreshToken = calendar.decrypt(connection.rows[0].refresh_token);
-    const calendarId = encodeURIComponent(connection.rows[0].calendar_id);
-    const synced = [];
-    for (const event of events) {
-      if (!event?.id || !event?.start || !event?.end || !event?.summary) continue;
-      const data = await calendar.calendarRequest(refreshToken, `/calendars/${calendarId}/events`, {
-        method: 'POST',
-        body: JSON.stringify({
-          id: event.id.replace(/[^a-z0-9_-]/gi, '').slice(0, 100),
-          summary: event.summary,
-          description: event.description || 'Plano de estudos MA Questões',
-          start: { dateTime: event.start, timeZone: event.timeZone || 'America/Sao_Paulo' },
-          end: { dateTime: event.end, timeZone: event.timeZone || 'America/Sao_Paulo' },
-        }),
-      }).catch(async (error) => {
-        if (!/already exists/i.test(error.message)) throw error;
-        return calendar.calendarRequest(refreshToken, `/calendars/${calendarId}/events/${event.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ summary: event.summary, description: event.description, start: { dateTime: event.start, timeZone: event.timeZone || 'America/Sao_Paulo' }, end: { dateTime: event.end, timeZone: event.timeZone || 'America/Sao_Paulo' } }),
-        });
-      });
-      synced.push(data.id);
-    }
-    return res.json({ synced: synced.length });
+    const connection = await pool.query(
+      'SELECT refresh_token, calendar_id FROM google_calendar_connections WHERE user_id = $1',
+      [user.id]
+    );
+    if (!connection.rows[0]) return res.status(409).json({ error: 'Google Calendar não conectado' });
+    const resultado = await calendar.sincronizar({
+      refreshToken: calendar.decrypt(connection.rows[0].refresh_token),
+      calendarId: connection.rows[0].calendar_id,
+      eventos: validacao.eventos,
+      dias: validacao.dias,
+    });
+    return res.json(resultado);
   } catch (error) {
     console.error('Erro ao sincronizar Google Calendar:', error.message);
-    return res.status(502).json({ error: error.message });
+    return res.status(502).json({ error: 'Não foi possível sincronizar com o Google Calendar' });
   }
 });
 
 app.delete('/calendar/google', async (req, res) => {
   const user = usuarioDoToken(req, res);
   if (!user) return;
-  await pool.query('DELETE FROM google_calendar_connections WHERE user_id = $1', [user.id]);
-  res.status(204).end();
+  try {
+    const { rows } = await pool.query(
+      'DELETE FROM google_calendar_connections WHERE user_id = $1 RETURNING refresh_token',
+      [user.id]
+    );
+    if (rows[0] && !calendar.configError()) {
+      // Melhor esforço: a conexão já foi apagada daqui de qualquer jeito.
+      try {
+        await calendar.revokeToken(calendar.decrypt(rows[0].refresh_token));
+      } catch (error) {
+        console.warn('Não foi possível revogar o token do Google:', error.message);
+      }
+    }
+    return res.status(204).end();
+  } catch (error) {
+    console.error('Erro ao desconectar Google Calendar:', error.message);
+    return res.status(500).json({ error: 'Erro ao desconectar' });
+  }
 });
 
 app.post('/forgot-password', async (req, res) => {
