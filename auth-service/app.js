@@ -183,8 +183,9 @@ app.post('/calendar/google/sync', async (req, res) => {
   if (configError) return res.status(503).json({ error: configError });
   const validacao = calendar.validarSync(req.body);
   if (validacao.erro) return res.status(400).json({ error: validacao.erro });
+  let connection;
   try {
-    const connection = await pool.query(
+    connection = await pool.query(
       'SELECT refresh_token, calendar_id FROM google_calendar_connections WHERE user_id = $1',
       [user.id]
     );
@@ -199,7 +200,12 @@ app.post('/calendar/google/sync', async (req, res) => {
   } catch (error) {
     if (error instanceof calendar.AutorizacaoRevogada) {
       // O usuário revogou o acesso no Google: a conexão guardada é inútil.
-      await pool.query('DELETE FROM google_calendar_connections WHERE user_id = $1', [user.id])
+      // Só a conexão que falhou: se a pessoa reconectou enquanto este sync
+      // rodava, a conexão nova (outro refresh_token) fica.
+      await pool.query(
+        'DELETE FROM google_calendar_connections WHERE user_id = $1 AND refresh_token = $2',
+        [user.id, connection.rows[0].refresh_token]
+      )
         .catch((err) => console.error('Erro ao apagar conexão revogada:', err.message));
       return res.status(409).json({ error: 'Reconecte o Google Agenda' });
     }

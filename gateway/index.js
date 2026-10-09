@@ -180,7 +180,7 @@ function calendarProxy(method, path, { comCorpo = false, timeout, semBreaker = f
 app.get('/api/calendar/google/status', calendarProxy('get', '/status'));
 app.get('/api/calendar/google/start', calendarProxy('get', '/start'));
 app.post('/api/calendar/google/sync', calendarProxy('post', '/sync', { comCorpo: true, timeout: SYNC_TIMEOUT_MS }));
-app.post('/api/calendar/google/confirm', calendarProxy('post', '/confirm', { comCorpo: true, semBreaker: true }));
+app.post('/api/calendar/google/confirm', calendarProxy('post', '/confirm', { comCorpo: true, semBreaker: true, timeout: 15000 }));
 app.delete('/api/calendar/google', calendarProxy('delete', ''));
 
 app.get('/api/calendar/google/callback', async (req, res) => {
