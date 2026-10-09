@@ -209,6 +209,37 @@ describe('gateway: Google Agenda', () => {
     expect(adapter).toHaveBeenCalledTimes(3);
   });
 
+  test('503 de configuração no start não abre o circuito e preserva a mensagem', async () => {
+    for (let i = 0; i < 5; i++) {
+      adapter.mockImplementationOnce(responder(503, { error: 'Google Calendar não está configurado no servidor' }));
+      const res = await request(app).get('/api/calendar/google/start').set('Authorization', 'Bearer t');
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe('Google Calendar não está configurado no servidor');
+    }
+    expect(adapter).toHaveBeenCalledTimes(5);
+  });
+
+  test('4xx respondidos pelo auth-service não abrem o circuito em nenhuma rota da agenda', async () => {
+    const rotas = [
+      () => request(app).get('/api/calendar/google/status'),
+      () => request(app).get('/api/calendar/google/start'),
+      () => request(app).post('/api/calendar/google/sync').send({}),
+      () => request(app).post('/api/calendar/google/confirm').send({}),
+      () => request(app).delete('/api/calendar/google'),
+    ];
+    for (const rota of rotas) {
+      for (let i = 0; i < 3; i++) {
+        adapter.mockImplementationOnce(responder(401, { error: 'Token não fornecido' }));
+        const res = await rota();
+        expect(res.status).toBe(401);
+        expect(res.body.error).toBe('Token não fornecido');
+      }
+    }
+    expect(adapter).toHaveBeenCalledTimes(15);
+    const ok = await request(app).get('/api/calendar/google/status');
+    expect(ok.status).toBe(200);
+  });
+
   test('falhas do Google não abrem o circuito do login', async () => {
     const erro = () => new axios.AxiosError('bad gateway', 'ERR_BAD_RESPONSE', {}, {}, { status: 502, data: { error: 'x' } });
     for (let i = 0; i < 3; i++) {
