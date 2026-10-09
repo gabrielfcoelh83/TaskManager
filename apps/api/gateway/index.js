@@ -142,32 +142,62 @@ app.get('/api/auth/verify-email', async (req, res) => {
   }
 });
 
-for (const method of ['get', 'post', 'delete']) {
-  app[method](`/api/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, async (req, res) => {
+// Google Agenda. As rotas usam um circuit breaker próprio ('auth-calendar'),
+// separado do 'auth' do login. E 502/503/504 respondidos pelo auth-service
+// nessas rotas são erro do Google, de configuração ou do prazo do sync — não
+// sinal de serviço fora do ar —, então passam como resposta normal e não
+// contam para abrir o circuito. Só falha de rede, timeout e outro 5xx contam.
+// Callback e confirm ficam fora do breaker: com o circuito aberto, o callback
+// perderia o `code` do Google, que é de uso único.
+const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL || 'https://mlkoab.tech').replace(/\/+$/, '');
+const calendarErro = `${FRONTEND_BASE_URL}/?calendar=error`;
+// O sync faz várias chamadas ao Google; o nginx espera até 30s.
+const SYNC_TIMEOUT_MS = 25000;
+
+const STATUS_DO_GOOGLE = new Set([502, 503, 504]);
+const validateCalendarStatus = (status) => (status >= 200 && status < 300) || STATUS_DO_GOOGLE.has(status);
+
+function calendarProxy(method, path, { comCorpo = false, timeout, semBreaker = false } = {}) {
+  return async (req, res) => {
     try {
-      const response = await downstream('auth', method, `${services.auth}/calendar/google${method === 'get' ? '/status' : method === 'post' ? '/sync' : ''}`, ...(method === 'post' ? [req.body] : []), { headers: { authorization: req.headers.authorization } });
+      const config = {
+        headers: { authorization: req.headers.authorization },
+        validateStatus: validateCalendarStatus,
+      };
+      if (timeout) config.timeout = timeout;
+      const args = [`${services.auth}/calendar/google${path}`, ...(comCorpo ? [req.body, config] : [config])];
+      const response = semBreaker
+        ? await http[method](...args)
+        : await downstream('auth-calendar', method, ...args);
+      if (response.status === 204) return res.status(204).end();
       res.status(response.status).json(response.data);
     } catch (error) {
       res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
     }
-  });
+  };
 }
 
-app.get('/api/calendar/google/start', async (req, res) => {
-  try {
-    const response = await downstream('auth', 'get', `${services.auth}/calendar/google/start`, { headers: { authorization: req.headers.authorization } });
-    res.json(response.data);
-  } catch (error) {
-    res.status(error.response?.status || 500).json({ error: error.response?.data?.error || 'Erro no Google Calendar' });
-  }
-});
+app.get('/api/calendar/google/status', calendarProxy('get', '/status'));
+app.get('/api/calendar/google/start', calendarProxy('get', '/start'));
+app.post('/api/calendar/google/sync', calendarProxy('post', '/sync', { comCorpo: true, timeout: SYNC_TIMEOUT_MS }));
+app.post('/api/calendar/google/confirm', calendarProxy('post', '/confirm', { comCorpo: true, semBreaker: true, timeout: 15000 }));
+app.delete('/api/calendar/google', calendarProxy('delete', ''));
 
 app.get('/api/calendar/google/callback', async (req, res) => {
   try {
-    const response = await downstream('auth', 'get', `${services.auth}/calendar/google/callback`, { params: req.query, maxRedirects: 0, validateStatus: (status) => status < 400 });
-    res.redirect(response.headers.location || '/?calendar=error');
+    const response = await http.get(`${services.auth}/calendar/google/callback`, {
+      params: req.query,
+      maxRedirects: 0,
+      validateStatus: (status) => status < 400,
+    });
+    const location = response.headers.location;
+    // Só segue redirecionamento para o próprio front.
+    const destino = typeof location === 'string' && location.startsWith(`${FRONTEND_BASE_URL}/`)
+      ? location
+      : calendarErro;
+    res.redirect(destino);
   } catch (error) {
-    res.redirect('/?calendar=error');
+    res.redirect(calendarErro);
   }
 });
 
