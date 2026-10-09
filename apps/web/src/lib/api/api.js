@@ -193,7 +193,11 @@ export async function entrarComGoogle(credential) {
     auth: false,
   });
 
-  if (!dados?.token) throw new ApiError('Resposta do login com o Google sem token', 502);
+  // Sem token, o servidor diz o porquê (ex.: conta pendente de confirmação).
+  // Mostrar a mensagem dele, não um "sem token" que ninguém entende.
+  if (!dados?.token) {
+    throw new ApiError(dados?.message || 'Não foi possível entrar com o Google. Tente de novo.', 502);
+  }
 
   setToken(dados.token);
   return dados.user;
