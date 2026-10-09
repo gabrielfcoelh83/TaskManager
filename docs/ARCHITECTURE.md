@@ -221,6 +221,43 @@ devolve o mesmo JWT. Sem a variável a rota responde 503. Em produção ela vem
 da variável `GOOGLE_CLIENT_ID` do GitHub Actions (não é secret: o Client ID é
 público) e precisa ser a mesma do `VITE_GOOGLE_CLIENT_ID` do front.
 
+**Google Agenda (Cronograma):** rotas `/api/calendar/google/*` no gateway,
+implementadas no auth-service (`google-calendar.js`). Sem
+`GOOGLE_CLIENT_SECRET` ou `GOOGLE_TOKEN_ENCRYPTION_KEY` (64 hex) respondem 503.
+No gateway usam um circuit breaker próprio (`auth-calendar`), para que falhas
+do Google não bloqueiem o login; 502/503/504 do auth-service (erro do Google,
+de configuração ou prazo do sync) não contam para abrir o circuito, e callback
+e confirm ficam fora do breaker (o `code` do Google é de uso único).
+
+1. `GET /start` (logado) devolve a URL de autorização; o `state` é um JWT de
+   10 min com o id da conta.
+2. `GET /callback` (o Google redireciona para cá) **não conecta**: troca o
+   `code` pelo refresh token, guarda uma pendência em
+   `google_calendar_pending_connections` (migration 007: código aleatório de
+   32 bytes salvo só como sha256, refresh token criptografado com AES-256-GCM,
+   validade de 10 min) e redireciona para
+   `FRONTEND_BASE_URL/?calendar=confirmar&codigo=…`. Erro do Google
+   (`?error=…`), falta de `code` ou `state` inválido → `?calendar=error`.
+3. `POST /confirm {codigo}` (logado) consome a pendência (uso único, apagada
+   na leitura) e só grava `google_calendar_connections` se a conta do JWT for
+   a que iniciou o fluxo. Conta diferente → 403 e o token é revogado; código
+   expirado, usado ou inexistente → 400. Isso impede que alguém ligue a
+   agenda de outra pessoa à própria conta enviando a ela um link de
+   autorização.
+4. `POST /sync {events:[{dia,summary,description,start,end,timeZone}],
+   intervalo:{de,ate}}` → `{sincronizados, removidos}`. No máximo 31 dias e 1
+   evento por dia; `start`/`end` em hora local (`YYYY-MM-DDTHH:MM:SS`) e
+   `timeZone` IANA. O servidor gera o id do evento (`mlkoab` + `yyyymmdd`,
+   só base32hex como o Google exige): insere; se o Google responder 409,
+   substitui (PUT, `status: confirmed`). Dias do intervalo sem evento têm o
+   evento do dia apagado (404/410 ignorados). Um access token por sync.
+   Prazo total de 20 s (`GOOGLE_SYNC_DEADLINE_MS`): estourou, não dispara
+   mais chamadas e responde 504 (repetir é seguro). Se o Google recusar o
+   refresh token (`invalid_grant`, acesso revogado pelo usuário), a conexão é
+   apagada e a resposta é 409 "Reconecte o Google Agenda".
+5. `GET /status` → `{connected, connectedAt}`. `DELETE /api/calendar/google`
+   apaga a conexão e tenta revogar o token no Google (melhor esforço).
+
 **Problema Atual:** `verifyToken` duplicado em 4 lugares  
 **Solução:** Centralizar em `shared/middleware/auth.js` + `@shared` no package.json
 
