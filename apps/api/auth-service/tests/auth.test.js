@@ -180,9 +180,35 @@ describe('POST /google', () => {
     // A audiência conferida é a do nosso app — é o que barra token de outro site.
     expect(audienciaPedida).toBe('client-id-de-teste.apps.googleusercontent.com');
 
-    const { rows } = await pool.query('SELECT password_hash, google_sub FROM users WHERE email = $1', [e]);
+    const { rows } = await pool.query('SELECT password_hash, google_sub, status, email_verified_at FROM users WHERE email = $1', [e]);
     expect(rows[0].password_hash).toBeNull();
     expect(rows[0].google_sub).toBe(payload.sub);
+    // O Google já confirmou o e-mail: a conta nasce ativa e confirmada.
+    expect(rows[0].status).toBe('active');
+    expect(rows[0].email_verified_at).not.toBeNull();
+  });
+
+  it('conta do Google bloqueada não entra nem recebe token', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    await pool.query(`UPDATE users SET status = 'blocked' WHERE email = $1`, [e]);
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+    expect(res.status).toBe(403);
+    expect(res.body.token).toBeUndefined();
+  });
+
+  it('conta do Google que ficou pendente é ativada no próximo login pelo Google', async () => {
+    const e = email();
+    payload = { sub: sub(), email: e, email_verified: true };
+    await request(app).post('/google').send({ credential: 'ok' });
+    await pool.query(`UPDATE users SET status = 'pending', email_verified_at = NULL WHERE email = $1`, [e]);
+    const res = await request(app).post('/google').send({ credential: 'ok' });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    const { rows } = await pool.query('SELECT status, email_verified_at FROM users WHERE email = $1', [e]);
+    expect(rows[0].status).toBe('active');
+    expect(rows[0].email_verified_at).not.toBeNull();
   });
 
   it('na segunda vez entra na mesma conta, sem criar outra', async () => {

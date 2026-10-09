@@ -463,16 +463,18 @@ app.post('/google', async (req, res) => {
     );
     if (rows[0]) {
       if (rows[0].status === 'blocked') return acessoNegado(res);
-      if (rows[0].status !== 'active' || (exigirConfirmacao && !rows[0].email_verified_at)) {
-        if (exigirConfirmacao) {
-          try {
-            await solicitarConfirmacao(rows[0]);
-          } catch (emailError) {
-            console.error('Erro ao reenviar confirmação:', emailError);
-            return res.status(503).json({ error: 'Não foi possível enviar o e-mail de confirmação' });
-          }
-        }
-        return res.status(403).json({ error: 'Confirme seu e-mail antes de entrar' });
+      // Conta criada pelo Google que ficou pendente (versão anterior pedia
+      // confirmação por e-mail): o Google acabou de confirmar a caixa postal
+      // desta mesma conta Google, então ativa e entra.
+      if (rows[0].status !== 'active' || !rows[0].email_verified_at) {
+        const ativada = await pool.query(
+          `UPDATE users SET status = 'active', email_verified_at = COALESCE(email_verified_at, NOW())
+            WHERE id = $1 AND status <> 'blocked' RETURNING id`,
+          [rows[0].id]
+        );
+        // Bloqueada entre o SELECT e o UPDATE: não entra.
+        if (ativada.rows.length === 0) return acessoNegado(res);
+        await pool.query('DELETE FROM email_verification_tokens WHERE user_id = $1', [rows[0].id]);
       }
       return res.json({ message: 'Login realizado com sucesso', user: rows[0], token: emitirToken(rows[0]), novo: false });
     }
@@ -545,10 +547,12 @@ app.post('/google', async (req, res) => {
       }
     }
 
-    // 3. Primeira vez: cria o usuário sem senha e avisa o user-service, como
-    //    no cadastro.
+    // 3. Primeira vez: cria a conta e entra. Não pede confirmação por
+    //    e-mail: o Google já confirmou a caixa postal (`email_verified`).
+    //    Avisa o user-service, como no cadastro.
     ({ rows } = await pool.query(
-      'INSERT INTO users (email, password_hash, google_sub) VALUES ($1, NULL, $2) RETURNING id, email',
+      `INSERT INTO users (email, password_hash, google_sub, status, email_verified_at)
+       VALUES ($1, NULL, $2, 'active', NOW()) RETURNING id, email`,
       [email, dados.sub]
     ));
     const user = rows[0];
@@ -570,14 +574,6 @@ app.post('/google', async (req, res) => {
       console.error('Não foi possível gravar o evento:', err.message);
     }
 
-    if (exigirConfirmacao) {
-      await solicitarConfirmacao(user);
-      return res.status(201).json({
-        message: 'Cadastro criado. Confirme seu e-mail para ativar o acesso.',
-        user,
-        novo: true,
-      });
-    }
     return res.status(201).json({ message: 'Usuário registrado com sucesso', user, token: emitirToken(user), novo: true });
   } catch (error) {
     // Unicidade recusou o INSERT: ou foi um duplo clique (a outra chamada da
