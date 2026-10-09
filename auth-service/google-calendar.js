@@ -9,6 +9,8 @@ const STATE_SECRET = process.env.JWT_SECRET;
 const TOKEN_KEY = process.env.GOOGLE_TOKEN_ENCRYPTION_KEY;
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 const GOOGLE_TIMEOUT_MS = 8000;
+// Prazo total de um sync, abaixo dos 25 s que o gateway espera por ele.
+const SYNC_DEADLINE_MS = Number(process.env.GOOGLE_SYNC_DEADLINE_MS) || 20000;
 
 // Prefixo dos ids de evento. O Google só aceita base32hex (a–v e 0–9) no id;
 // m, l, k, o, a, b estão todas entre a e v.
@@ -92,7 +94,30 @@ async function exchangeCode(code) {
   return data;
 }
 
-async function accessToken(refreshToken) {
+// O Google recusou o refresh token (o usuário revogou o acesso, por exemplo):
+// a conexão guardada não serve mais.
+class AutorizacaoRevogada extends Error {
+  constructor() {
+    super('Autorização do Google revogada');
+    this.name = 'AutorizacaoRevogada';
+  }
+}
+
+// O sync passou do prazo total; repetir é seguro (ids fixos por dia).
+class PrazoEsgotado extends Error {
+  constructor() {
+    super('A sincronização demorou demais');
+    this.name = 'PrazoEsgotado';
+  }
+}
+
+// Junta o timeout por chamada com o prazo total do sync, se houver.
+function sinal(prazo) {
+  const porChamada = AbortSignal.timeout(GOOGLE_TIMEOUT_MS);
+  return prazo ? AbortSignal.any([porChamada, prazo]) : porChamada;
+}
+
+async function accessToken(refreshToken, prazo) {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -102,9 +127,10 @@ async function accessToken(refreshToken) {
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
       grant_type: 'refresh_token',
     }),
-    signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
+    signal: sinal(prazo),
   });
   const data = await response.json().catch(() => null);
+  if (response.status === 400 && data?.error === 'invalid_grant') throw new AutorizacaoRevogada();
   if (!response.ok || !data?.access_token) throw new Error('Não foi possível renovar a autorização do Google');
   return data.access_token;
 }
@@ -136,11 +162,13 @@ class GoogleCalendarError extends Error {
 // Recebe o access token já renovado: uma sincronização pede um só ao Google.
 // Erros carregam o status HTTP em `error.status` para quem chama decidir
 // (409 = id já existe, 404/410 = evento não existe mais).
+// `options.prazo` (AbortSignal) é o prazo total do sync, quando houver.
 async function calendarRequest(token, path, options = {}) {
+  const { prazo, ...init } = options;
   const response = await fetch(`${CALENDAR_API}${path}`, {
-    ...options,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...options.headers },
-    signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...init.headers },
+    signal: sinal(prazo),
   });
   const data = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) throw new GoogleCalendarError(response.status, data?.error?.message);
@@ -243,12 +271,14 @@ function validarSync(body) {
   return { eventos, dias: diasDoIntervalo(intervalo.de, intervalo.ate) };
 }
 
-// Executa `fn` sobre `itens` com no máximo `limite` em paralelo.
-async function emParalelo(itens, limite, fn) {
+// Executa `fn` sobre `itens` com no máximo `limite` em paralelo. Esgotado o
+// `prazo`, não dispara mais nenhuma chamada.
+async function emParalelo(itens, limite, prazo, fn) {
   const resultados = new Array(itens.length);
   let proximo = 0;
   async function trabalhador() {
     while (proximo < itens.length) {
+      if (prazo.aborted) throw new PrazoEsgotado();
       const i = proximo++;
       resultados[i] = await fn(itens[i]);
     }
@@ -260,28 +290,41 @@ async function emParalelo(itens, limite, fn) {
 // Sincroniza um intervalo: cria/atualiza um evento por dia com evento e apaga
 // o evento dos dias sem evento. Ids fixos por dia tornam a operação idempotente.
 async function sincronizar({ refreshToken, calendarId, eventos, dias }) {
-  const token = await accessToken(refreshToken);
+  const prazo = AbortSignal.timeout(SYNC_DEADLINE_MS);
+  try {
+    return await sincronizarComPrazo({ refreshToken, calendarId, eventos, dias, prazo });
+  } catch (error) {
+    // Chamada abortada pelo prazo total vira um erro só, claro.
+    if (prazo.aborted && !(error instanceof AutorizacaoRevogada)) throw new PrazoEsgotado();
+    throw error;
+  }
+}
+
+async function sincronizarComPrazo({ refreshToken, calendarId, eventos, dias, prazo }) {
+  const token = await accessToken(refreshToken, prazo);
   const base = `/calendars/${encodeURIComponent(calendarId)}/events`;
 
-  await emParalelo(eventos, 4, async (ev) => {
+  await emParalelo(eventos, 4, prazo, async (ev) => {
     try {
-      await calendarRequest(token, base, { method: 'POST', body: JSON.stringify({ id: ev.id, ...ev.body }) });
+      await calendarRequest(token, base, { method: 'POST', body: JSON.stringify({ id: ev.id, ...ev.body }), prazo });
     } catch (error) {
       if (error.status !== 409) throw error;
+      if (prazo.aborted) throw new PrazoEsgotado();
       // Id já existe (inclusive evento apagado antes, que fica "cancelled"):
       // substitui o conteúdo e reativa.
       await calendarRequest(token, `${base}/${encodeURIComponent(ev.id)}`, {
         method: 'PUT',
         body: JSON.stringify({ ...ev.body, status: 'confirmed' }),
+        prazo,
       });
     }
   });
 
   const comEvento = new Set(eventos.map((ev) => ev.dia));
   const sobras = dias.filter((dia) => !comEvento.has(dia));
-  const apagados = await emParalelo(sobras, 4, async (dia) => {
+  const apagados = await emParalelo(sobras, 4, prazo, async (dia) => {
     try {
-      await calendarRequest(token, `${base}/${encodeURIComponent(eventId(dia))}`, { method: 'DELETE' });
+      await calendarRequest(token, `${base}/${encodeURIComponent(eventId(dia))}`, { method: 'DELETE', prazo });
       return true;
     } catch (error) {
       if (error.status === 404 || error.status === 410) return false;
@@ -311,6 +354,8 @@ module.exports = {
   revokeToken,
   calendarRequest,
   GoogleCalendarError,
+  AutorizacaoRevogada,
+  PrazoEsgotado,
   validarSync,
   sincronizar,
   eventId,

@@ -225,7 +225,9 @@ público) e precisa ser a mesma do `VITE_GOOGLE_CLIENT_ID` do front.
 implementadas no auth-service (`google-calendar.js`). Sem
 `GOOGLE_CLIENT_SECRET` ou `GOOGLE_TOKEN_ENCRYPTION_KEY` (64 hex) respondem 503.
 No gateway usam um circuit breaker próprio (`auth-calendar`), para que falhas
-do Google não bloqueiem o login.
+do Google não bloqueiem o login; 502/503/504 do auth-service (erro do Google,
+de configuração ou prazo do sync) não contam para abrir o circuito, e callback
+e confirm ficam fora do breaker (o `code` do Google é de uso único).
 
 1. `GET /start` (logado) devolve a URL de autorização; o `state` é um JWT de
    10 min com o id da conta.
@@ -249,6 +251,10 @@ do Google não bloqueiem o login.
    só base32hex como o Google exige): insere; se o Google responder 409,
    substitui (PUT, `status: confirmed`). Dias do intervalo sem evento têm o
    evento do dia apagado (404/410 ignorados). Um access token por sync.
+   Prazo total de 20 s (`GOOGLE_SYNC_DEADLINE_MS`): estourou, não dispara
+   mais chamadas e responde 504 (repetir é seguro). Se o Google recusar o
+   refresh token (`invalid_grant`, acesso revogado pelo usuário), a conexão é
+   apagada e a resposta é 409 "Reconecte o Google Agenda".
 5. `GET /status` → `{connected, connectedAt}`. `DELETE /api/calendar/google`
    apaga a conexão e tenta revogar o token no Google (melhor esforço).
 

@@ -4,6 +4,8 @@ process.env.GOOGLE_CLIENT_ID = 'cliente-teste.apps.googleusercontent.com';
 process.env.GOOGLE_CLIENT_SECRET = 'segredo-teste';
 process.env.GOOGLE_TOKEN_ENCRYPTION_KEY = 'a'.repeat(64);
 process.env.FRONTEND_BASE_URL = 'https://front.exemplo';
+// Prazo total do sync curto para testar o estouro sem esperar 20 s.
+process.env.GOOGLE_SYNC_DEADLINE_MS = '600';
 
 const request = require('supertest');
 const { app, pool, redis } = require('../app');
@@ -171,6 +173,10 @@ describe('POST /calendar/google/confirm', () => {
     const res = await request(app).post('/calendar/google/confirm').set(auth(vitima)).send({ codigo });
     expect(res.status).toBe(403);
     expect(JSON.stringify(res.body)).not.toMatch(/user|atacante|expir/i);
+    // A autorização da vítima é devolvida ao Google antes da resposta.
+    const revoke = chamadas.filter((c) => c.url === 'https://oauth2.googleapis.com/revoke');
+    expect(revoke).toHaveLength(1);
+    expect(revoke[0].body.get('token')).toBe('refresh-novo');
 
     for (const u of [atacante, vitima]) {
       const conn = await pool.query('SELECT 1 FROM google_calendar_connections WHERE user_id = $1', [u.id]);
@@ -286,6 +292,62 @@ describe('POST /calendar/google/sync', () => {
     const res = await request(app).post('/calendar/google/sync').set(auth(user))
       .send({ events: [], intervalo: { de: '2026-10-05', ate: '2026-10-05' } });
     expect(res.status).toBe(502);
+  });
+
+  it('acesso revogado no Google (invalid_grant): apaga a conexão e pede reconexão', async () => {
+    const user = await novoUsuario();
+    await conectar(user);
+    respostas = (url) => (url === 'https://oauth2.googleapis.com/token'
+      ? { status: 400, body: { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' } }
+      : undefined);
+    const res = await request(app).post('/calendar/google/sync').set(auth(user))
+      .send({ events: [evento('2026-10-07')], intervalo });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'Reconecte o Google Agenda' });
+    expect(eventCalls()).toHaveLength(0);
+    const status = await request(app).get('/calendar/google/status').set(auth(user));
+    expect(status.body).toEqual({ connected: false, connectedAt: null });
+  });
+
+  it('outra falha ao renovar o token não apaga a conexão', async () => {
+    const user = await novoUsuario();
+    await conectar(user);
+    respostas = (url) => (url === 'https://oauth2.googleapis.com/token' ? { status: 500, body: {} } : undefined);
+    const res = await request(app).post('/calendar/google/sync').set(auth(user)).send({ events: [], intervalo });
+    expect(res.status).toBe(502);
+    const status = await request(app).get('/calendar/google/status').set(auth(user));
+    expect(status.body.connected).toBe(true);
+  });
+
+  it('estouro do prazo total: para de disparar chamadas e responde 504', async () => {
+    const user = await novoUsuario();
+    await conectar(user);
+    // Google lento: cada chamada de evento leva 250 ms (e respeita o abort).
+    global.fetch.mockImplementation(async (url, init = {}) => {
+      chamadas.push({ url: String(url), method: init.method || 'GET', body: init.body });
+      if (String(url) === 'https://oauth2.googleapis.com/token') return resposta(200, { access_token: 'access-1' });
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, 250);
+        init.signal?.addEventListener('abort', () => { clearTimeout(t); reject(init.signal.reason); });
+      });
+      return resposta(200, { id: 'ok' });
+    });
+    const events = [];
+    for (let d = 1; d <= 31; d++) events.push(evento(`2026-10-${String(d).padStart(2, '0')}`));
+
+    const inicio = Date.now();
+    const res = await request(app).post('/calendar/google/sync').set(auth(user))
+      .send({ events, intervalo: { de: '2026-10-01', ate: '2026-10-31' } });
+    const duracao = Date.now() - inicio;
+
+    expect(res.status).toBe(504);
+    expect(res.body).toEqual({ error: 'A sincronização demorou demais; tente de novo' });
+    expect(duracao).toBeLessThan(1500);
+    const disparadas = eventCalls().length;
+    expect(disparadas).toBeLessThan(31);
+    // Depois da resposta, nenhuma chamada nova ao Google.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(eventCalls().length).toBe(disparadas);
   });
 
   it('sem conexão responde 409 e não chama o Google', async () => {

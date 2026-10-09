@@ -142,21 +142,33 @@ app.get('/api/auth/verify-email', async (req, res) => {
   }
 });
 
-// Google Agenda. As rotas usam um circuit breaker próprio ('auth-calendar'):
-// uma falha do Google vira 502 no auth-service e não pode abrir o circuito do
-// 'auth', que derrubaria o login junto.
+// Google Agenda. As rotas usam um circuit breaker próprio ('auth-calendar'),
+// separado do 'auth' do login. E 502/503/504 respondidos pelo auth-service
+// nessas rotas são erro do Google, de configuração ou do prazo do sync — não
+// sinal de serviço fora do ar —, então passam como resposta normal e não
+// contam para abrir o circuito. Só falha de rede, timeout e outro 5xx contam.
+// Callback e confirm ficam fora do breaker: com o circuito aberto, o callback
+// perderia o `code` do Google, que é de uso único.
 const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL || 'https://mlkoab.tech').replace(/\/+$/, '');
 const calendarErro = `${FRONTEND_BASE_URL}/?calendar=error`;
 // O sync faz várias chamadas ao Google; o nginx espera até 30s.
 const SYNC_TIMEOUT_MS = 25000;
 
-function calendarProxy(method, path, { comCorpo = false, timeout } = {}) {
+const STATUS_DO_GOOGLE = new Set([502, 503, 504]);
+const validateCalendarStatus = (status) => (status >= 200 && status < 300) || STATUS_DO_GOOGLE.has(status);
+
+function calendarProxy(method, path, { comCorpo = false, timeout, semBreaker = false } = {}) {
   return async (req, res) => {
     try {
-      const config = { headers: { authorization: req.headers.authorization } };
+      const config = {
+        headers: { authorization: req.headers.authorization },
+        validateStatus: validateCalendarStatus,
+      };
       if (timeout) config.timeout = timeout;
-      const args = comCorpo ? [req.body, config] : [config];
-      const response = await downstream('auth-calendar', method, `${services.auth}/calendar/google${path}`, ...args);
+      const args = [`${services.auth}/calendar/google${path}`, ...(comCorpo ? [req.body, config] : [config])];
+      const response = semBreaker
+        ? await http[method](...args)
+        : await downstream('auth-calendar', method, ...args);
       if (response.status === 204) return res.status(204).end();
       res.status(response.status).json(response.data);
     } catch (error) {
@@ -168,12 +180,12 @@ function calendarProxy(method, path, { comCorpo = false, timeout } = {}) {
 app.get('/api/calendar/google/status', calendarProxy('get', '/status'));
 app.get('/api/calendar/google/start', calendarProxy('get', '/start'));
 app.post('/api/calendar/google/sync', calendarProxy('post', '/sync', { comCorpo: true, timeout: SYNC_TIMEOUT_MS }));
-app.post('/api/calendar/google/confirm', calendarProxy('post', '/confirm', { comCorpo: true }));
+app.post('/api/calendar/google/confirm', calendarProxy('post', '/confirm', { comCorpo: true, semBreaker: true }));
 app.delete('/api/calendar/google', calendarProxy('delete', ''));
 
 app.get('/api/calendar/google/callback', async (req, res) => {
   try {
-    const response = await downstream('auth-calendar', 'get', `${services.auth}/calendar/google/callback`, {
+    const response = await http.get(`${services.auth}/calendar/google/callback`, {
       params: req.query,
       maxRedirects: 0,
       validateStatus: (status) => status < 400,

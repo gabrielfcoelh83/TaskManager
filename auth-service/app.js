@@ -139,7 +139,7 @@ app.post('/calendar/google/confirm', async (req, res) => {
       console.warn('Confirmação do Google Calendar recusada: conta diferente da que iniciou o fluxo');
       // A autorização não pertence a ninguém agora: devolve ao Google.
       try {
-        calendar.revokeToken(calendar.decrypt(pendente.refresh_token));
+        await calendar.revokeToken(calendar.decrypt(pendente.refresh_token));
       } catch { /* melhor esforço */ }
       return res.status(403).json({ error: 'Não foi possível confirmar a conexão' });
     }
@@ -197,6 +197,15 @@ app.post('/calendar/google/sync', async (req, res) => {
     });
     return res.json(resultado);
   } catch (error) {
+    if (error instanceof calendar.AutorizacaoRevogada) {
+      // O usuário revogou o acesso no Google: a conexão guardada é inútil.
+      await pool.query('DELETE FROM google_calendar_connections WHERE user_id = $1', [user.id])
+        .catch((err) => console.error('Erro ao apagar conexão revogada:', err.message));
+      return res.status(409).json({ error: 'Reconecte o Google Agenda' });
+    }
+    if (error instanceof calendar.PrazoEsgotado) {
+      return res.status(504).json({ error: 'A sincronização demorou demais; tente de novo' });
+    }
     console.error('Erro ao sincronizar Google Calendar:', error.message);
     return res.status(502).json({ error: 'Não foi possível sincronizar com o Google Calendar' });
   }
