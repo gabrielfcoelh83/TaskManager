@@ -1,9 +1,12 @@
-// Escreve a EXPLICAÇÃO das questões objetivas a partir do GABARITO OFICIAL.
+// Escreve a EXPLICAÇÃO das questões objetivas a partir do GABARITO OFICIAL,
+// e só grava a que um SEGUNDO modelo conferiu e aprovou.
 //
-//   node explicar.js                         # mostra o que faria, não grava
-//   node explicar.js --aplicar               # grava
+//   node explicar.js                         # prévia: gera e confere, não grava
+//   node explicar.js --aplicar               # grava as aprovadas na conferência
 //   node explicar.js --exame 45 --lote 3 --total 30 --aplicar
 //   node explicar.js --refazer-ia --aplicar  # reescreve também as que já são 'ia'
+//   node explicar.js --conferir-gravadas     # confere as 'ia' já gravadas (prévia)
+//   node explicar.js --conferir-gravadas --aplicar  # e LIMPA as reprovadas
 //
 // O MODELO EXPLICA A RESPOSTA, NÃO A ESCOLHE
 // Gabarito é fato da FGV (migrations/001_baseline.sql). O modelo recebe a
@@ -21,6 +24,40 @@
 // Pelo mesmo motivo, um texto que AFIRMA outra letra como correta também é
 // recusado (ver `letraAfirmadaNoTexto`).
 //
+// CONFERÊNCIA POR UM SEGUNDO MODELO
+// A letra certa não basta. Na primeira rodada do 46º Exame (Ética), 2 das 6
+// explicações tinham a letra oficial, passavam em todos os filtros de texto
+// e ainda assim ensinavam direito errado:
+//   - 46º/1: "ao assumir a chefia da procuradoria, Danilo passa a integrar a
+//     carreira do Ministério Público" (Procuradoria do Estado não é MP; o
+//     fundamento é a legitimação exclusiva para a advocacia vinculada à
+//     função, no Estatuto da Advocacia);
+//   - 46º/4: "não há previsão de participação do advogado nos bens
+//     particulares do cliente" e "a quota litis não exige contraprestação
+//     exclusivamente pecuniária" (o Código de Ética diz o contrário nas duas).
+// Erro de conteúdo sem número nenhum, que regex não pega. Por isso cada lote
+// gerado vai a um modelo DIFERENTE do que escreveu (`PROMPT_CONFERENCIA`),
+// que devolve `{id, aprovada, problemas}` por questão e é instruído a
+// reprovar na dúvida. Regras:
+//   - só a APROVADA é gravada; a reprovada não marca nada no banco e volta
+//     na próxima rodada, com os problemas impressos no resumo;
+//   - resposta da conferência fora do formato (JSON quebrado, id faltando ou
+//     sobrando, `aprovada` que não seja booleano) derruba o lote inteiro —
+//     nunca vira aprovação;
+//   - sem um segundo modelo disponível não há conferência, e então não se
+//     grava nada: melhor ficar sem explicação do que gravar sem conferir. A
+//     rodada para (seguir só gastaria pedidos de geração).
+// O conferente também erra, então `revisada = false` continua valendo: a
+// conferência reduz o erro, não substitui a revisão humana.
+//
+// Um pedido de conferência POR LOTE, não por questão: a saída da conferência
+// é curta (um booleano e, se houver, uma ou duas frases por questão), então o
+// problema que limitou o lote de geração a 3 — resposta longa cortada no meio
+// — não existe aqui. Conferir uma a uma custaria 1 + 3 = 4 pedidos por lote
+// em vez de 2, e cortaria pela metade o que cabe na cota do dia. O risco do
+// lote é o mesmo da geração: uma resposta quebrada derruba as 3 questões, que
+// voltam na próxima rodada.
+//
 // ANULADAS FICAM DE FORA
 // A FGV anula quando a questão tem duas respostas, nenhuma, ou erro no
 // enunciado. O `gabarito` dessas linhas é o da prova antes da anulação — não
@@ -30,16 +67,21 @@
 // de a anulação chegar no meio da rodada).
 //
 // 'humano' NUNCA É TOCADO
-// Nem com --refazer-ia. A fila exclui, e o UPDATE repete a condição: se uma
-// pessoa escrever a explicação entre a leitura e a gravação, o texto do
-// modelo é descartado.
+// Nem com --refazer-ia, nem com --conferir-gravadas. A fila exclui, e o
+// UPDATE repete a condição: se uma pessoa escrever a explicação entre a
+// leitura e a gravação, o texto do modelo é descartado (e o da pessoa não é
+// limpo).
 //
 // Roda à mão, fora do serviço, pelos mesmos motivos do classificar.js.
 //
-// COTA: o plano gratuito da OpenRouter dá 50 pedidos/dia por chave, e o modo
-// de conferência GASTA a cota igual ao --aplicar (ele chama o modelo; só não
-// grava). Cada lote é um pedido quando dá certo e até MAX_TENTATIVAS (4) quando
-// os modelos falham em sequência.
+// COTA: o plano gratuito da OpenRouter dá 50 pedidos/dia por chave, e a
+// prévia (sem --aplicar) GASTA a cota igual ao --aplicar (ela gera e confere;
+// só não grava). Cada lote custa 2 pedidos quando dá certo (1 de geração + 1
+// de conferência) e até 4 + 3 = 7 quando os modelos falham em sequência
+// (MAX_TENTATIVAS na geração; na conferência, os mesmos menos o gerador). Lote
+// todo recusado nos filtros de texto não vai à conferência e custa 1. Teto do
+// dia: 25 lotes = 75 questões se nada falhar; conte com umas 60. O resumo
+// mostra os pedidos gastos. --conferir-gravadas custa 1 pedido por lote.
 
 const { pool } = require('./app');
 const { migrate } = require('./migrate');
@@ -70,11 +112,15 @@ const LETRAS = ['A', 'B', 'C', 'D'];
 // MAX_TOKENS.
 const LOTE_PADRAO = 3;
 
-// 30 questões = 10 pedidos no caso bom, 40 no pior (4 modelos por lote).
-// Deixa cota para outra rodada no mesmo dia; para mais, --total.
+// 30 questões = 10 lotes = 20 pedidos no caso bom (geração + conferência).
+// Mantido em 30, e não dobrado: deixa ~30 pedidos do dia para os modelos que
+// falham (cada falha custa mais um) e para uma segunda rodada que pegue as
+// reprovadas. Com a cota inteira livre, --total 60 cabe no caso bom (40).
 const TOTAL_PADRAO = 30;
 
 const MAX_TOKENS = 4096;
+// A conferência devolve booleano + frases curtas por questão; 1500 sobra.
+const MAX_TOKENS_CONFERENCIA = 1500;
 
 // Explicação sem resposta em 90s é modelo travado; o pedido seguinte vai para
 // o próximo modelo da lista em vez de prender a rodada.
@@ -337,34 +383,187 @@ function interpretarResposta(texto, questoes) {
   return { aceitas, recusadas };
 }
 
-async function chamarOpenRouter(prompt, { chave, modelos } = {}) {
+// CONFERÊNCIA (ver "CONFERÊNCIA POR UM SEGUNDO MODELO", no topo).
+//
+// O exemplo de problema do prompt é de propósito genérico (prazo de recurso),
+// e não um dos dois erros reais: citar o caso real no prompt ensinaria o
+// conferente a procurar AQUELE erro, não a conferir.
+const PROMPT_CONFERENCIA = `Você é revisor jurídico de um cursinho preparatório para o Exame de Ordem
+da OAB. Outro professor escreveu explicações para o gabarito oficial da FGV
+de questões objetivas. Sua tarefa é CONFERIR cada explicação, não reescrevê-la.
+
+Para cada questão você recebe o enunciado, as alternativas A, B, C e D, a
+letra correta segundo o gabarito oficial (é fato, não está em discussão) e a
+explicação escrita.
+
+REPROVE a explicação se encontrar QUALQUER um destes defeitos:
+1. afirmação jurídica falsa: instituto, órgão, carreira, lei, regra,
+   requisito, prazo, competência ou consequência descritos de forma errada —
+   mesmo que a letra final esteja certa, e mesmo que o erro esteja num
+   detalhe ou na justificativa de uma das alternativas erradas;
+2. contradição com a letra oficial: o texto afirma ou dá a entender que outra
+   alternativa é a correta, ou que a oficial está errada;
+3. justificativa genérica: não explica, especificamente, por que CADA UMA das
+   três alternativas erradas está errada (frases como "as demais confundem os
+   institutos" não bastam);
+4. citação inventada ou que você não consegue confirmar: dispositivo, súmula,
+   julgado, tese ou doutrina.
+
+Na dúvida, REPROVE. Uma explicação reprovada é refeita depois; uma explicação
+errada aprovada ensina errado a quem estuda. Não reprove por estilo, tamanho
+ou por faltar número de artigo: as explicações são proibidas de citar número
+de dispositivo de propósito. Se você concluir que o próprio gabarito oficial
+está errado, reprove e diga isso em "problemas".
+
+Em "problemas", uma frase curta e específica por defeito: o que o texto
+afirma e o que é o correto. Exemplo: "Diz que o prazo da apelação é de 10
+dias; no processo civil são 15." Explicação aprovada tem "problemas": [].
+
+Responda APENAS com JSON válido, sem markdown e sem comentários.`;
+
+// `explicadas`: [{id, explicacao}]; `questoes`: as linhas do lote.
+function montarPromptConferencia(explicadas, questoes) {
+  const porId = new Map(questoes.map((q) => [q.id, q]));
+  const itens = explicadas.map(({ id, explicacao }) => {
+    const q = porId.get(id);
+    return {
+      id,
+      ...(q.disciplina ? { disciplina: q.disciplina } : {}),
+      ...(q.tema ? { tema: q.tema } : {}),
+      enunciado: String(q.enunciado),
+      alternativas: Object.fromEntries(q.alternativas.map((texto, i) => [LETRAS[i], String(texto)])),
+      gabarito_oficial: LETRAS[q.gabarito],
+      explicacao,
+    };
+  });
+
+  return `Confira as explicações destas ${itens.length} questões.
+
+${JSON.stringify(itens, null, 2)}
+
+Responda com uma lista JSON, exatamente um objeto por questão, no formato:
+[{"id": 123, "aprovada": false, "problemas": ["Diz que ...; o correto é ..."]}, {"id": 124, "aprovada": true, "problemas": []}]`;
+}
+
+// Lê o veredito da conferência. ESTRITA de propósito: qualquer coisa fora do
+// formato LANÇA, e o lote inteiro volta na próxima rodada — uma resposta que
+// não se consegue ler nunca pode virar aprovação. Lança se: não há lista
+// JSON; um item não é objeto; `aprovada` não é booleano de verdade ("true"
+// em string não serve); `problemas` não é lista de strings; um id é
+// repetido, não foi enviado, ou falta.
+//
+// Devolve Map id -> { aprovada, problemas }. `aprovada: true` com problemas
+// apontados é contraditório e conta como REPROVADA (na dúvida, reprovar);
+// reprovada sem problema nenhum ganha um texto para o resumo não ficar mudo.
+function interpretarConferencia(texto, ids) {
+  const limpo = String(texto || '').trim();
+  const inicio = limpo.indexOf('[');
+  const fim = limpo.lastIndexOf(']');
+  if (inicio === -1 || fim === -1 || fim < inicio) {
+    throw new Error('conferência sem lista JSON');
+  }
+
+  let bruto;
+  try {
+    bruto = JSON.parse(limpo.slice(inicio, fim + 1));
+  } catch (err) {
+    throw new Error(`conferência com JSON inválido (${err.message})`);
+  }
+  if (!Array.isArray(bruto)) throw new Error('conferência não é uma lista');
+
+  const esperados = new Set(ids.map(Number));
+  const vereditos = new Map();
+
+  for (const item of bruto) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error('conferência com item que não é objeto');
+    }
+    const id = Number(item.id);
+    if (!esperados.has(id)) throw new Error(`conferência com id fora do lote (${JSON.stringify(item.id)})`);
+    if (vereditos.has(id)) throw new Error(`conferência com id repetido (${id})`);
+    if (typeof item.aprovada !== 'boolean') {
+      throw new Error(`conferência sem "aprovada" booleano no id ${id} (${JSON.stringify(item.aprovada ?? null)})`);
+    }
+    const problemas = item.problemas ?? [];
+    if (!Array.isArray(problemas) || problemas.some((p) => typeof p !== 'string')) {
+      throw new Error(`conferência com "problemas" que não é lista de textos no id ${id}`);
+    }
+    const apontados = problemas.map((p) => p.trim()).filter(Boolean);
+
+    if (item.aprovada && apontados.length > 0) {
+      vereditos.set(id, {
+        aprovada: false,
+        problemas: [...apontados, '(conferente marcou aprovada, mas apontou problemas: tratada como reprovada)'],
+      });
+    } else if (!item.aprovada && apontados.length === 0) {
+      vereditos.set(id, { aprovada: false, problemas: ['(conferente reprovou sem dizer por quê)'] });
+    } else {
+      vereditos.set(id, { aprovada: item.aprovada, problemas: apontados });
+    }
+  }
+
+  const faltando = [...esperados].filter((id) => !vereditos.has(id));
+  if (faltando.length > 0) throw new Error(`conferência não avaliou: ${faltando.join(', ')}`);
+
+  return vereditos;
+}
+
+// Um pedido à OpenRouter, caindo para o próximo modelo da lista em erro.
+// Devolve { conteudo, modelo, tentativas }; o erro também leva `tentativas`
+// (é o custo em pedidos, mostrado no resumo).
+//
+// `excluir`: modelos que NÃO podem responder — a conferência passa o
+// gerador. Se a exclusão esvaziar a lista, o erro sai com
+// `semConferente = true`, e quem chamou não grava.
+async function chamarOpenRouter(
+  prompt,
+  {
+    chave,
+    modelos,
+    excluir = [],
+    sistema = PROMPT_SISTEMA,
+    temperatura = 0.2,
+    maxTokens = MAX_TOKENS,
+    titulo = 'MA Questoes - explicacao',
+  } = {}
+) {
   if (!chave) throw new Error('OPENROUTER_API_KEY não definida');
 
-  const ordem = modelos || (await modelosEmOrdem(PREFERIDOS));
-  if (ordem.length === 0) throw new Error('a OpenRouter não lista nenhum modelo gratuito');
+  const todos = modelos || (await modelosEmOrdem(PREFERIDOS));
+  if (todos.length === 0) throw new Error('a OpenRouter não lista nenhum modelo gratuito');
+  const ordem = todos.filter((m) => !excluir.includes(m));
+  if (ordem.length === 0) {
+    const erro = new Error(`nenhum modelo disponível além de ${excluir.join(', ')} para conferir`);
+    erro.semConferente = true;
+    erro.tentativas = 0;
+    throw erro;
+  }
 
   let ultimoErro = null;
   let todos429 = true;
+  let tentativas = 0;
 
   for (const modelo of ordem) {
+    tentativas++;
     try {
       const res = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${chave}`,
           'Content-Type': 'application/json',
-          'X-Title': 'MA Questoes - explicacao',
+          'X-Title': titulo,
         },
         body: JSON.stringify({
           model: modelo,
           messages: [
-            { role: 'system', content: PROMPT_SISTEMA },
+            { role: 'system', content: sistema },
             { role: 'user', content: prompt },
           ],
-          // Baixa, não zero: texto corrido sai menos robótico com um pouco de
-          // variação, e o que importa (a letra) é conferido de qualquer jeito.
-          temperature: 0.2,
-          max_tokens: MAX_TOKENS,
+          // Geração: baixa, não zero — texto corrido sai menos robótico com
+          // um pouco de variação, e o que importa (a letra) é conferido de
+          // qualquer jeito. Conferência: zero (ver chamarConferencia).
+          temperature: temperatura,
+          max_tokens: maxTokens,
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
@@ -382,7 +581,7 @@ async function chamarOpenRouter(prompt, { chave, modelos } = {}) {
         continue;
       }
 
-      return { conteudo, modelo };
+      return { conteudo, modelo, tentativas };
     } catch (err) {
       todos429 = false;
       ultimoErro = err;
@@ -393,7 +592,23 @@ async function chamarOpenRouter(prompt, { chave, modelos } = {}) {
   // Todos os modelos em 429 é, quase sempre, a cota diária da CHAVE — não de
   // um modelo. Seguir para o próximo lote só gastaria mais 4 pedidos negados.
   if (todos429) erro.cotaEsgotada = true;
+  erro.tentativas = tentativas;
   throw erro;
+}
+
+// A conferência: mesma lista de modelos gratuitos (conferida contra
+// /api/v1/models), menos os de `excluir`. Temperatura zero: é um veredito,
+// não um texto.
+function chamarConferencia(prompt, { chave, modelos, excluir = [] } = {}) {
+  return chamarOpenRouter(prompt, {
+    chave,
+    modelos,
+    excluir,
+    sistema: PROMPT_CONFERENCIA,
+    temperatura: 0,
+    maxTokens: MAX_TOKENS_CONFERENCIA,
+    titulo: 'MA Questoes - conferencia',
+  });
 }
 
 async function buscarPendentes(cliente, { exame, limite, refazerIa, ignorar = [] }) {
@@ -475,7 +690,120 @@ async function gravar(cliente, aceitas, pendentes, { refazerIa }) {
   return gravadas;
 }
 
-// `chamarModelo` é injetável para o teste rodar sem rede.
+// Explicações 'ia' já gravadas e ainda não revisadas por pessoa — a fila do
+// --conferir-gravadas. 'ia' revisada = true foi conferida por alguém e fica
+// de fora, como no --refazer-ia; 'humano' nunca entra.
+async function buscarGravadas(cliente, { exame, limite, ignorar = [] }) {
+  const valores = [];
+  const condicoes = [
+    'anulada = FALSE',
+    `explicacao_fonte = 'ia'`,
+    'revisada = FALSE',
+    `explicacao IS NOT NULL AND btrim(explicacao) <> ''`,
+  ];
+  if (exame != null) {
+    valores.push(exame);
+    condicoes.push(`exame = $${valores.length}`);
+  }
+  if (ignorar.length > 0) {
+    valores.push(ignorar);
+    condicoes.push(`id <> ALL($${valores.length}::bigint[])`);
+  }
+  valores.push(limite);
+
+  const { rows } = await cliente.query(
+    `SELECT id, exame, numero, enunciado, alternativas, gabarito, disciplina, tema, explicacao
+       FROM questoes
+      WHERE ${condicoes.join(' AND ')}
+      ORDER BY exame DESC, tipo_prova ASC, numero ASC
+      LIMIT $${valores.length}`,
+    valores
+  );
+  return rows.map((r) => ({ ...r, id: Number(r.id), gabarito: Number(r.gabarito) }));
+}
+
+// Devolve à fila (explicacao e fonte = NULL) as 'ia' reprovadas. O WHERE
+// exige o MESMO texto que foi conferido: se alguém o editou, revisou ou
+// trocou por um humano no meio, nada é apagado.
+async function limparReprovadas(cliente, reprovadas) {
+  let limpas = 0;
+  for (const { id, explicacao } of reprovadas) {
+    const { rowCount } = await cliente.query(
+      `UPDATE questoes
+          SET explicacao       = NULL,
+              explicacao_fonte = NULL,
+              revisada         = FALSE,
+              atualizada_em    = NOW()
+        WHERE id = $1
+          AND explicacao_fonte = 'ia'
+          AND revisada = FALSE
+          AND explicacao = $2`,
+      [id, explicacao]
+    );
+    limpas += rowCount;
+  }
+  return limpas;
+}
+
+function novoResumo() {
+  return {
+    lidas: 0,
+    geradas: 0, // passaram nos filtros de texto (letra, tamanho, citação)
+    aprovadas: 0, // e na conferência
+    reprovadas: [], // { id, exame, numero, problemas } — reprovadas na conferência
+    gravadas: 0,
+    limpas: 0, // --conferir-gravadas --aplicar
+    recusadas: [], // filtros de texto
+    semConferente: 0,
+    lotesComErro: 0,
+    errosDeLote: [],
+    modelos: [],
+    modelosConferencia: [],
+    pedidos: 0,
+    interrompida: null,
+  };
+}
+
+const anotarModelo = (lista, modelo) => {
+  if (modelo && !lista.includes(modelo)) lista.push(modelo);
+};
+
+function registrarErroDeLote(resumo, ids, err, log) {
+  log(`  ⚠️  lote [${ids.join(', ')}] falhou (${err.message}) — volta na próxima rodada`);
+  resumo.lotesComErro++;
+  resumo.errosDeLote.push({ ids, motivo: err.message });
+  if (err.cotaEsgotada) {
+    resumo.interrompida = 'todos os modelos devolveram 429 (cota da chave provavelmente esgotada)';
+  }
+}
+
+// Confere `explicadas` ([{id, explicacao}]) e devolve o Map de vereditos.
+// Lança nos mesmos casos de interpretarConferencia, e também quando o
+// conferente acaba sendo o próprio gerador (defesa contra um `conferirModelo`
+// que ignore `excluir`).
+async function conferir(conferirModelo, explicadas, questoes, { gerador, resumo }) {
+  const excluir = gerador ? [gerador] : [];
+  let r;
+  try {
+    r = await conferirModelo(montarPromptConferencia(explicadas, questoes), { excluir });
+  } catch (err) {
+    resumo.pedidos += err.tentativas ?? 1;
+    throw err;
+  }
+  resumo.pedidos += r.tentativas ?? 1;
+  anotarModelo(resumo.modelosConferencia, r.modelo);
+  if (gerador && (!r.modelo || r.modelo === gerador)) {
+    throw new Error(`conferência feita pelo próprio gerador (${r.modelo || 'modelo não informado'})`);
+  }
+  return interpretarConferencia(r.conteudo, explicadas.map((e) => e.id));
+}
+
+const rotulo = (q) => `${q.exame}º/${q.numero} (id ${q.id}) · gabarito ${LETRAS[q.gabarito]}`;
+
+// `chamarModelo(prompt)` gera; `conferirModelo(prompt, { excluir })` confere.
+// Os dois são injetáveis para o teste rodar sem rede, e devolvem
+// { conteudo, modelo, tentativas? }. Sem `conferirModelo` a função se
+// recusa a rodar: não existe caminho que grave sem conferir.
 async function explicar({
   exame = null,
   lote = LOTE_PADRAO,
@@ -483,20 +811,15 @@ async function explicar({
   aplicar = false,
   refazerIa = false,
   chamarModelo,
+  conferirModelo,
   log = console.log,
 } = {}) {
-  const cliente = await pool.connect();
+  if (typeof conferirModelo !== 'function') {
+    throw new Error('explicar() sem conferirModelo: nada é gravado sem conferência');
+  }
 
-  const resumo = {
-    lidas: 0,
-    explicadas: 0,
-    gravadas: 0,
-    recusadas: [],
-    lotesComErro: 0,
-    errosDeLote: [],
-    modelos: [],
-    interrompida: null,
-  };
+  const cliente = await pool.connect();
+  const resumo = novoResumo();
 
   try {
     let restantes = total;
@@ -514,42 +837,78 @@ async function explicar({
       resumo.lidas += pendentes.length;
       jaTentadas.push(...pendentes.map((p) => p.id));
       restantes -= pendentes.length;
+      const ids = pendentes.map((p) => p.id);
 
+      // 1. GERAÇÃO
       let interpretada;
+      let gerador;
       try {
-        const { conteudo, modelo } = await chamarModelo(montarPrompt(pendentes));
-        if (modelo && !resumo.modelos.includes(modelo)) resumo.modelos.push(modelo);
-        interpretada = interpretarResposta(conteudo, pendentes);
+        let r;
+        try {
+          r = await chamarModelo(montarPrompt(pendentes));
+        } catch (err) {
+          resumo.pedidos += err.tentativas ?? 1;
+          throw err;
+        }
+        resumo.pedidos += r.tentativas ?? 1;
+        gerador = r.modelo;
+        anotarModelo(resumo.modelos, gerador);
+        // Sem saber quem escreveu, não há como garantir que outro confira.
+        if (!gerador) throw new Error('a geração não informou o modelo');
+        interpretada = interpretarResposta(r.conteudo, pendentes);
       } catch (err) {
         // Lote que falha (rede, JSON quebrado) não derruba a rodada: as
         // questões continuam pendentes e voltam na próxima execução.
-        const ids = pendentes.map((p) => p.id).join(', ');
-        log(`  ⚠️  lote [${ids}] falhou (${err.message}) — volta na próxima rodada`);
-        resumo.lotesComErro++;
-        resumo.errosDeLote.push({ ids: pendentes.map((p) => p.id), motivo: err.message });
-        if (err.cotaEsgotada) {
-          resumo.interrompida = 'todos os modelos devolveram 429 (cota da chave provavelmente esgotada)';
-          break;
-        }
+        registrarErroDeLote(resumo, ids, err, log);
+        if (resumo.interrompida) break;
         continue;
       }
 
-      resumo.explicadas += interpretada.aceitas.length;
+      resumo.geradas += interpretada.aceitas.length;
       resumo.recusadas.push(...interpretada.recusadas);
+      for (const rec of interpretada.recusadas) log(`  ✗ recusada ${rec.id}: ${rec.motivo}`);
 
-      // Na conferência o texto vai inteiro para a tela: é para isso que ela
-      // existe — ler antes de decidir gravar.
+      // Tudo recusado nos filtros de texto: nada a conferir, e não se gasta
+      // o pedido.
+      if (interpretada.aceitas.length === 0) continue;
+
+      // 2. CONFERÊNCIA
+      let vereditos;
+      try {
+        vereditos = await conferir(conferirModelo, interpretada.aceitas, pendentes, { gerador, resumo });
+      } catch (err) {
+        if (err.semConferente) {
+          resumo.semConferente += interpretada.aceitas.length;
+          resumo.interrompida = `sem segundo modelo para conferir (${err.message}); nada foi gravado sem conferência`;
+          log(`  ⛔ ${resumo.interrompida}`);
+          break;
+        }
+        registrarErroDeLote(resumo, ids, err, log);
+        if (resumo.interrompida) break;
+        continue;
+      }
+
+      // O texto vai inteiro para a tela, com o veredito: é para ler antes
+      // de confiar.
+      const aprovadas = [];
       for (const item of interpretada.aceitas) {
         const q = pendentes.find((p) => p.id === item.id);
-        log(`\n  ${q.exame}º/${q.numero} (id ${q.id}) · gabarito ${LETRAS[q.gabarito]}`);
+        const v = vereditos.get(item.id);
+        log(`\n  ${rotulo(q)} · ${v.aprovada ? 'APROVADA' : 'REPROVADA'} na conferência`);
         log(`  ${item.explicacao}`);
+        if (v.aprovada) {
+          aprovadas.push(item);
+        } else {
+          for (const p of v.problemas) log(`    - ${p}`);
+          resumo.reprovadas.push({ id: q.id, exame: q.exame, numero: q.numero, problemas: v.problemas });
+        }
       }
-      for (const rec of interpretada.recusadas) {
-        log(`  ✗ recusada ${rec.id}: ${rec.motivo}`);
-      }
+      resumo.aprovadas += aprovadas.length;
 
-      if (aplicar) {
-        resumo.gravadas += await gravar(cliente, interpretada.aceitas, pendentes, { refazerIa });
+      // 3. GRAVAÇÃO — só as aprovadas. Reprovada não marca nada no banco:
+      // continua pendente e volta na próxima rodada.
+      if (aplicar && aprovadas.length > 0) {
+        resumo.gravadas += await gravar(cliente, aprovadas, pendentes, { refazerIa });
       }
     }
   } finally {
@@ -559,15 +918,122 @@ async function explicar({
   return resumo;
 }
 
+// --conferir-gravadas: confere as 'ia' não revisadas que JÁ estão no banco,
+// sem gerar nada. Com `aplicar`, as reprovadas são limpas e voltam à fila
+// normal; as aprovadas ficam como estão (sem marca nenhuma — `revisada`
+// continua sendo só para pessoa). O banco não guarda qual modelo escreveu
+// cada uma, então o conferente é o primeiro disponível da lista — para não
+// ter o autor conferindo a si mesmo, rode com IA_MODELOS sem o gerador.
+async function conferirGravadas({
+  exame = null,
+  lote = LOTE_PADRAO,
+  total = TOTAL_PADRAO,
+  aplicar = false,
+  conferirModelo,
+  log = console.log,
+} = {}) {
+  if (typeof conferirModelo !== 'function') throw new Error('conferirGravadas() sem conferirModelo');
+
+  const cliente = await pool.connect();
+  const resumo = novoResumo();
+
+  try {
+    let restantes = total;
+    const jaTentadas = [];
+
+    while (restantes > 0) {
+      const gravadas = await buscarGravadas(cliente, {
+        exame,
+        limite: Math.min(lote, restantes),
+        ignorar: jaTentadas,
+      });
+      if (gravadas.length === 0) break;
+      resumo.lidas += gravadas.length;
+      jaTentadas.push(...gravadas.map((q) => q.id));
+      restantes -= gravadas.length;
+
+      const explicadas = gravadas.map((q) => ({ id: q.id, explicacao: q.explicacao }));
+      let vereditos;
+      try {
+        vereditos = await conferir(conferirModelo, explicadas, gravadas, { gerador: null, resumo });
+      } catch (err) {
+        registrarErroDeLote(resumo, gravadas.map((q) => q.id), err, log);
+        if (resumo.interrompida) break;
+        continue;
+      }
+
+      const reprovadas = [];
+      for (const q of gravadas) {
+        const v = vereditos.get(q.id);
+        log(`\n  ${rotulo(q)} · ${v.aprovada ? 'APROVADA' : 'REPROVADA'} na conferência`);
+        if (v.aprovada) {
+          resumo.aprovadas++;
+        } else {
+          log(`  ${q.explicacao}`);
+          for (const p of v.problemas) log(`    - ${p}`);
+          resumo.reprovadas.push({ id: q.id, exame: q.exame, numero: q.numero, problemas: v.problemas });
+          reprovadas.push(q);
+        }
+      }
+
+      if (aplicar && reprovadas.length > 0) {
+        resumo.limpas += await limparReprovadas(cliente, reprovadas);
+      }
+    }
+  } finally {
+    cliente.release();
+  }
+
+  return resumo;
+}
+
+function imprimirResumo(r, { aplicar, modo }) {
+  console.log('');
+  if (modo === 'conferir-gravadas') {
+    console.log(
+      `${r.lidas} conferida(s): ${r.aprovadas} aprovada(s), ${r.reprovadas.length} reprovada(s)` +
+        (aplicar ? `, ${r.limpas} limpa(s) e de volta à fila` : ' (prévia: nada foi limpo)')
+    );
+  } else {
+    console.log(
+      `${r.lidas} lida(s) · ${r.geradas} gerada(s) · ${r.aprovadas} aprovada(s) · ` +
+        `${r.reprovadas.length} reprovada(s) na conferência · ` +
+        (aplicar ? `${r.gravadas} gravada(s)` : '0 gravada(s) (prévia)')
+    );
+    if (r.recusadas.length) console.log(`${r.recusadas.length} recusada(s) nos filtros de texto`);
+    if (r.semConferente) console.log(`${r.semConferente} sem conferente disponível — não gravada(s)`);
+  }
+  console.log(`custo: ${r.pedidos} pedido(s) à OpenRouter (cota gratuita: 50/dia)`);
+  if (r.lotesComErro) console.log(`${r.lotesComErro} lote(s) falharam e voltam na próxima rodada`);
+  for (const e of r.errosDeLote) console.log(`  lote [${e.ids.join(', ')}]: ${e.motivo}`);
+  if (r.interrompida) console.log(`⛔ rodada interrompida: ${r.interrompida}`);
+  if (modo !== 'conferir-gravadas') {
+    console.log(`gerador(es): ${r.modelos.length ? r.modelos.join(', ') : 'nenhum'}`);
+  }
+  console.log(`conferente(s): ${r.modelosConferencia.length ? r.modelosConferencia.join(', ') : 'nenhum'}`);
+  for (const rec of r.recusadas) console.log(`  recusada ${rec.id}: ${rec.motivo}`);
+  for (const rep of r.reprovadas) {
+    console.log(`  reprovada ${rep.exame}º/${rep.numero} (id ${rep.id}):`);
+    for (const p of rep.problemas) console.log(`    - ${p}`);
+  }
+}
+
 module.exports = {
   explicar,
+  conferirGravadas,
   interpretarResposta,
+  interpretarConferencia,
   montarPrompt,
+  montarPromptConferencia,
   chamarOpenRouter,
+  chamarConferencia,
   letraAfirmadaNoTexto,
   citacaoNumerada,
   PROMPT_SISTEMA,
+  PROMPT_CONFERENCIA,
+  PREFERIDOS,
   LOTE_PADRAO,
+  TOTAL_PADRAO,
   MAX_CARACTERES,
 };
 
@@ -586,6 +1052,7 @@ if (require.main === module) {
 
   const aplicar = argv.includes('--aplicar');
   const refazerIa = argv.includes('--refazer-ia');
+  const modoGravadas = argv.includes('--conferir-gravadas');
   const exame = valor('--exame', null);
   const lote = valor('--lote', LOTE_PADRAO);
   const total = valor('--total', TOTAL_PADRAO);
@@ -596,32 +1063,50 @@ if (require.main === module) {
     console.error('   Ex.: OPENROUTER_API_KEY=$(cat ~/.openrouter-key) node explicar.js --aplicar');
     process.exit(1);
   }
+  if (modoGravadas && refazerIa) {
+    console.error('❌ --conferir-gravadas não gera nada; não combina com --refazer-ia.');
+    process.exit(1);
+  }
 
   if (!aplicar) {
-    console.log('🔍 Modo de conferência: nada será gravado. Use --aplicar para valer.');
-    console.log('   (A conferência chama o modelo e gasta cota da OpenRouter igual.)\n');
+    console.log('🔍 Prévia: nada será gravado nem limpo. Use --aplicar para valer.');
+    console.log('   (A prévia chama os modelos e gasta cota da OpenRouter igual.)\n');
   }
   if (refazerIa) console.log('♻️  --refazer-ia: explicações da IA não revisadas também entram na fila.\n');
+  if (modoGravadas) console.log("🔎 --conferir-gravadas: confere as explicações 'ia' não revisadas já gravadas.\n");
 
-  migrate(pool)
+  const conferirModelo = (prompt, { excluir }) => chamarConferencia(prompt, { chave, excluir });
+
+  // Antes de gastar um pedido: a geração precisa de DOIS modelos (um escreve,
+  // outro confere). Com um só (ex.: IA_MODELOS com um id), não roda.
+  // Listar modelos não gasta cota.
+  modelosEmOrdem(PREFERIDOS)
+    .then((disponiveis) => {
+      const minimo = modoGravadas ? 1 : 2;
+      if (disponiveis.length < minimo) {
+        throw new Error(
+          `só ${disponiveis.length} modelo(s) gratuito(s) disponível(is) (${disponiveis.join(', ') || 'nenhum'}); ` +
+            `${modoGravadas ? 'a conferência precisa de 1' : 'são precisos 2: um escreve, outro confere'}. Nada foi feito.`
+        );
+      }
+      console.log(`modelos disponíveis: ${disponiveis.join(', ')}\n`);
+      return migrate(pool);
+    })
     .then(() =>
-      explicar({
-        exame,
-        lote,
-        total,
-        aplicar,
-        refazerIa,
-        chamarModelo: (prompt) => chamarOpenRouter(prompt, { chave }),
-      })
+      modoGravadas
+        ? conferirGravadas({ exame, lote, total, aplicar, conferirModelo })
+        : explicar({
+            exame,
+            lote,
+            total,
+            aplicar,
+            refazerIa,
+            chamarModelo: (prompt) => chamarOpenRouter(prompt, { chave }),
+            conferirModelo,
+          })
     )
     .then((r) => {
-      console.log(`\n${r.lidas} lida(s), ${r.explicadas} explicada(s), ${r.recusadas.length} recusada(s)`);
-      if (aplicar) console.log(`${r.gravadas} gravada(s) no banco`);
-      if (r.lotesComErro) console.log(`${r.lotesComErro} lote(s) falharam e voltam na próxima rodada`);
-      for (const e of r.errosDeLote) console.log(`  lote [${e.ids.join(', ')}]: ${e.motivo}`);
-      if (r.interrompida) console.log(`⛔ rodada interrompida: ${r.interrompida}`);
-      console.log(`modelo(s) usado(s): ${r.modelos.length ? r.modelos.join(', ') : 'nenhum'}`);
-      for (const rec of r.recusadas) console.log(`  recusada ${rec.id}: ${rec.motivo}`);
+      imprimirResumo(r, { aplicar, modo: modoGravadas ? 'conferir-gravadas' : 'gerar' });
       return pool.end();
     })
     .catch((err) => {

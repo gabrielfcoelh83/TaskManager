@@ -12,9 +12,14 @@ const { pool } = require('../app');
 const { migrate } = require('../migrate');
 const {
   explicar,
+  conferirGravadas,
   interpretarResposta,
+  interpretarConferencia,
   montarPrompt,
+  montarPromptConferencia,
   chamarOpenRouter,
+  chamarConferencia,
+  PROMPT_CONFERENCIA,
   letraAfirmadaNoTexto,
   citacaoNumerada,
   PROMPT_SISTEMA,
@@ -87,6 +92,18 @@ function modeloQueConcorda({ texto = textoBom, letra } = {}) {
     };
   });
 }
+
+// Conferente que aprova tudo o que recebe, com modelo diferente do gerador.
+function conferenteQueAprova(modelo = 'conferente-teste') {
+  return jest.fn(async (prompt) => ({
+    conteudo: JSON.stringify(itensDaConferencia(prompt).map((q) => ({ id: q.id, aprovada: true, problemas: [] }))),
+    modelo,
+  }));
+}
+
+// A lista que o prompt de conferência carrega.
+const itensDaConferencia = (prompt) =>
+  JSON.parse(prompt.slice(prompt.indexOf('['), prompt.indexOf(']\n\nResponda') + 1));
 
 beforeAll(async () => {
   await migrate(pool);
@@ -368,7 +385,7 @@ describe('chamarOpenRouter (fetch simulado)', () => {
 
     const r = await chamarOpenRouter(prompt, { chave: 'k', modelos: ['m1', 'm2', 'm3'] });
 
-    expect(r).toEqual({ conteudo: '[]', modelo: 'm3' });
+    expect(r).toEqual({ conteudo: '[]', modelo: 'm3', tentativas: 3 });
     expect(global.fetch).toHaveBeenCalledTimes(3);
     const corpo = JSON.parse(global.fetch.mock.calls[0][1].body);
     expect(corpo.messages[0].content).toBe(PROMPT_SISTEMA);
@@ -403,9 +420,9 @@ describe('explicar', () => {
     const antes = await buscar(id);
     const modelo = modeloQueConcorda();
 
-    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo: modelo });
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo: modelo, conferirModelo: conferenteQueAprova() });
 
-    expect(r).toMatchObject({ lidas: 1, explicadas: 1, gravadas: 1, recusadas: [], modelos: ['modelo-teste'] });
+    expect(r).toMatchObject({ lidas: 1, geradas: 1, aprovadas: 1, gravadas: 1, recusadas: [], reprovadas: [], modelos: ['modelo-teste'], pedidos: 2 });
     expect(modelo.mock.calls[0][0]).toContain('"gabarito_oficial": "C"');
 
     const depois = await buscar(id);
@@ -421,6 +438,7 @@ describe('explicar', () => {
     const id = await inserir(1, { gabarito: 2 });
 
     const r = await explicar({
+      conferirModelo: conferenteQueAprova(),
       exame: EXAME_TESTE,
       aplicar: true,
       log: silencio,
@@ -432,6 +450,7 @@ describe('explicar', () => {
     expect((await buscar(id)).explicacao).toBeNull();
 
     const segunda = await explicar({
+      conferirModelo: conferenteQueAprova(),
       exame: EXAME_TESTE,
       aplicar: true,
       log: silencio,
@@ -451,7 +470,7 @@ describe('explicar', () => {
 
     for (const refazerIa of [false, true]) {
       const modelo = modeloQueConcorda();
-      await explicar({ exame: EXAME_TESTE, aplicar: true, refazerIa, log: silencio, chamarModelo: modelo });
+      await explicar({ exame: EXAME_TESTE, aplicar: true, refazerIa, log: silencio, chamarModelo: modelo, conferirModelo: conferenteQueAprova() });
       for (const [prompt] of modelo.mock.calls) expect(prompt).not.toContain(MARCA);
     }
 
@@ -473,9 +492,9 @@ describe('explicar', () => {
       return base(prompt);
     });
 
-    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo });
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo, conferirModelo: conferenteQueAprova() });
 
-    expect(r.explicadas).toBe(1);
+    expect(r.geradas).toBe(1);
     expect(r.gravadas).toBe(0);
     const q = await buscar(id);
     expect(q.explicacao).toBe('Texto humano.');
@@ -493,7 +512,7 @@ describe('explicar', () => {
       return base(prompt);
     });
 
-    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo });
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo, conferirModelo: conferenteQueAprova() });
 
     expect(r.gravadas).toBe(0);
     expect((await buscar(anulada)).explicacao).toBeNull();
@@ -506,7 +525,7 @@ describe('explicar', () => {
     await inserir(2);
     const modelo = modeloQueConcorda();
 
-    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo: modelo });
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo: modelo, conferirModelo: conferenteQueAprova() });
 
     expect(r.lidas).toBe(1);
     expect(modelo.mock.calls[0][0]).not.toContain(MARCA);
@@ -520,6 +539,7 @@ describe('explicar', () => {
     const humana = await inserir(4, { explicacao: 'Humana.', explicacao_fonte: 'humano' });
 
     const normal = await explicar({
+      conferirModelo: conferenteQueAprova(),
       exame: EXAME_TESTE,
       aplicar: true,
       log: silencio,
@@ -531,6 +551,7 @@ describe('explicar', () => {
 
     const modelo = modeloQueConcorda();
     const refeita = await explicar({
+      conferirModelo: conferenteQueAprova(),
       exame: EXAME_TESTE,
       aplicar: true,
       refazerIa: true,
@@ -550,14 +571,14 @@ describe('explicar', () => {
     expect((await buscar(humana)).explicacao).toBe('Humana.');
   });
 
-  it('modo conferência não grava, mas percorre a fila inteira', async () => {
+  it('prévia (sem --aplicar) não grava, mas gera, confere e percorre a fila inteira', async () => {
     const ids = [];
     for (let n = 1; n <= 5; n++) ids.push(await inserir(n));
     const modelo = modeloQueConcorda();
 
-    const r = await explicar({ exame: EXAME_TESTE, lote: 2, aplicar: false, log: silencio, chamarModelo: modelo });
+    const r = await explicar({ exame: EXAME_TESTE, lote: 2, aplicar: false, log: silencio, chamarModelo: modelo, conferirModelo: conferenteQueAprova() });
 
-    expect(r).toMatchObject({ lidas: 5, explicadas: 5, gravadas: 0 });
+    expect(r).toMatchObject({ lidas: 5, geradas: 5, aprovadas: 5, gravadas: 0 });
     expect(modelo).toHaveBeenCalledTimes(3);
     for (const id of ids) expect((await buscar(id)).explicacao).toBeNull();
   });
@@ -574,7 +595,7 @@ describe('explicar', () => {
       return bom(prompt);
     });
 
-    const r = await explicar({ exame: EXAME_TESTE, lote: 2, aplicar: true, log: silencio, chamarModelo });
+    const r = await explicar({ exame: EXAME_TESTE, lote: 2, aplicar: true, log: silencio, chamarModelo, conferirModelo: conferenteQueAprova() });
 
     expect(r.lotesComErro).toBe(1);
     expect(r.errosDeLote[0].ids).toEqual(ids.slice(0, 2));
@@ -584,7 +605,7 @@ describe('explicar', () => {
 
     // Próxima rodada: as duas do lote quebrado são as únicas na fila.
     const modelo = modeloQueConcorda();
-    const segunda = await explicar({ exame: EXAME_TESTE, lote: 2, aplicar: true, log: silencio, chamarModelo: modelo });
+    const segunda = await explicar({ exame: EXAME_TESTE, lote: 2, aplicar: true, log: silencio, chamarModelo: modelo, conferirModelo: conferenteQueAprova() });
     expect(segunda).toMatchObject({ lidas: 2, gravadas: 2, lotesComErro: 0 });
   });
 
@@ -596,7 +617,7 @@ describe('explicar', () => {
       throw e;
     });
 
-    const r = await explicar({ exame: EXAME_TESTE, lote: 1, aplicar: true, log: silencio, chamarModelo });
+    const r = await explicar({ exame: EXAME_TESTE, lote: 1, aplicar: true, log: silencio, chamarModelo, conferirModelo: conferenteQueAprova() });
 
     expect(chamarModelo).toHaveBeenCalledTimes(1);
     expect(r.interrompida).toMatch(/429/);
@@ -606,6 +627,7 @@ describe('explicar', () => {
   it('respeita --total', async () => {
     for (let n = 1; n <= 5; n++) await inserir(n);
     const r = await explicar({
+      conferirModelo: conferenteQueAprova(),
       exame: EXAME_TESTE,
       lote: 2,
       total: 3,
@@ -624,5 +646,475 @@ test('gabarito é índice 0..3 e vira A..D no prompt', () => {
   LETRAS.forEach((letra, i) => {
     const p = montarPrompt([{ id: 1, enunciado: 'x', alternativas: ['a', 'b', 'c', 'd'], gabarito: i }]);
     expect(p).toContain(`"gabarito_oficial": "${letra}"`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONFERÊNCIA POR UM SEGUNDO MODELO
+//
+// Os dois erros jurídicos reais da primeira rodada do 46º Exame (Ética):
+// letra oficial certa, nenhum número de dispositivo, tamanho dentro da faixa
+// — passam em todos os filtros de texto, e por isso a conferência existe.
+// ---------------------------------------------------------------------------
+
+// 46º/1 — gabarito D. Erro: Procuradoria do Estado tratada como Ministério
+// Público (o fundamento é a legitimação exclusiva para a advocacia vinculada
+// à função, no Estatuto da Advocacia).
+const REAL_46_1 = {
+  gabarito: 3,
+  enunciado:
+    'Danilo, advogado, foi nomeado Procurador-Geral do Estado. Ele pretende continuar advogando em causas particulares.',
+  explicacao:
+    'A alternativa D está correta. Ao assumir a chefia da procuradoria, Danilo passa a integrar a carreira do ' +
+    'Ministério Público, e por isso fica impedido de exercer a advocacia fora das atribuições do cargo. A ' +
+    'alternativa A está errada porque não há licença automática da inscrição nesse caso. A alternativa B está ' +
+    'errada porque a restrição não alcança apenas as causas contra o Estado. A alternativa C está errada porque ' +
+    'a inscrição não é cancelada; apenas a advocacia privada fica vedada enquanto durar a chefia do órgão.',
+  problemas: [
+    'Diz que a chefia da procuradoria integra a carreira do Ministério Público; a Procuradoria do Estado não é MP — o fundamento é a legitimação exclusiva para a advocacia vinculada à função, no Estatuto da Advocacia.',
+  ],
+};
+
+// 46º/4 — gabarito A. Erros: nega a participação em bens particulares (o
+// Código de Ética a admite excepcionalmente) e diz que a quota litis não
+// precisa ser em pecúnia (precisa).
+const REAL_46_4 = {
+  gabarito: 0,
+  enunciado:
+    'Uma cliente teve os bens bloqueados e propôs ao advogado pagar os honorários com parte do que vier a ser liberado.',
+  explicacao:
+    'A alternativa A está correta, pois o advogado pode ajustar os honorários com a cliente desde que observe os ' +
+    'limites éticos da cobrança. A alternativa B está errada porque não há previsão de participação do advogado ' +
+    'nos bens particulares do cliente. A alternativa C está errada porque a cláusula de quota litis não exige que ' +
+    'a contraprestação seja exclusivamente pecuniária, podendo o advogado receber bens. A alternativa D está errada ' +
+    'porque o bloqueio dos bens não autoriza o advogado a reter valores sem previsão no contrato de honorários.',
+  problemas: [
+    'Diz que não há previsão de participação do advogado em bens particulares do cliente; o Código de Ética a admite excepcionalmente.',
+    'Diz que a quota litis não precisa ser exclusivamente em pecúnia; o Código de Ética exige que seja em pecúnia.',
+  ],
+};
+
+// Só o que a questão tem no banco antes de ser explicada.
+const pendente = (real) => ({ gabarito: real.gabarito, enunciado: real.enunciado });
+
+// Gerador que devolve, por id, o texto de `textos` (ou o texto bom).
+function geradorComTextos(textos, modelo = 'modelo-teste') {
+  return jest.fn(async (prompt) => ({
+    conteudo: JSON.stringify(
+      itensDoPrompt(prompt).map((q) => ({
+        id: q.id,
+        correta: q.gabarito_oficial,
+        explicacao: textos[q.id] ?? textoBom(`[${q.id}]`),
+      }))
+    ),
+    modelo,
+  }));
+}
+
+// Conferente que reprova os ids de `reprovar` (id -> problemas) e aprova o resto.
+function conferenteQueReprova(reprovar, modelo = 'conferente-teste') {
+  return jest.fn(async (prompt) => ({
+    conteudo: JSON.stringify(
+      itensDaConferencia(prompt).map((q) =>
+        reprovar[q.id]
+          ? { id: q.id, aprovada: false, problemas: reprovar[q.id] }
+          : { id: q.id, aprovada: true, problemas: [] }
+      )
+    ),
+    modelo,
+  }));
+}
+
+describe('conferência: prompt e interpretação', () => {
+  it('o prompt manda reprovar erro jurídico, contradição, justificativa genérica e citação inventada — e na dúvida', () => {
+    expect(PROMPT_CONFERENCIA).toMatch(/REPROVE/);
+    expect(PROMPT_CONFERENCIA).toMatch(/afirmação jurídica falsa/);
+    expect(PROMPT_CONFERENCIA).toMatch(/instituto, órgão, carreira, lei, regra/);
+    expect(PROMPT_CONFERENCIA).toMatch(/contradição com a letra oficial/);
+    expect(PROMPT_CONFERENCIA).toMatch(/justificativa genérica/);
+    expect(PROMPT_CONFERENCIA).toMatch(/citação inventada/);
+    expect(PROMPT_CONFERENCIA).toMatch(/Na dúvida, REPROVE/);
+    expect(PROMPT_CONFERENCIA).toMatch(/APENAS com JSON/);
+  });
+
+  it('montarPromptConferencia leva enunciado, alternativas, letra oficial e a explicação', () => {
+    const q = { id: 9, enunciado: 'Caso.', alternativas: ['a', 'b', 'c', 'd'], gabarito: 3, disciplina: 'Ética', tema: null };
+    const prompt = montarPromptConferencia([{ id: 9, explicacao: 'Texto da explicação.' }], [q]);
+    expect(itensDaConferencia(prompt)).toEqual([
+      {
+        id: 9,
+        disciplina: 'Ética',
+        enunciado: 'Caso.',
+        alternativas: { A: 'a', B: 'b', C: 'c', D: 'd' },
+        gabarito_oficial: 'D',
+        explicacao: 'Texto da explicação.',
+      },
+    ]);
+    expect(prompt).toMatch(/"aprovada"/);
+    expect(prompt).toMatch(/"problemas"/);
+  });
+
+  it('lê aprovada e reprovada, com os problemas', () => {
+    const v = interpretarConferencia(
+      JSON.stringify([
+        { id: 1, aprovada: true, problemas: [] },
+        { id: 2, aprovada: false, problemas: ['Erro de instituto.'] },
+      ]),
+      [1, 2]
+    );
+    expect(v.get(1)).toEqual({ aprovada: true, problemas: [] });
+    expect(v.get(2)).toEqual({ aprovada: false, problemas: ['Erro de instituto.'] });
+  });
+
+  it('aprovada com problemas apontados conta como reprovada; reprovada muda ganha motivo', () => {
+    const v = interpretarConferencia(
+      JSON.stringify([
+        { id: 1, aprovada: true, problemas: ['Mas cita prazo errado.'] },
+        { id: 2, aprovada: false, problemas: [] },
+      ]),
+      [1, 2]
+    );
+    expect(v.get(1).aprovada).toBe(false);
+    expect(v.get(1).problemas[0]).toBe('Mas cita prazo errado.');
+    expect(v.get(2)).toEqual({ aprovada: false, problemas: ['(conferente reprovou sem dizer por quê)'] });
+  });
+
+  it('aceita cerca ```json em volta', () => {
+    const v = interpretarConferencia('```json\n[{"id": 1, "aprovada": true, "problemas": []}]\n```', [1]);
+    expect(v.get(1).aprovada).toBe(true);
+  });
+
+  it.each([
+    ['texto sem JSON', 'Todas as explicações estão corretas.'],
+    ['JSON cortado', '[{"id": 1, "aprovada": tr'],
+    ['objeto em vez de lista', '{"id": 1, "aprovada": true}'],
+    ['"aprovada" em string', '[{"id": 1, "aprovada": "true", "problemas": []}]'],
+    ['"aprovada" ausente', '[{"id": 1, "problemas": []}]'],
+    ['"problemas" que não é lista', '[{"id": 1, "aprovada": false, "problemas": "erro"}]'],
+    ['id faltando', '[{"id": 1, "aprovada": true, "problemas": []}]', [1, 2]],
+    ['id fora do lote', '[{"id": 1, "aprovada": true, "problemas": []}, {"id": 7, "aprovada": true, "problemas": []}]'],
+    ['id repetido', '[{"id": 1, "aprovada": false, "problemas": ["x"]}, {"id": 1, "aprovada": true, "problemas": []}]'],
+  ])('JSON inválido da conferência LANÇA, nunca aprova: %s', (_caso, texto, ids = [1]) => {
+    expect(() => interpretarConferencia(texto, ids)).toThrow();
+  });
+
+  it('os dois erros reais do 46º passam em todos os filtros de texto (por isso a conferência)', () => {
+    const { aceitas, recusadas } = interpretarResposta(
+      JSON.stringify([
+        { id: 1, correta: 'D', explicacao: REAL_46_1.explicacao },
+        { id: 4, correta: 'A', explicacao: REAL_46_4.explicacao },
+      ]),
+      [
+        { id: 1, gabarito: REAL_46_1.gabarito },
+        { id: 4, gabarito: REAL_46_4.gabarito },
+      ]
+    );
+    expect(recusadas).toEqual([]);
+    expect(aceitas.map((a) => a.id)).toEqual([1, 4]);
+  });
+});
+
+describe('explicar com conferência', () => {
+  it('grava a aprovada e NÃO grava as reprovadas (os dois casos reais do 46º), que voltam na próxima rodada', async () => {
+    const q1 = await inserir(1, pendente(REAL_46_1));
+    const q4 = await inserir(4, pendente(REAL_46_4));
+    const boa = await inserir(5, { gabarito: 1 });
+
+    const gerador = geradorComTextos({ [q1]: REAL_46_1.explicacao, [q4]: REAL_46_4.explicacao });
+    const conferente = conferenteQueReprova({ [q1]: REAL_46_1.problemas, [q4]: REAL_46_4.problemas });
+    const linhas = [];
+
+    const r = await explicar({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: (m) => linhas.push(m),
+      chamarModelo: gerador,
+      conferirModelo: conferente,
+    });
+
+    expect(r).toMatchObject({ lidas: 3, geradas: 3, aprovadas: 1, gravadas: 1, pedidos: 2, lotesComErro: 0 });
+    expect(r.reprovadas).toEqual([
+      { id: q1, exame: EXAME_TESTE, numero: 1, problemas: REAL_46_1.problemas },
+      { id: q4, exame: EXAME_TESTE, numero: 4, problemas: REAL_46_4.problemas },
+    ]);
+    // Os problemas vão para a tela.
+    const saida = linhas.join('\n');
+    expect(saida).toContain('REPROVADA na conferência');
+    expect(saida).toContain(REAL_46_4.problemas[1]);
+
+    // O conferente recebeu as três explicações num pedido só, com a letra oficial.
+    expect(conferente).toHaveBeenCalledTimes(1);
+    const enviados = itensDaConferencia(conferente.mock.calls[0][0]);
+    expect(enviados.find((i) => i.id === q1)).toMatchObject({ gabarito_oficial: 'D', explicacao: REAL_46_1.explicacao });
+
+    // Reprovada não marca nada no banco.
+    for (const id of [q1, q4]) {
+      const q = await buscar(id);
+      expect(q.explicacao).toBeNull();
+      expect(q.explicacao_fonte).toBeNull();
+    }
+    expect((await buscar(boa)).explicacao_fonte).toBe('ia');
+
+    // Próxima rodada: só as duas reprovadas estão na fila.
+    const modelo = modeloQueConcorda();
+    const segunda = await explicar({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      chamarModelo: modelo,
+      conferirModelo: conferenteQueAprova(),
+    });
+    expect(idsDoPrompt(modelo.mock.calls[0][0]).sort((a, b) => a - b)).toEqual([q1, q4].sort((a, b) => a - b));
+    expect(segunda.gravadas).toBe(2);
+  });
+
+  it('JSON inválido da conferência não grava nada: o lote falha e volta depois', async () => {
+    const ids = [await inserir(1), await inserir(2)];
+    const conferente = jest.fn(async () => ({ conteudo: '[{"id": 1, "aprovada": tru', modelo: 'conferente-teste' }));
+
+    const r = await explicar({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      chamarModelo: modeloQueConcorda(),
+      conferirModelo: conferente,
+    });
+
+    expect(r).toMatchObject({ geradas: 2, aprovadas: 0, gravadas: 0, lotesComErro: 1, pedidos: 2 });
+    expect(r.errosDeLote[0].motivo).toMatch(/conferência/);
+    for (const id of ids) expect((await buscar(id)).explicacao).toBeNull();
+  });
+
+  it('"aprovada": "true" (string) não vale como aprovação', async () => {
+    const id = await inserir(1);
+    const conferente = jest.fn(async (prompt) => ({
+      conteudo: JSON.stringify(itensDaConferencia(prompt).map((q) => ({ id: q.id, aprovada: 'true', problemas: [] }))),
+      modelo: 'conferente-teste',
+    }));
+    const r = await explicar({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      chamarModelo: modeloQueConcorda(),
+      conferirModelo: conferente,
+    });
+    expect(r.gravadas).toBe(0);
+    expect((await buscar(id)).explicacao).toBeNull();
+  });
+
+  it('a conferência é pedida excluindo o gerador; conferente igual ao gerador não grava', async () => {
+    const id = await inserir(1);
+    const conferente = conferenteQueAprova('modelo-teste'); // mesmo id do gerador
+
+    const r = await explicar({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      chamarModelo: modeloQueConcorda(),
+      conferirModelo: conferente,
+    });
+
+    expect(conferente.mock.calls[0][1]).toEqual({ excluir: ['modelo-teste'] });
+    expect(r.gravadas).toBe(0);
+    expect(r.errosDeLote[0].motivo).toMatch(/próprio gerador/);
+    expect((await buscar(id)).explicacao).toBeNull();
+  });
+
+  it('lote todo recusado nos filtros de texto não vai à conferência (não gasta o pedido)', async () => {
+    await inserir(1, { gabarito: 2 });
+    const conferente = conferenteQueAprova();
+    const r = await explicar({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      chamarModelo: modeloQueConcorda({ letra: () => 'A' }),
+      conferirModelo: conferente,
+    });
+    expect(conferente).not.toHaveBeenCalled();
+    expect(r.pedidos).toBe(1);
+  });
+
+  it('sem conferirModelo, explicar se recusa a rodar', async () => {
+    await expect(explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, chamarModelo: modeloQueConcorda() })).rejects.toThrow(
+      /conferirModelo/
+    );
+  });
+});
+
+// Ponta a ponta pelo cliente HTTP real (chamarOpenRouter / chamarConferencia),
+// com `fetch` simulado: nenhum pedido sai para a OpenRouter.
+describe('explicar + OpenRouter (fetch simulado)', () => {
+  const fetchOriginal = global.fetch;
+  afterEach(() => {
+    global.fetch = fetchOriginal;
+  });
+
+  const ok = (conteudo) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: conteudo } }] }) });
+
+  // Responde como gerador quando o system prompt é o de explicação, e como
+  // conferente (aprovando) quando é o de conferência. `falhar` = modelos que
+  // devolvem 429 na geração.
+  function fetchSimulado({ falharNaGeracao = [], reprovar = {} } = {}) {
+    return jest.fn(async (_url, opts) => {
+      const corpo = JSON.parse(opts.body);
+      const [sistema, usuario] = corpo.messages.map((m) => m.content);
+      if (sistema === PROMPT_SISTEMA) {
+        if (falharNaGeracao.includes(corpo.model)) return { ok: false, status: 429 };
+        const itens = itensDoPrompt(usuario);
+        return ok(JSON.stringify(itens.map((q) => ({ id: q.id, correta: q.gabarito_oficial, explicacao: textoBom(`[${q.id}]`) }))));
+      }
+      if (sistema === PROMPT_CONFERENCIA) {
+        const itens = itensDaConferencia(usuario);
+        return ok(
+          JSON.stringify(
+            itens.map((q) => (reprovar[q.id] ? { id: q.id, aprovada: false, problemas: reprovar[q.id] } : { id: q.id, aprovada: true, problemas: [] }))
+          )
+        );
+      }
+      throw new Error('prompt de sistema desconhecido');
+    });
+  }
+
+  const ligar = (modelos) => ({
+    chamarModelo: (p) => chamarOpenRouter(p, { chave: 'k', modelos }),
+    conferirModelo: (p, { excluir }) => chamarConferencia(p, { chave: 'k', modelos, excluir }),
+  });
+
+  const modelosDosPedidos = () =>
+    global.fetch.mock.calls.map(([, o]) => {
+      const c = JSON.parse(o.body);
+      return [c.messages[0].content === PROMPT_SISTEMA ? 'gera' : 'confere', c.model, c.temperature];
+    });
+
+  it('o conferente é um modelo diferente do que escreveu', async () => {
+    const id = await inserir(1);
+    global.fetch = fetchSimulado();
+
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, ...ligar(['m1', 'm2', 'm3']) });
+
+    expect(modelosDosPedidos()).toEqual([
+      ['gera', 'm1', 0.2],
+      ['confere', 'm2', 0],
+    ]);
+    expect(r).toMatchObject({ gravadas: 1, pedidos: 2, modelos: ['m1'], modelosConferencia: ['m2'] });
+    expect((await buscar(id)).explicacao_fonte).toBe('ia');
+  });
+
+  it('se o gerador foi o 2º da lista (o 1º deu 429), o conferente pode ser o 1º — nunca o gerador', async () => {
+    await inserir(1);
+    global.fetch = fetchSimulado({ falharNaGeracao: ['m1'] });
+
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, ...ligar(['m1', 'm2']) });
+
+    expect(modelosDosPedidos()).toEqual([
+      ['gera', 'm1', 0.2],
+      ['gera', 'm2', 0.2],
+      ['confere', 'm1', 0],
+    ]);
+    expect(r).toMatchObject({ gravadas: 1, pedidos: 3 });
+  });
+
+  it('reprovada pelo conferente não é gravada', async () => {
+    const id = await inserir(1, pendente(REAL_46_1));
+    global.fetch = fetchSimulado({ reprovar: { [id]: REAL_46_1.problemas } });
+
+    const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, ...ligar(['m1', 'm2']) });
+
+    expect(r).toMatchObject({ geradas: 1, aprovadas: 0, gravadas: 0 });
+    expect(r.reprovadas[0].problemas).toEqual(REAL_46_1.problemas);
+    expect((await buscar(id)).explicacao).toBeNull();
+  });
+
+  it('com um só modelo disponível não há conferência: não grava e para a rodada', async () => {
+    const ids = [];
+    for (let n = 1; n <= 4; n++) ids.push(await inserir(n));
+    global.fetch = fetchSimulado();
+
+    const r = await explicar({ exame: EXAME_TESTE, lote: 3, aplicar: true, log: silencio, ...ligar(['m1']) });
+
+    // Um pedido de geração e nenhum de conferência; o 2º lote nem é gerado.
+    expect(modelosDosPedidos()).toEqual([['gera', 'm1', 0.2]]);
+    expect(r).toMatchObject({ geradas: 3, aprovadas: 0, gravadas: 0, semConferente: 3, pedidos: 1 });
+    expect(r.interrompida).toMatch(/sem segundo modelo/);
+    for (const id of ids) expect((await buscar(id)).explicacao).toBeNull();
+  });
+});
+
+describe('conferirGravadas (--conferir-gravadas)', () => {
+  async function cenario() {
+    return {
+      reprovada: await inserir(1, { ...REAL_46_1, explicacao_fonte: 'ia' }),
+      aprovada: await inserir(2, { explicacao: textoBom('[ok]').trim(), explicacao_fonte: 'ia' }),
+      revisada: await inserir(3, { explicacao: 'IA revisada por pessoa.', explicacao_fonte: 'ia', revisada: true }),
+      humana: await inserir(4, { explicacao: 'MARCA-HUMANA: escrita por pessoa.', explicacao_fonte: 'humano' }),
+      vazia: await inserir(5),
+    };
+  }
+
+  it('prévia: confere só as ia não revisadas e não muda nada', async () => {
+    const c = await cenario();
+    const conferente = conferenteQueReprova({ [c.reprovada]: REAL_46_1.problemas });
+
+    const r = await conferirGravadas({ exame: EXAME_TESTE, aplicar: false, log: silencio, conferirModelo: conferente });
+
+    const enviados = conferente.mock.calls.flatMap(([p]) => itensDaConferencia(p).map((i) => i.id)).sort((a, b) => a - b);
+    expect(enviados).toEqual([c.reprovada, c.aprovada].sort((a, b) => a - b));
+    expect(conferente.mock.calls[0][0]).not.toContain('MARCA-HUMANA');
+    expect(r).toMatchObject({ lidas: 2, aprovadas: 1, limpas: 0, pedidos: 1 });
+    expect(r.reprovadas).toEqual([{ id: c.reprovada, exame: EXAME_TESTE, numero: 1, problemas: REAL_46_1.problemas }]);
+    expect((await buscar(c.reprovada)).explicacao).toBe(REAL_46_1.explicacao);
+  });
+
+  it('com --aplicar limpa SÓ a ia reprovada, que volta à fila; aprovada, revisada e humana ficam', async () => {
+    const c = await cenario();
+    const r = await conferirGravadas({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      conferirModelo: conferenteQueReprova({ [c.reprovada]: REAL_46_1.problemas }),
+    });
+
+    expect(r.limpas).toBe(1);
+    const limpa = await buscar(c.reprovada);
+    expect(limpa.explicacao).toBeNull();
+    expect(limpa.explicacao_fonte).toBeNull();
+    expect(limpa.gabarito).toBe(REAL_46_1.gabarito);
+    expect((await buscar(c.aprovada)).explicacao_fonte).toBe('ia');
+    expect((await buscar(c.revisada)).explicacao).toBe('IA revisada por pessoa.');
+    const humana = await buscar(c.humana);
+    expect(humana.explicacao).toBe('MARCA-HUMANA: escrita por pessoa.');
+    expect(humana.explicacao_fonte).toBe('humano');
+
+    // A limpa volta para a fila normal de geração.
+    const modelo = modeloQueConcorda();
+    await explicar({ exame: EXAME_TESTE, aplicar: false, log: silencio, chamarModelo: modelo, conferirModelo: conferenteQueAprova() });
+    expect(idsDoPrompt(modelo.mock.calls[0][0]).sort((a, b) => a - b)).toEqual([c.reprovada, c.vazia].sort((a, b) => a - b));
+  });
+
+  it('nunca limpa humano, mesmo se a reprovada virar humana durante a conferência', async () => {
+    const id = await inserir(1, { ...REAL_46_1, explicacao_fonte: 'ia' });
+    const base = conferenteQueReprova({ [id]: REAL_46_1.problemas });
+    const conferente = jest.fn(async (prompt, opts) => {
+      await pool.query(`UPDATE questoes SET explicacao = 'Corrigida à mão.', explicacao_fonte = 'humano' WHERE id = $1`, [id]);
+      return base(prompt, opts);
+    });
+
+    const r = await conferirGravadas({ exame: EXAME_TESTE, aplicar: true, log: silencio, conferirModelo: conferente });
+
+    expect(r.reprovadas).toHaveLength(1);
+    expect(r.limpas).toBe(0);
+    expect(await buscar(id)).toMatchObject({ explicacao: 'Corrigida à mão.', explicacao_fonte: 'humano' });
+  });
+
+  it('JSON inválido da conferência não limpa nada', async () => {
+    const c = await cenario();
+    const r = await conferirGravadas({
+      exame: EXAME_TESTE,
+      aplicar: true,
+      log: silencio,
+      conferirModelo: jest.fn(async () => ({ conteudo: 'não sei', modelo: 'm' })),
+    });
+    expect(r).toMatchObject({ lotesComErro: 1, limpas: 0 });
+    expect((await buscar(c.reprovada)).explicacao).toBe(REAL_46_1.explicacao);
   });
 });
