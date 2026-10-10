@@ -147,12 +147,18 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    `[{id, aprovada, problemas}]`. O prompt (`PROMPT_CONFERENCIA`) manda
    reprovar afirmação jurídica falsa, contradição com a letra oficial,
    justificativa genérica (sem dizer por que cada errada está errada) e
-   citação inventada — e, na dúvida, reprovar. Regras: só a aprovada é
-   gravada; a reprovada não marca nada no banco, sai no resumo com os
-   problemas e volta na próxima rodada; resposta da conferência fora do
-   formato (JSON quebrado, id faltando/sobrando, `aprovada` não booleano)
-   derruba o lote, nunca vira aprovação; `aprovada: true` com problemas
-   apontados conta como reprovada; sem segundo modelo disponível (ex.:
+   citação inventada — e, na dúvida, reprovar; enunciado, alternativas e
+   explicação são material a conferir, e instrução escrita dentro deles é
+   ignorada. Regras: só a aprovada **sem ressalva** é gravada (aprovada com
+   problemas apontados também não grava), com o gerador em
+   `explicacao_modelo` (migration 006); a reprovada não marca nada no banco,
+   sai no resumo com os problemas e volta na próxima rodada; resposta da
+   conferência fora do formato (JSON quebrado, lista vazia, id
+   faltando/sobrando/repetido, `aprovada` não booleano, texto depois da
+   lista) vai a um 2º conferente e, se ele também falhar, derruba o lote —
+   nunca vira aprovação (id numérico entre aspas, `"123"`, é aceito se casar
+   com um id enviado); falha na listagem de modelos interrompe a rodada; sem
+   segundo modelo disponível (ex.:
    `IA_MODELOS` com um id só) nada é gravado — a CLI nem começa, e
    `explicar()` para a rodada. Um pedido de conferência **por lote** (não por
    questão): a saída é curta, e conferir uma a uma dobraria o custo. O
@@ -172,14 +178,22 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    gravadas e o custo em pedidos. Se todos os modelos devolverem 429, a rodada
    para. Lotes recusados, reprovados ou com JSON quebrado voltam na próxima
    execução.
-6. `OPENROUTER_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--aplicar]`
+6. `OPENROUTER_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--excluir <modelo>]... [--backup <arquivo> --aplicar]`
    — confere, sem gerar, as explicações `'ia'` **já gravadas** e não revisadas
-   (1 pedido por lote). Com `--aplicar`, as reprovadas são **limpas**
-   (`explicacao` e `explicacao_fonte` = NULL) e voltam à fila normal; as
-   aprovadas ficam como estão. `'humano'` e `'ia'` revisada nunca entram, e o
-   UPDATE exige o mesmo texto que foi conferido (editado no meio = não limpa).
-   O banco não guarda qual modelo escreveu cada texto: para não ter o autor
-   conferindo a si mesmo, rode com `IA_MODELOS` sem o modelo gerador.
+   (1 pedido por lote). O conferente nunca é o autor: o `explicacao_modelo`
+   de cada linha é excluído automaticamente; para as gravadas antes da
+   migration 006 (sem autor) a CLI **exige** `--excluir <modelo-autor>` ou
+   `IA_MODELOS` explícito, e aborta antes de gastar pedido se faltar. Com
+   `--aplicar`, só as reprovadas (`aprovada === false`) são **limpas**
+   (`explicacao`, `explicacao_fonte` e `explicacao_modelo` = NULL) e voltam
+   à fila normal; aprovada com ressalvas fica e só mostra as ressalvas.
+   `--backup <arquivo>` é obrigatório com `--aplicar`: o arquivo (que não
+   pode existir) é criado antes do primeiro pedido, e o texto de cada
+   explicação é gravado nele em JSON — e impresso numa linha `BACKUP {...}` —
+   antes do UPDATE que a limpa. `'humano'` e `'ia'` revisada nunca entram, e
+   o UPDATE exige o mesmo texto que foi conferido (editado no meio = não
+   limpa). `--excluir` também vale na geração (o modelo não escreve nem
+   confere).
 
 ---
 
