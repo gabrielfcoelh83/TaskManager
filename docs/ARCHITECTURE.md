@@ -117,7 +117,7 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    `--aplicar`, só mostra o que mudaria.
 4. `OPENROUTER_API_KEY=... node classificar.js [--aplicar]` — preenche o tema
    (e a disciplina, onde a tabela não chega).
-5. `OPENROUTER_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia]`
+5. `GEMINI_API_KEY=... OPENROUTER_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia] [--gerador openrouter|gemini]`
    — escreve a **explicação** a partir do gabarito oficial (`explicacao_fonte = 'ia'`,
    `revisada = false`) e só grava a que **um segundo modelo conferiu e aprovou**.
    O modelo recebe a letra oficial e devolve, junto do texto,
@@ -170,15 +170,77 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    gabarito) para não gravar sobre o que mudou no meio. `--refazer-ia` refaz
    só as `'ia'` ainda não revisadas.
 
+   **Provedores: Gemini gera, OpenRouter confere.** A cota gratuita da
+   OpenRouter (50 pedidos/dia) acaba numa rodada, então a geração pode sair
+   do Google Gemini (Google AI Studio, plano gratuito, cota própria por
+   modelo), pela rota compatível com OpenAI
+   (`/v1beta/openai/chat/completions`, `Authorization: Bearer`), com o mesmo
+   corpo e a mesma leitura da resposta. Regras:
+   - com `GEMINI_API_KEY` o gerador padrão é o Gemini; `--gerador
+     openrouter|gemini` escolhe à mão. **Sem `GEMINI_API_KEY` tudo segue
+     como antes** (só OpenRouter);
+   - modelos do Gemini vêm da listagem `GET /v1beta/models` (chave no header
+     `x-goog-api-key`, nunca em `?key=`), só os que suportam
+     `generateContent`. Padrão (`gemini.js`), por lista branca: ids
+     exatamente `gemini-<versão>-flash` (flash estável), maior versão
+     primeiro, e depois `gemini-flash-latest`. Fica de fora todo o resto
+     (`-lite`, `-image`, `-tts`, `-live`, `-native-audio`, `-transcribe`,
+     preview/exp, pro, gemma, omni, nano-banana, lyria, robotics,
+     computer-use, antigravity, deep-research, embedding) sem precisar ser
+     nomeado. `GEMINI_MODELOS` (ids separados por vírgula) substitui a regra;
+   - o gerador não muda de provedor no meio da rodada: 429 passa ao próximo
+     modelo **do mesmo provedor**; todos em 429 = cota do dia, a rodada para;
+   - o conferente vem de preferência do **outro provedor e de outro
+     fabricante**: o gemma servido pela OpenRouter é Google como o Gemini,
+     então, com o Gemini gerando, o primeiro conferente é um não-Google
+     (nemotron). Sem `OPENROUTER_API_KEY`, ou com ela toda em 429, a
+     conferência cai para outro modelo Gemini, **nunca o próprio gerador**;
+     sem nenhum, não grava (como antes);
+   - ids passam a ser `<provedor>:<id>` (`provedores.js`), e o gerador vai
+     assim para `explicacao_modelo` (`gemini:gemini-3.8-flash`,
+     `openrouter:nvidia/...:free`). O que já está gravado sem prefixo é da
+     OpenRouter. Em `--excluir`, id com prefixo exclui só naquele provedor;
+     sem prefixo, o id em qualquer provedor;
+   - nos modelos que raciocinam (`thinking` na listagem) o pedido ao Gemini
+     leva `reasoning_effort: "low"` e uma folga no `max_tokens`, porque o
+     raciocínio sai do mesmo teto da resposta;
+   - a chave nunca aparece em log ou erro (`ocultarChave`);
+   - o resumo mostra os pedidos **por provedor**.
+
+   **Privacidade.** O plano gratuito do Google pode usar o conteúdo enviado
+   para melhorar os produtos dele. Aqui só vão questões públicas da OAB e o
+   gabarito oficial, nada de usuário. Não reaproveite a chave para dados
+   pessoais.
+
+   **Chave do Gemini.** Em https://aistudio.google.com/apikey, "Create API
+   key" (cria um projeto do Google Cloud se for preciso; o plano gratuito não
+   pede cartão). Guarde no servidor, legível só pelo seu usuário e fora do
+   histórico do shell: `install -m 600 /dev/null ~/.gemini-key && nano
+   ~/.gemini-key` (cole, salve). O formato da chave muda; nada valida
+   prefixo. Rodada em produção:
+
+   ```bash
+   docker exec \
+     -e GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" \
+     -e OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" \
+     taskmanager-questoes-service-1 node explicar.js --total N --aplicar
+   ```
+
+   Antes de qualquer pedido pago, a CLI lista os modelos de cada provedor
+   com chave e imprime o gerador e a ordem da conferência; listagem que
+   falha (chave errada, rede) aborta sem gastar cota.
+
    **Cota.** Padrão: lotes de 3, 30 questões por rodada. Cada lote custa 2
    pedidos no caso bom (geração + conferência), até 7 com modelos falhando; a
    cota gratuita é de 50 pedidos/dia — teto de ~75 questões/dia se nada
-   falhar, conte com umas 60. A prévia (sem `--aplicar`) gera e confere, e
+   falhar, conte com umas 60. Com o Gemini gerando, só a conferência gasta
+   da OpenRouter (1 pedido por lote): ~50 lotes = ~150 questões/dia, se a
+   cota do Gemini acompanhar. A prévia (sem `--aplicar`) gera e confere, e
    gasta cota igual. O resumo mostra geradas / aprovadas / reprovadas /
    gravadas e o custo em pedidos. Se todos os modelos devolverem 429, a rodada
    para. Lotes recusados, reprovados ou com JSON quebrado voltam na próxima
    execução.
-6. `OPENROUTER_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--excluir <modelo>]... [--backup <arquivo> --aplicar]`
+6. `[GEMINI_API_KEY=...] OPENROUTER_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--excluir <modelo>]... [--backup <arquivo> --aplicar]`
    — confere, sem gerar, as explicações `'ia'` **já gravadas** e não revisadas
    (1 pedido por lote). O conferente nunca é o autor: o `explicacao_modelo`
    de cada linha é excluído automaticamente; para as gravadas antes da

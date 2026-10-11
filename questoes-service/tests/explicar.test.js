@@ -1189,7 +1189,8 @@ describe('conferência: ressalvas, autor, nova tentativa e listagem', () => {
       chamarModelo: modeloQueConcorda(),
       conferirModelo: conferenteQueAprova(),
     });
-    expect(await buscar(id)).toMatchObject({ explicacao_fonte: 'ia', explicacao_modelo: 'modelo-teste' });
+    // Qualificado com o provedor; id sem prefixo vindo do gerador = OpenRouter.
+    expect(await buscar(id)).toMatchObject({ explicacao_fonte: 'ia', explicacao_modelo: 'openrouter:modelo-teste' });
   });
 
   it('resposta 200 ilegível do 1º conferente: o 2º (outro modelo) confere e o lote é gravado', async () => {
