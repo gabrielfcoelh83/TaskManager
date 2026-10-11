@@ -22,6 +22,7 @@ const {
   PROMPT_CONFERENCIA,
   letraAfirmadaNoTexto,
   citacaoNumerada,
+  semSaudacao,
   PROMPT_SISTEMA,
 } = require('../explicar');
 
@@ -164,6 +165,80 @@ describe('montarPrompt', () => {
     expect(PROMPT_SISTEMA).toMatch(/"a Lei do\s+Inquilinato"/);
     // e a regra antiga, que deixava citar "com certeza", não volta
     expect(PROMPT_SISTEMA).not.toMatch(/QUANDO VOCÊ TIVER CERTEZA/);
+  });
+});
+
+describe('semSaudacao', () => {
+  // Aberturas reais do Gemini Flash na rodada do 46º Exame.
+  it.each([
+    ['Fala, pessoal! A alternativa A está correta porque...'],
+    ['Olá, futuros aprovados! A alternativa A está correta porque...'],
+    ['Olha a pegadinha, futuro advogado! A alternativa A está correta porque...'],
+    ['Atenção a este tema indispensável! A alternativa A está correta porque...'],
+    ['Vamos lá, pessoal! Atenção! A alternativa A está correta porque...'],
+  ])('corta a abertura de %s', (texto) => {
+    expect(semSaudacao(texto)).toBe('A alternativa A está correta porque...');
+  });
+
+  it('também antes de "As alternativas", "A letra" e "O gabarito"', () => {
+    expect(semSaudacao('Bora! As alternativas A e B...')).toBe('As alternativas A e B...');
+    expect(semSaudacao('Bora! A letra C...')).toBe('A letra C...');
+    expect(semSaudacao('Bora! O gabarito é C...')).toBe('O gabarito é C...');
+  });
+
+  it('não mexe em texto que já começa pela explicação', () => {
+    const t = 'A alternativa D é a correta! O motivo é que...';
+    expect(semSaudacao(t)).toBe(t);
+  });
+
+  it('não corta frase longa nem frase sem "!"', () => {
+    const longa = `${'x'.repeat(90)}! A alternativa A está correta.`;
+    expect(semSaudacao(longa)).toBe(longa);
+    const semExclamacao = 'Fala, pessoal. A alternativa A está correta.';
+    expect(semSaudacao(semExclamacao)).toBe(semExclamacao);
+  });
+
+  it('corta "!!" e emoji depois da saudação', () => {
+    expect(semSaudacao('Fala, pessoal!! A alternativa A está correta.')).toBe('A alternativa A está correta.');
+    expect(semSaudacao('Olá, pessoal! 👋 A alternativa A está correta.')).toBe('A alternativa A está correta.');
+  });
+
+  it('não corta abertura com conteúdo: letra, resposta ou número', () => {
+    for (const t of [
+      'A alternativa correta é a B! A alternativa C está correta porque...',
+      'Resposta: letra B! A alternativa C está correta porque...',
+      'Cuidado com o prazo de 15 dias! A alternativa C está correta porque...',
+    ]) {
+      expect(semSaudacao(t)).toBe(t);
+    }
+  });
+
+  it('a contradição na abertura continua recusada por interpretarResposta', () => {
+    const { aceitas, recusadas } = interpretarResposta(
+      JSON.stringify([{ id: 1, correta: 'C', explicacao: `A alternativa correta é a B! ${textoBom()}` }]),
+      [{ id: 1, gabarito: 2 }]
+    );
+    expect(aceitas).toEqual([]);
+    expect(recusadas[0].motivo).toMatch(/afirma outra alternativa/);
+  });
+
+  it('não corta quando o que vem depois não é o começo da explicação', () => {
+    const t = 'Cuidado! O prazo é de 15 dias. A alternativa A está correta.';
+    expect(semSaudacao(t)).toBe(t);
+  });
+
+  it('interpretarResposta grava a explicação sem a saudação', () => {
+    const { aceitas } = interpretarResposta(
+      JSON.stringify([{ id: 1, correta: 'C', explicacao: `Fala, pessoal! ${textoBom()}` }]),
+      [{ id: 1, gabarito: 2 }]
+    );
+    expect(aceitas).toHaveLength(1);
+    expect(aceitas[0].explicacao).toBe(textoBom().trim());
+  });
+
+  it('o prompt pede para começar sem saudação', () => {
+    expect(PROMPT_SISTEMA).toMatch(/sem saudação/);
+    expect(PROMPT_SISTEMA).not.toMatch(/professor de cursinho, direto/);
   });
 });
 
