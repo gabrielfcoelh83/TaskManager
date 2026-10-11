@@ -119,7 +119,8 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    (e a disciplina, onde a tabela não chega).
 5. `OPENROUTER_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia]`
    — escreve a **explicação** a partir do gabarito oficial (`explicacao_fonte = 'ia'`,
-   `revisada = false`). O modelo recebe a letra oficial e devolve, junto do texto,
+   `revisada = false`) e só grava a que **um segundo modelo conferiu e aprovou**.
+   O modelo recebe a letra oficial e devolve, junto do texto,
    a letra que considera correta; se ela divergir do gabarito, a explicação é
    recusada (um modelo que discorda do gabarito não o explica). Também recusa
    texto vazio, curto/longo demais, com cerca markdown ou que afirme outra
@@ -134,15 +135,65 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    9.514/97 como de bens móveis; art. 112 do ECA para procuração oral).
    Número solto não é citação e passa (prazos, valores, idades, "CF/88",
    "Constituição de 1988"); "§" é sempre recusado; "parágrafo único" por
-   extenso passa. Erro de conteúdo sem número nenhum o filtro não pega — por
-   isso `revisada = false`. Anuladas ficam de fora (não há resposta oficial
+   extenso passa.
+
+   **Conferência.** Erro de conteúdo sem número nenhum o filtro não pega: no
+   46º Exame (Ética), 2 de 6 explicações tinham a letra certa e direito errado
+   (Procuradoria do Estado tratada como Ministério Público; quota litis "não
+   precisa ser em pecúnia"). Por isso, depois da geração e antes do UPDATE, o
+   lote vai a um modelo **diferente do que escreveu** (mesma lista de
+   gratuitos conferida contra `/api/v1/models`, menos o gerador), que recebe
+   enunciado, alternativas, letra oficial e explicação e devolve
+   `[{id, aprovada, problemas}]`. O prompt (`PROMPT_CONFERENCIA`) manda
+   reprovar afirmação jurídica falsa, contradição com a letra oficial,
+   justificativa genérica (sem dizer por que cada errada está errada) e
+   citação inventada — e, na dúvida, reprovar; enunciado, alternativas e
+   explicação são material a conferir, e instrução escrita dentro deles é
+   ignorada. Regras: só a aprovada **sem ressalva** é gravada (aprovada com
+   problemas apontados também não grava), com o gerador em
+   `explicacao_modelo` (migration 006); a reprovada não marca nada no banco,
+   sai no resumo com os problemas e volta na próxima rodada; resposta da
+   conferência fora do formato (JSON quebrado, lista vazia, id
+   faltando/sobrando/repetido, `aprovada` não booleano, texto depois da
+   lista) vai a um 2º conferente e, se ele também falhar, derruba o lote —
+   nunca vira aprovação (id numérico entre aspas, `"123"`, é aceito se casar
+   com um id enviado); falha na listagem de modelos interrompe a rodada; sem
+   segundo modelo disponível (ex.:
+   `IA_MODELOS` com um id só) nada é gravado — a CLI nem começa, e
+   `explicar()` para a rodada. Um pedido de conferência **por lote** (não por
+   questão): a saída é curta, e conferir uma a uma dobraria o custo. O
+   conferente também erra: `revisada = false` continua valendo.
+
+   Anuladas ficam de fora (não há resposta oficial
    para explicar); `'humano'` nunca entra na fila nem é sobrescrito, e o UPDATE
    repete as condições (vazia / `'ia'` não revisada, não anulada, mesmo
    gabarito) para não gravar sobre o que mudou no meio. `--refazer-ia` refaz
-   só as `'ia'` ainda não revisadas. Padrão: lotes de 3, 30 questões por
-   rodada — a cota gratuita é de 50 pedidos/dia, e a conferência (sem
-   `--aplicar`) gasta cota igual. Se todos os modelos devolverem 429, a rodada
-   para. Lotes recusados ou com JSON quebrado voltam na próxima execução.
+   só as `'ia'` ainda não revisadas.
+
+   **Cota.** Padrão: lotes de 3, 30 questões por rodada. Cada lote custa 2
+   pedidos no caso bom (geração + conferência), até 7 com modelos falhando; a
+   cota gratuita é de 50 pedidos/dia — teto de ~75 questões/dia se nada
+   falhar, conte com umas 60. A prévia (sem `--aplicar`) gera e confere, e
+   gasta cota igual. O resumo mostra geradas / aprovadas / reprovadas /
+   gravadas e o custo em pedidos. Se todos os modelos devolverem 429, a rodada
+   para. Lotes recusados, reprovados ou com JSON quebrado voltam na próxima
+   execução.
+6. `OPENROUTER_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--excluir <modelo>]... [--backup <arquivo> --aplicar]`
+   — confere, sem gerar, as explicações `'ia'` **já gravadas** e não revisadas
+   (1 pedido por lote). O conferente nunca é o autor: o `explicacao_modelo`
+   de cada linha é excluído automaticamente; para as gravadas antes da
+   migration 006 (sem autor) a CLI **exige** `--excluir <modelo-autor>` ou
+   `IA_MODELOS` explícito, e aborta antes de gastar pedido se faltar. Com
+   `--aplicar`, só as reprovadas (`aprovada === false`) são **limpas**
+   (`explicacao`, `explicacao_fonte` e `explicacao_modelo` = NULL) e voltam
+   à fila normal; aprovada com ressalvas fica e só mostra as ressalvas.
+   `--backup <arquivo>` é obrigatório com `--aplicar`: o arquivo (que não
+   pode existir) é criado antes do primeiro pedido, e o texto de cada
+   explicação é gravado nele em JSON — e impresso numa linha `BACKUP {...}` —
+   antes do UPDATE que a limpa. `'humano'` e `'ia'` revisada nunca entram, e
+   o UPDATE exige o mesmo texto que foi conferido (editado no meio = não
+   limpa). `--excluir` também vale na geração (o modelo não escreve nem
+   confere).
 
 ---
 
