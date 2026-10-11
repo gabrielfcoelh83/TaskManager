@@ -105,7 +105,10 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const PREFERIDOS = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'google/gemma-4-31b-it:free',
-  'qwen/qwen3.8-27b:free',
+  // O qwen/qwen3.8-27b:free saiu da OpenRouter (out/2026). Com ele, tirar o
+  // autor da conferência deixava um modelo só, e um 429 dele parava a rodada.
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'google/gemma-4-26b-a4b-it:free',
 ];
 
 const LETRAS = ['A', 'B', 'C', 'D'];
