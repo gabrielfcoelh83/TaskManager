@@ -6,6 +6,15 @@
 //   node explicar.js --exame 45 --lote 3 --total 30 --aplicar
 //   node explicar.js --refazer-ia --aplicar  # reescreve também as que já são 'ia'
 //   node explicar.js --excluir <modelo>      # nunca usa esse modelo (pode repetir)
+//   node explicar.js --gerador openrouter    # gera pela OpenRouter mesmo com GEMINI_API_KEY
+//
+//   Chaves: GEMINI_API_KEY (Google AI Studio) e/ou OPENROUTER_API_KEY. Com a
+//   do Gemini, ele GERA e a OpenRouter CONFERE (ver PROVEDORES, abaixo). No
+//   servidor, a chave vai no AMBIENTE do processo e `-e NOME` SEM valor —
+//   nunca `-e NOME=valor`, que fica visível em `ps` para todo usuário:
+//   GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" \
+//   OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" \
+//   docker exec -e GEMINI_API_KEY -e OPENROUTER_API_KEY <container> node explicar.js --total 30 --aplicar
 //
 //   # confere as 'ia' já gravadas (prévia); --excluir = quem as escreveu
 //   node explicar.js --conferir-gravadas --excluir <modelo-autor>
@@ -84,7 +93,35 @@
 //
 // Roda à mão, fora do serviço, pelos mesmos motivos do classificar.js.
 //
-// COTA: o plano gratuito da OpenRouter dá 50 pedidos/dia por chave, e a
+// PROVEDORES: OPENROUTER E GEMINI
+// A cota gratuita da OpenRouter (50 pedidos/dia) acaba em uma rodada. O
+// Google AI Studio tem plano gratuito próprio, com cota POR MODELO, e fala o
+// mesmo formato de chat da OpenAI (rota /v1beta/openai/chat/completions).
+//   - Com GEMINI_API_KEY, o gerador padrão é o Gemini (modelos "flash"
+//     estáveis, escolhidos pela listagem — regra em gemini.js; GEMINI_MODELOS
+//     substitui). --gerador openrouter|gemini escolhe à mão. Sem
+//     GEMINI_API_KEY tudo é como antes: só OpenRouter.
+//   - O gerador não troca de provedor no meio: todos os modelos dele em 429
+//     é a cota do dia, e a rodada para (como sempre parou).
+//   - O conferente vem preferencialmente do OUTRO provedor e de outro
+//     FABRICANTE: o gemma da OpenRouter é Google como o Gemini, então com o
+//     Gemini gerando o primeiro conferente é um modelo não-Google (nemotron).
+//     Sem a chave do outro provedor, ou com ele todo em 429, cai para outro
+//     modelo do mesmo provedor — nunca o próprio gerador. Sem nenhum, não
+//     grava (como antes).
+//   - Ids passam a ser "<provedor>:<id>" (provedores.js), e é assim que o
+//     gerador vai para `explicacao_modelo`. O que já está gravado sem prefixo
+//     é da OpenRouter. Em --excluir, id com prefixo exclui só naquele
+//     provedor; sem prefixo, em qualquer um.
+//   - A chave do Gemini vai em header (nunca em `?key=` na URL), e toda
+//     mensagem de erro passa por `ocultarChave` antes de ser impressa.
+//   - O plano gratuito do Google pode usar o que é enviado para melhorar os
+//     produtos dele. Aqui só vão questões públicas da OAB e o gabarito
+//     oficial — nada de usuário.
+//
+// COTA (números da OpenRouter; com o Gemini gerando, a geração sai da cota
+// do Google e só a conferência gasta da OpenRouter — o resumo separa os
+// pedidos por provedor): o plano gratuito da OpenRouter dá 50 pedidos/dia por chave, e a
 // prévia (sem --aplicar) GASTA a cota igual ao --aplicar (ela gera e confere;
 // só não grava). Cada lote custa 2 pedidos quando dá certo (1 de geração + 1
 // de conferência) e até 4 + 3 = 7 quando os modelos falham em sequência
@@ -97,8 +134,12 @@ const fs = require('fs');
 const { pool } = require('./app');
 const { migrate } = require('./migrate');
 const { modelosEmOrdem } = require('./openrouter');
+const { modelosGeminiEmOrdem, ocultarChave } = require('./gemini');
+const { PROVEDORES, qualificar, normalizar, provedorDe, fabricante, excluido, ordenarConferentes } = require('./provedores');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+// Rota compatível com OpenAI do Gemini (Google AI Studio).
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 
 // Mesma lógica do classificar.js: preferência, conferida contra a listagem
 // da OpenRouter antes de usar (openrouter.js); IA_MODELOS substitui.
@@ -565,9 +606,171 @@ function interpretarConferencia(texto, ids) {
 // Só a aprovada SEM ressalva é gravada.
 const aprovadaSemRessalva = (v) => v.aprovada === true && v.problemas.length === 0;
 
+// PROVEDORES (ver "PROVEDORES: OPENROUTER E GEMINI", no topo).
+//
+// Os dois falam o formato de chat da OpenAI: mesmo corpo (model, messages,
+// temperature, max_tokens) e mesma resposta (choices[0].message.content). O
+// Gemini usa a rota compatível documentada pelo Google
+// (/v1beta/openai/chat/completions, `Authorization: Bearer <chave>`).
+//
+// Só para o Gemini, e só para modelo que a listagem marca como `thinking`:
+// `reasoning_effort: "low"` (campo documentado da rota compatível) e uma
+// folga no `max_tokens`. No Gemini os tokens de raciocínio saem do mesmo teto
+// da resposta; sem folga, um modelo que pensa muito devolve o JSON cortado.
+const FOLGA_RACIOCINIO = 4096;
+
+function montarPedido(c, { prompt, sistema, temperatura, maxTokens, titulo }) {
+  const corpo = {
+    model: c.id,
+    messages: [
+      { role: 'system', content: sistema },
+      { role: 'user', content: prompt },
+    ],
+    // Geração: baixa, não zero — texto corrido sai menos robótico com um
+    // pouco de variação, e o que importa (a letra) é conferido de qualquer
+    // jeito. Conferência: zero (ver chamarConferencia).
+    temperature: temperatura,
+    max_tokens: maxTokens,
+  };
+  const headers = { Authorization: `Bearer ${c.chave}`, 'Content-Type': 'application/json' };
+
+  if (c.provedor === 'gemini') {
+    if (c.pensa) {
+      corpo.reasoning_effort = 'low';
+      corpo.max_tokens = maxTokens + FOLGA_RACIOCINIO;
+    }
+    return { url: GEMINI_URL, headers, corpo };
+  }
+  return { url: OPENROUTER_URL, headers: { ...headers, 'X-Title': titulo }, corpo };
+}
+
+// Tira toda chave conhecida de uma mensagem de erro (a de rede pode trazer
+// cabeçalho ou URL). A chave nunca vai em URL, mas erro é o que se imprime.
+function semChaves(texto, candidatos) {
+  let s = String(texto ?? '');
+  for (const c of candidatos) s = ocultarChave(s, c.chave);
+  return s;
+}
+
+// Tenta `candidatos` ([{provedor, id, chave, pensa?}]) em ordem, caindo para
+// o próximo em qualquer erro. Devolve { conteudo, candidato, tentativas,
+// porProvedor }; o erro também leva `tentativas` e `porProvedor` (custo em
+// pedidos, por provedor, para o resumo). Todos em 429 = `cotaEsgotada`.
+async function pedirEmOrdem(prompt, candidatos, opcoes) {
+  let ultimoErro = null;
+  let todos429 = true;
+  let tentativas = 0;
+  // Provedor ESGOTADO = todos os modelos dele na lista foram tentados e
+  // todos deram 429 (a cota do dia da chave, quase sempre). O roteador usa
+  // para pular o provedor na conferência pelo resto da rodada.
+  const esgotados = () =>
+    Object.keys(porProvedor).filter(
+      (p) => n429[p] === porProvedor[p] && porProvedor[p] === candidatos.filter((c) => c.provedor === p).length
+    );
+  const porProvedor = {};
+  const com429 = new Set();
+  const n429 = {}; // 429 por provedor
+
+  for (const c of candidatos) {
+    tentativas++;
+    porProvedor[c.provedor] = (porProvedor[c.provedor] || 0) + 1;
+    const nome = qualificar(c.provedor, c.id);
+    try {
+      const { url, headers, corpo } = montarPedido(c, { prompt, ...opcoes });
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(corpo),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+
+      if (res.status === 429) {
+        com429.add(c.provedor);
+        n429[c.provedor] = (n429[c.provedor] || 0) + 1;
+      } else todos429 = false;
+      if (!res.ok) {
+        ultimoErro = new Error(`${nome}: HTTP ${res.status}`);
+        continue;
+      }
+
+      const dados = await res.json();
+      const conteudo = dados?.choices?.[0]?.message?.content;
+      if (!conteudo) {
+        ultimoErro = new Error(`${nome}: resposta sem conteúdo`);
+        continue;
+      }
+
+      return { conteudo, candidato: c, tentativas, porProvedor, esgotados: esgotados() };
+    } catch (err) {
+      todos429 = false;
+      ultimoErro = new Error(`${nome}: ${semChaves(err.message, candidatos)}`);
+    }
+  }
+
+  const erro = ultimoErro || new Error('nenhum modelo respondeu');
+  erro.message = semChaves(erro.message, candidatos);
+  // Todos os modelos em 429 é, quase sempre, a cota diária da CHAVE — não de
+  // um modelo. Seguir para o próximo lote só gastaria mais pedidos negados.
+  if (todos429 && tentativas > 0) {
+    erro.cotaEsgotada = true;
+    erro.provedores429 = [...com429];
+  }
+  erro.tentativas = tentativas;
+  erro.porProvedor = porProvedor;
+  erro.esgotados = esgotados();
+  throw erro;
+}
+
+// LIMITE POR MINUTO ≠ COTA DO DIA. Com vários modelos, todos em 429 é a
+// cota do dia. Com UM modelo Gemini só, um 429 pode ser o limite por minuto
+// do plano gratuito (que zera em 60 s): espera e tenta UMA vez antes de dar
+// a rodada por encerrada. `esperar` é injetável (teste com timer falso).
+const ESPERA_429_MS = 60 * 1000;
+
+const somarPorProvedor = (a, b) => {
+  const s = { ...a };
+  for (const [p, n] of Object.entries(b || {})) s[p] = (s[p] || 0) + n;
+  return s;
+};
+
+async function pedirComEspera(prompt, candidatos, params, { esperar, log }) {
+  try {
+    return await pedirEmOrdem(prompt, candidatos, params);
+  } catch (err) {
+    const unicoGemini = candidatos.length === 1 && candidatos[0].provedor === 'gemini';
+    if (!err.cotaEsgotada || !unicoGemini) throw err;
+    log(`  ⏳ ${candidatos[0].qualificado}: 429 com um só modelo Gemini — pode ser o limite por minuto; nova tentativa em ${ESPERA_429_MS / 1000} s`);
+    await esperar(ESPERA_429_MS);
+    try {
+      const r = await pedirEmOrdem(prompt, candidatos, params);
+      return { ...r, tentativas: r.tentativas + err.tentativas, porProvedor: somarPorProvedor(err.porProvedor, r.porProvedor) };
+    } catch (err2) {
+      err2.tentativas += err.tentativas;
+      err2.porProvedor = somarPorProvedor(err.porProvedor, err2.porProvedor);
+      throw err2;
+    }
+  }
+}
+
+function erroSemModelo(mensagem) {
+  const erro = new Error(mensagem);
+  erro.semConferente = true;
+  erro.tentativas = 0;
+  return erro;
+}
+
+const PARAMS_GERACAO = { sistema: PROMPT_SISTEMA, temperatura: 0.2, maxTokens: MAX_TOKENS, titulo: 'MA Questoes - explicacao' };
+const PARAMS_CONFERENCIA = {
+  sistema: PROMPT_CONFERENCIA,
+  temperatura: 0,
+  maxTokens: MAX_TOKENS_CONFERENCIA,
+  titulo: 'MA Questoes - conferencia',
+};
+
 // Um pedido à OpenRouter, caindo para o próximo modelo da lista em erro.
-// Devolve { conteudo, modelo, tentativas }; o erro também leva `tentativas`
-// (é o custo em pedidos, mostrado no resumo).
+// Devolve { conteudo, modelo, tentativas } com o id CRU da OpenRouter (sem
+// prefixo — é o formato de antes, e id sem prefixo = OpenRouter); o erro
+// também leva `tentativas`.
 //
 // `excluir`: modelos que NÃO podem responder — a conferência passa o
 // gerador. Se a exclusão esvaziar a lista, o erro sai com
@@ -599,84 +802,168 @@ async function chamarOpenRouter(
     }
   }
   if (todos.length === 0) throw new Error('a OpenRouter não lista nenhum modelo gratuito');
-  const ordem = todos.filter((m) => !excluir.includes(m));
+  const ordem = todos.filter((m) => !excluido(qualificar('openrouter', m), excluir));
   if (ordem.length === 0) {
-    const erro = new Error(`nenhum modelo disponível além de ${excluir.join(', ')} para conferir`);
-    erro.semConferente = true;
-    erro.tentativas = 0;
-    throw erro;
+    throw erroSemModelo(`nenhum modelo disponível além de ${excluir.join(', ')} para conferir`);
   }
 
-  let ultimoErro = null;
-  let todos429 = true;
-  let tentativas = 0;
+  const r = await pedirEmOrdem(
+    prompt,
+    ordem.map((id) => ({ provedor: 'openrouter', id, chave })),
+    { sistema, temperatura, maxTokens, titulo }
+  );
+  return { conteudo: r.conteudo, modelo: r.candidato.id, tentativas: r.tentativas };
+}
 
-  for (const modelo of ordem) {
-    tentativas++;
-    try {
-      const res = await fetch(OPENROUTER_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${chave}`,
-          'Content-Type': 'application/json',
-          'X-Title': titulo,
-        },
-        body: JSON.stringify({
-          model: modelo,
-          messages: [
-            { role: 'system', content: sistema },
-            { role: 'user', content: prompt },
-          ],
-          // Geração: baixa, não zero — texto corrido sai menos robótico com
-          // um pouco de variação, e o que importa (a letra) é conferido de
-          // qualquer jeito. Conferência: zero (ver chamarConferencia).
-          temperature: temperatura,
-          max_tokens: maxTokens,
-        }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
+// A conferência só pela OpenRouter: mesma lista de modelos gratuitos
+// (conferida contra /api/v1/models), menos os de `excluir`. Temperatura
+// zero: é um veredito, não um texto.
+function chamarConferencia(prompt, { chave, modelos, excluir = [] } = {}) {
+  return chamarOpenRouter(prompt, { chave, modelos, excluir, ...PARAMS_CONFERENCIA });
+}
 
-      if (res.status !== 429) todos429 = false;
-      if (!res.ok) {
-        ultimoErro = new Error(`${modelo}: HTTP ${res.status}`);
-        continue;
+// O ROTEADOR entre os provedores — é o que a CLI usa.
+//
+//   chaves:   { openrouter, gemini } — provedor sem chave não existe aqui;
+//   gerador:  'gemini' | 'openrouter' — de onde vem a explicação;
+//   listar:   { openrouter(), gemini(chave) } injetáveis (o teste passa
+//             listas fixas); o padrão é a descoberta de openrouter.js e
+//             gemini.js. Devolvem ids (string) ou { id, pensa }.
+//
+// gerar(prompt): só modelos do provedor gerador, na ordem dele (sem cair
+//   para o outro provedor: todos em 429 = cota do dia, a rodada para).
+// conferir(prompt, { excluir }): todos os provedores com chave — o outro
+//   provedor primeiro —, menos os excluídos, e então preferindo fabricante
+//   diferente dos excluídos (provedores.js: gemma da OpenRouter é Google
+//   como o Gemini). Outro provedor sem chave ou em 429: cai para outro
+//   modelo do mesmo provedor do gerador, nunca o próprio gerador.
+// Os dois devolvem { conteudo, modelo: '<provedor>:<id>', tentativas,
+// porProvedor }.
+//
+// COTA NA CONFERÊNCIA: o provedor que devolver 429 em TODOS os modelos dele
+// (ver `esgotados` em pedirEmOrdem) é pulado na conferência pelo resto da
+// rodada — re-tentar a cada lote só gastaria pedidos negados (e tempo). Um
+// aviso só, no log. Se todos os provedores ficarem sem cota, a conferência
+// lança `cotaEsgotada` sem pedido nenhum, e a rodada para.
+//
+// `log` e `esperar` injetáveis (teste).
+const NOME_PROVEDOR = { openrouter: 'OpenRouter', gemini: 'Gemini' };
+
+function criarRoteador({
+  chaves = {},
+  gerador,
+  listar = {},
+  log = console.log,
+  esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms)),
+} = {}) {
+  const listadores = {
+    openrouter: listar.openrouter || (() => modelosEmOrdem(PREFERIDOS)),
+    gemini: listar.gemini || ((chave) => modelosGeminiEmOrdem(chave)),
+  };
+  const disponiveis = PROVEDORES.filter((p) => chaves[p]);
+  if (!gerador) gerador = chaves.gemini ? 'gemini' : 'openrouter';
+  if (!PROVEDORES.includes(gerador)) throw new Error(`gerador desconhecido: ${gerador} (use openrouter ou gemini)`);
+  if (!chaves[gerador]) {
+    throw new Error(`${gerador === 'gemini' ? 'GEMINI_API_KEY' : 'OPENROUTER_API_KEY'} não definida para o gerador ${gerador}`);
+  }
+  // O outro provedor primeiro na conferência; o do gerador por último.
+  const ordemConferencia = [...disponiveis.filter((p) => p !== gerador), gerador];
+  const semCotaNaConferencia = new Set();
+
+  function marcarSemCota(esgotados = []) {
+    for (const p of esgotados) {
+      if (semCotaNaConferencia.has(p)) continue;
+      semCotaNaConferencia.add(p);
+      const restam = ordemConferencia.filter((q) => !semCotaNaConferencia.has(q));
+      if (restam.length) {
+        log(
+          `  ⚠️  ${NOME_PROVEDOR[p]} sem cota: conferência cai para o mesmo fabricante ` +
+            `(só ${restam.map((q) => NOME_PROVEDOR[q]).join(', ')}) pelo resto da rodada`
+        );
       }
-
-      const dados = await res.json();
-      const conteudo = dados?.choices?.[0]?.message?.content;
-      if (!conteudo) {
-        ultimoErro = new Error(`${modelo}: resposta sem conteúdo`);
-        continue;
-      }
-
-      return { conteudo, modelo, tentativas };
-    } catch (err) {
-      todos429 = false;
-      ultimoErro = err;
     }
   }
 
-  const erro = ultimoErro || new Error('nenhum modelo respondeu');
-  // Todos os modelos em 429 é, quase sempre, a cota diária da CHAVE — não de
-  // um modelo. Seguir para o próximo lote só gastaria mais 4 pedidos negados.
-  if (todos429) erro.cotaEsgotada = true;
-  erro.tentativas = tentativas;
-  throw erro;
-}
+  async function candidatosDe(provedor) {
+    const chave = chaves[provedor];
+    let lista;
+    try {
+      lista = await listadores[provedor](chave);
+    } catch (err) {
+      const e = new Error(ocultarChave(err.message, chave));
+      e.listagem = true;
+      e.tentativas = 0;
+      throw e;
+    }
+    return lista.map((m) => {
+      const id = typeof m === 'string' ? m : m.id;
+      return { provedor, id, chave, pensa: typeof m === 'object' && m.pensa === true, qualificado: qualificar(provedor, id) };
+    });
+  }
 
-// A conferência: mesma lista de modelos gratuitos (conferida contra
-// /api/v1/models), menos os de `excluir`. Temperatura zero: é um veredito,
-// não um texto.
-function chamarConferencia(prompt, { chave, modelos, excluir = [] } = {}) {
-  return chamarOpenRouter(prompt, {
-    chave,
-    modelos,
-    excluir,
-    sistema: PROMPT_CONFERENCIA,
-    temperatura: 0,
-    maxTokens: MAX_TOKENS_CONFERENCIA,
-    titulo: 'MA Questoes - conferencia',
+  const resultado = (r) => ({
+    conteudo: r.conteudo,
+    modelo: r.candidato.qualificado,
+    tentativas: r.tentativas,
+    porProvedor: r.porProvedor,
   });
+
+  async function gerar(prompt, { excluir = [] } = {}) {
+    const candidatos = (await candidatosDe(gerador)).filter((c) => !excluido(c.qualificado, excluir));
+    if (candidatos.length === 0) {
+      const e = new Error(`nenhum modelo do ${gerador} disponível para gerar`);
+      e.tentativas = 0;
+      e.semGerador = true; // o lote seguinte falharia igual: a rodada para
+      throw e;
+    }
+    return resultado(await pedirComEspera(prompt, candidatos, PARAMS_GERACAO, { esperar, log }));
+  }
+
+  async function conferir(prompt, { excluir = [] } = {}) {
+    const ativos = ordemConferencia.filter((p) => !semCotaNaConferencia.has(p));
+    if (ativos.length === 0) {
+      const e = new Error(`sem cota para conferir em nenhum provedor (${ordemConferencia.join(', ')})`);
+      e.cotaEsgotada = true;
+      e.provedores429 = [...semCotaNaConferencia];
+      e.tentativas = 0;
+      throw e;
+    }
+    const todos = [];
+    const falhas = [];
+    for (const p of ativos) {
+      try {
+        todos.push(...(await candidatosDe(p)));
+      } catch (err) {
+        falhas.push(err);
+      }
+    }
+    if (falhas.length === ativos.length) throw falhas[0];
+
+    const candidatos = ordenarConferentes(todos, excluir);
+    if (candidatos.length === 0) {
+      if (falhas.length) throw falhas[0];
+      throw erroSemModelo(`nenhum modelo disponível além de ${excluir.join(', ')} para conferir`);
+    }
+    let r;
+    try {
+      r = await pedirComEspera(prompt, candidatos, PARAMS_CONFERENCIA, { esperar, log });
+    } catch (err) {
+      marcarSemCota(err.esgotados);
+      throw err;
+    }
+    marcarSemCota(r.esgotados);
+    return resultado(r);
+  }
+
+  return {
+    gerador,
+    provedores: disponiveis,
+    ordemConferencia,
+    semCotaNaConferencia,
+    candidatosDe,
+    gerar,
+    conferir,
+  };
 }
 
 async function buscarPendentes(cliente, { exame, limite, refazerIa, ignorar = [] }) {
@@ -871,8 +1158,22 @@ function novoResumo() {
     modelos: [],
     modelosConferencia: [],
     pedidos: 0,
+    pedidosPorProvedor: {}, // { openrouter: n, gemini: n }
+    conferencias: [], // { ids, modelo, mesmoFabricante } — um por lote conferido
     interrompida: null,
   };
+}
+
+// Soma o custo de um pedido (ou de um erro) no total e por provedor. Sem o
+// detalhe por provedor (chamarModelo injetado, chamarOpenRouter), conta para
+// o provedor do modelo — id sem prefixo, ou nenhum, é OpenRouter.
+function contarPedidos(resumo, r) {
+  const total = r.tentativas ?? 1;
+  resumo.pedidos += total;
+  const por = r.porProvedor || (total ? { [provedorDe(r.modelo)]: total } : {});
+  for (const [p, n] of Object.entries(por)) {
+    resumo.pedidosPorProvedor[p] = (resumo.pedidosPorProvedor[p] || 0) + n;
+  }
 }
 
 const anotarModelo = (lista, modelo) => {
@@ -887,9 +1188,12 @@ function registrarErroDeLote(resumo, ids, err, log) {
   resumo.lotesComErro++;
   resumo.errosDeLote.push({ ids, motivo: err.message });
   if (err.cotaEsgotada) {
-    resumo.interrompida = 'todos os modelos devolveram 429 (cota da chave provavelmente esgotada)';
+    const quem = err.provedores429 && err.provedores429.length ? ` (${err.provedores429.join(', ')})` : '';
+    resumo.interrompida = `todos os modelos${quem} devolveram 429 (cota do dia da chave provavelmente esgotada; tente amanhã)`;
   } else if (err.listagem) {
-    resumo.interrompida = `sem a lista de modelos da OpenRouter (${err.message})`;
+    resumo.interrompida = `sem a lista de modelos (${err.message})`;
+  } else if (err.semGerador) {
+    resumo.interrompida = err.message;
   }
 }
 
@@ -905,10 +1209,13 @@ const MAX_CONFERENTES = 2;
 // Lança nos casos de interpretarConferencia (depois da 2ª tentativa), e
 // quando o conferente devolvido é um excluído (defesa contra um
 // `conferirModelo` que ignore `excluir`).
-async function conferir(conferirModelo, explicadas, questoes, { excluir = [], resumo, log = () => {} }) {
+// `autores`: quem escreveu (o gerador, ou os autores gravados) — para
+// registrar o lote conferido por modelo do MESMO fabricante (provedores.js),
+// o que acontece quando o outro provedor falta ou está sem cota.
+async function conferir(conferirModelo, explicadas, questoes, { excluir = [], autores = [], resumo, log = () => {} }) {
   const prompt = montarPromptConferencia(explicadas, questoes);
   const ids = explicadas.map((e) => e.id);
-  const proibidos = [...new Set(excluir)];
+  const proibidos = [...new Set(excluir.filter(Boolean))];
   let ultimoErro = null;
 
   for (let tentativa = 0; tentativa < MAX_CONFERENTES; tentativa++) {
@@ -916,24 +1223,32 @@ async function conferir(conferirModelo, explicadas, questoes, { excluir = [], re
     try {
       r = await conferirModelo(prompt, { excluir: [...proibidos] });
     } catch (err) {
-      resumo.pedidos += err.tentativas ?? 1;
+      contarPedidos(resumo, err);
       // Já houve um conferente ilegível e não sobra outro: é falha do lote,
       // não "sem segundo modelo".
       if (ultimoErro && err.semConferente) throw ultimoErro;
       throw err;
     }
-    resumo.pedidos += r.tentativas ?? 1;
+    contarPedidos(resumo, r);
     anotarModelo(resumo.modelosConferencia, r.modelo);
-    if (!r.modelo || proibidos.includes(r.modelo)) {
+    // Comparação por provedor (provedores.js): "gemini:x" e "x" sem prefixo
+    // (= OpenRouter, ou qualquer provedor quando está em `excluir`).
+    if (!r.modelo || excluido(r.modelo, proibidos)) {
       throw new Error(`conferência feita por modelo excluído — o próprio autor? (${r.modelo || 'modelo não informado'})`);
     }
+    let vereditos;
     try {
-      return interpretarConferencia(r.conteudo, ids);
+      vereditos = interpretarConferencia(r.conteudo, ids);
     } catch (err) {
       ultimoErro = new Error(`${r.modelo}: ${err.message}`);
       proibidos.push(r.modelo);
       if (tentativa + 1 < MAX_CONFERENTES) log(`  ↻ ${ultimoErro.message} — tentando outro conferente`);
+      continue;
     }
+    const mesmoFabricante = autores.filter(Boolean).some((a) => fabricante(a) === fabricante(r.modelo));
+    resumo.conferencias.push({ ids, modelo: r.modelo, mesmoFabricante });
+    log(`  🔎 lote [${ids.join(', ')}] conferido por ${r.modelo}${mesmoFabricante ? ' (MESMO fabricante do autor)' : ''}`);
+    return vereditos;
   }
   throw ultimoErro;
 }
@@ -989,10 +1304,12 @@ async function explicar({
         try {
           r = await chamarModelo(montarPrompt(pendentes));
         } catch (err) {
-          resumo.pedidos += err.tentativas ?? 1;
+          contarPedidos(resumo, err);
           throw err;
         }
-        resumo.pedidos += r.tentativas ?? 1;
+        contarPedidos(resumo, r);
+        // Como veio (o roteador já qualifica: "gemini:..."); a exclusão na
+        // conferência entende os dois formatos, e a gravação qualifica.
         gerador = r.modelo;
         anotarModelo(resumo.modelos, gerador);
         // Sem saber quem escreveu, não há como garantir que outro confira.
@@ -1019,6 +1336,7 @@ async function explicar({
       try {
         vereditos = await conferir(conferirModelo, interpretada.aceitas, pendentes, {
           excluir: [...excluir, gerador],
+          autores: [gerador],
           resumo,
           log,
         });
@@ -1061,7 +1379,9 @@ async function explicar({
       // 3. GRAVAÇÃO — só as aprovadas. Reprovada não marca nada no banco:
       // continua pendente e volta na próxima rodada.
       if (aplicar && aprovadas.length > 0) {
-        resumo.gravadas += await gravar(cliente, aprovadas, pendentes, { refazerIa, modelo: gerador });
+        // Com provedor ("openrouter:..." / "gemini:..."): sem ambiguidade
+        // para a reconferência (--conferir-gravadas) saber quem excluir.
+        resumo.gravadas += await gravar(cliente, aprovadas, pendentes, { refazerIa, modelo: normalizar(gerador) });
       }
     }
   } finally {
@@ -1120,6 +1440,7 @@ async function conferirGravadas({
       try {
         vereditos = await conferir(conferirModelo, explicadas, gravadas, {
           excluir: [...excluir, ...autores],
+          autores,
           resumo,
           log,
         });
@@ -1181,6 +1502,36 @@ async function conferirGravadas({
   return resumo;
 }
 
+// Só OpenRouter (ou nada): a linha de sempre. Com Gemini, por provedor.
+function linhaDeCusto(r) {
+  const por = r.pedidosPorProvedor || {};
+  if (!por.gemini) return `custo: ${r.pedidos} pedido(s) à OpenRouter (cota gratuita: 50/dia)`;
+  const partes = [`Gemini ${por.gemini} (cota gratuita: por modelo, ver AI Studio)`];
+  if (por.openrouter) partes.unshift(`OpenRouter ${por.openrouter} (cota gratuita: 50/dia)`);
+  return `custo: ${r.pedidos} pedido(s) — ${partes.join(' · ')}`;
+}
+
+// Conferente de cada lote e, se houver, quantos foram conferidos pelo
+// MESMO fabricante do autor (outro provedor sem chave ou sem cota), por modelo.
+function linhasDeConferentes(r) {
+  const conf = r.conferencias || [];
+  const linhas = conf.map(
+    (c) => `  lote [${c.ids.join(', ')}] conferido por ${c.modelo}${c.mesmoFabricante ? ' (mesmo fabricante)' : ''}`
+  );
+  const mesmos = conf.filter((c) => c.mesmoFabricante);
+  if (mesmos.length) {
+    const porModelo = {};
+    for (const c of mesmos) porModelo[c.modelo] = (porModelo[c.modelo] || 0) + 1;
+    linhas.push(
+      `⚠️  ${mesmos.length} de ${conf.length} lote(s) conferido(s) pelo MESMO fabricante do autor: ` +
+        Object.entries(porModelo)
+          .map(([m, n]) => `${m} (${n})`)
+          .join(', ')
+    );
+  }
+  return linhas;
+}
+
 function imprimirResumo(r, { aplicar, modo }) {
   console.log('');
   if (modo === 'conferir-gravadas') {
@@ -1199,7 +1550,7 @@ function imprimirResumo(r, { aplicar, modo }) {
     if (r.recusadas.length) console.log(`${r.recusadas.length} recusada(s) nos filtros de texto`);
     if (r.semConferente) console.log(`${r.semConferente} sem conferente disponível — não gravada(s)`);
   }
-  console.log(`custo: ${r.pedidos} pedido(s) à OpenRouter (cota gratuita: 50/dia)`);
+  console.log(linhaDeCusto(r));
   if (r.lotesComErro) console.log(`${r.lotesComErro} lote(s) falharam e voltam na próxima rodada`);
   for (const e of r.errosDeLote) console.log(`  lote [${e.ids.join(', ')}]: ${e.motivo}`);
   if (r.interrompida) console.log(`⛔ rodada interrompida: ${r.interrompida}`);
@@ -1207,6 +1558,7 @@ function imprimirResumo(r, { aplicar, modo }) {
     console.log(`gerador(es): ${r.modelos.length ? r.modelos.join(', ') : 'nenhum'}`);
   }
   console.log(`conferente(s): ${r.modelosConferencia.length ? r.modelosConferencia.join(', ') : 'nenhum'}`);
+  for (const linha of linhasDeConferentes(r)) console.log(linha);
   for (const rec of r.recusadas) console.log(`  recusada ${rec.id}: ${rec.motivo}`);
   for (const rep of r.reprovadas) {
     console.log(`  reprovada ${rep.exame}º/${rep.numero} (id ${rep.id}):`);
@@ -1227,11 +1579,16 @@ module.exports = {
   montarPromptConferencia,
   chamarOpenRouter,
   chamarConferencia,
+  criarRoteador,
+  linhaDeCusto,
+  linhasDeConferentes,
+  ESPERA_429_MS,
   letraAfirmadaNoTexto,
   citacaoNumerada,
   PROMPT_SISTEMA,
   PROMPT_CONFERENCIA,
   PREFERIDOS,
+  GEMINI_URL,
   LOTE_PADRAO,
   TOTAL_PADRAO,
   MAX_CARACTERES,
@@ -1272,12 +1629,27 @@ if (require.main === module) {
   const total = valor('--total', TOTAL_PADRAO);
   const excluir = textos('--excluir');
   const [backup] = textos('--backup');
+  const [geradorPedido] = textos('--gerador');
   const listaExplicita = Boolean(process.env.IA_MODELOS && process.env.IA_MODELOS.trim());
-  const chave = process.env.OPENROUTER_API_KEY;
+  // Chave com espaço/quebra de linha (arquivo editado à mão) vira header
+  // inválido; o trim evita o erro. Nenhum formato de chave é validado.
+  const limpa = (v) => (v && v.trim()) || undefined;
+  const chaves = { openrouter: limpa(process.env.OPENROUTER_API_KEY), gemini: limpa(process.env.GEMINI_API_KEY) };
 
-  if (!chave) {
-    console.error('❌ OPENROUTER_API_KEY não definida.');
-    console.error('   Ex.: OPENROUTER_API_KEY=$(cat ~/.openrouter-key) node explicar.js --aplicar');
+  if (!chaves.openrouter && !chaves.gemini) {
+    console.error('❌ Nenhuma chave definida: OPENROUTER_API_KEY e/ou GEMINI_API_KEY.');
+    console.error('   Ex. (a chave no ambiente e `-e NOME` sem valor: nunca `-e NOME=valor`, que aparece em `ps`):');
+    console.error('   GEMINI_API_KEY="$(tr -d \'[:space:]\' < ~/.gemini-key)" \\');
+    console.error('   OPENROUTER_API_KEY="$(tr -d \'[:space:]\' < ~/.openrouter-key)" \\');
+    console.error('   docker exec -e GEMINI_API_KEY -e OPENROUTER_API_KEY <container> node explicar.js --aplicar');
+    process.exit(1);
+  }
+  if (geradorPedido && !PROVEDORES.includes(geradorPedido)) {
+    console.error(`❌ --gerador ${geradorPedido}: use openrouter ou gemini.`);
+    process.exit(1);
+  }
+  if (modoGravadas && geradorPedido) {
+    console.error('❌ --conferir-gravadas não gera nada; não combina com --gerador.');
     process.exit(1);
   }
   if (modoGravadas && refazerIa) {
@@ -1294,44 +1666,72 @@ if (require.main === module) {
     process.exit(1);
   }
 
+  let roteador;
+  try {
+    // Com GEMINI_API_KEY o gerador padrão é o Gemini; sem ela, a OpenRouter.
+    roteador = criarRoteador({ chaves, gerador: geradorPedido });
+  } catch (err) {
+    console.error('❌', err.message);
+    process.exit(1);
+  }
+
   if (!aplicar) {
     console.log('🔍 Prévia: nada será gravado nem limpo. Use --aplicar para valer.');
-    console.log('   (A prévia chama os modelos e gasta cota da OpenRouter igual.)\n');
+    console.log('   (A prévia chama os modelos e gasta cota igual.)\n');
   }
   if (refazerIa) console.log('♻️  --refazer-ia: explicações da IA não revisadas também entram na fila.\n');
   if (modoGravadas) console.log("🔎 --conferir-gravadas: confere as explicações 'ia' não revisadas já gravadas.\n");
   if (excluir.length) console.log(`🚫 nunca usar: ${excluir.join(', ')}\n`);
 
-  const conferirModelo = (prompt, { excluir: fora }) => chamarConferencia(prompt, { chave, excluir: fora });
+  const conferirModelo = (prompt, { excluir: fora }) => roteador.conferir(prompt, { excluir: fora });
 
   // Tudo o que pode abortar vem antes do primeiro pedido pago (listar
-  // modelos e consultar o banco não gastam cota).
-  modelosEmOrdem(PREFERIDOS)
-    .then(async (lista) => {
-      const disponiveis = lista.filter((m) => !excluir.includes(m));
-      const minimo = modoGravadas ? 1 : 2;
-      if (disponiveis.length < minimo) {
+  // modelos e consultar o banco não gastam cota). Listagem de um provedor
+  // configurado que falha (chave errada, rede) aborta: se a chave foi dada,
+  // a intenção era usá-lo.
+  (async () => {
+    const porProvedor = {};
+    for (const p of roteador.provedores) {
+      porProvedor[p] = (await roteador.candidatosDe(p))
+        .map((c) => c.qualificado)
+        .filter((m) => !excluido(m, excluir));
+    }
+    const todos = Object.values(porProvedor).flat();
+
+    if (modoGravadas) {
+      if (todos.length < 1) throw new Error('nenhum modelo utilizável para conferir. Nada foi feito.');
+    } else {
+      const geradores = porProvedor[roteador.gerador];
+      if (geradores.length < 1 || todos.length < 2) {
         throw new Error(
-          `só ${disponiveis.length} modelo(s) gratuito(s) utilizável(is) (${disponiveis.join(', ') || 'nenhum'}); ` +
-            `${modoGravadas ? 'a conferência precisa de 1' : 'são precisos 2: um escreve, outro confere'}. Nada foi feito.`
+          `só ${todos.length} modelo(s) utilizável(is) (${todos.join(', ') || 'nenhum'}), ` +
+            `${geradores.length} do gerador (${roteador.gerador}); são precisos 2: um escreve, outro confere. Nada foi feito.`
         );
       }
-      console.log(`modelos disponíveis: ${disponiveis.join(', ')}\n`);
-      await migrate(pool);
-
-      // O banco só sabe o autor das gravadas depois da migration 006. Para
-      // as anteriores, quem roda precisa dizer quem NÃO confere.
-      if (modoGravadas && excluir.length === 0 && !listaExplicita) {
-        const semAutor = await contarGravadasSemAutor(pool, { exame });
-        if (semAutor > 0) {
-          throw new Error(
-            `${semAutor} explicação(ões) na fila sem autor registrado: o conferente poderia ser o próprio autor. ` +
-              'Diga quem escreveu com --excluir <id-do-modelo> (pode repetir) ou fixe os conferentes em IA_MODELOS. ' +
-              'Nada foi feito.'
-          );
-        }
+      console.log(`gerador: ${roteador.gerador} — ${geradores.join(', ')}`);
+      if (roteador.ordemConferencia.length === 1) {
+        console.log(`⚠️  só há chave do ${roteador.gerador}: a conferência usa outro modelo do mesmo provedor.`);
       }
-    })
+    }
+    for (const p of roteador.ordemConferencia) {
+      console.log(`conferência (${p}): ${porProvedor[p].join(', ') || 'nenhum'}`);
+    }
+    console.log('');
+    await migrate(pool);
+
+    // O banco só sabe o autor das gravadas depois da migration 006. Para
+    // as anteriores, quem roda precisa dizer quem NÃO confere.
+    if (modoGravadas && excluir.length === 0 && !listaExplicita) {
+      const semAutor = await contarGravadasSemAutor(pool, { exame });
+      if (semAutor > 0) {
+        throw new Error(
+          `${semAutor} explicação(ões) na fila sem autor registrado: o conferente poderia ser o próprio autor. ` +
+            'Diga quem escreveu com --excluir <id-do-modelo> (pode repetir) ou fixe os conferentes em IA_MODELOS. ' +
+            'Nada foi feito.'
+        );
+      }
+    }
+  })()
     .then(() =>
       modoGravadas
         ? conferirGravadas({ exame, lote, total, aplicar, excluir, backup, conferirModelo })
@@ -1342,7 +1742,7 @@ if (require.main === module) {
             aplicar,
             refazerIa,
             excluir,
-            chamarModelo: (prompt) => chamarOpenRouter(prompt, { chave, excluir }),
+            chamarModelo: (prompt) => roteador.gerar(prompt, { excluir }),
             conferirModelo,
           })
     )
@@ -1351,7 +1751,7 @@ if (require.main === module) {
       return pool.end();
     })
     .catch((err) => {
-      console.error('❌', err.message);
+      console.error('❌', ocultarChave(ocultarChave(err.message, chaves.gemini), chaves.openrouter));
       process.exit(1);
     });
 }
