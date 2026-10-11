@@ -228,8 +228,11 @@ Explicação com número de dispositivo é descartada automaticamente.
 Prazos, valores, idades e quantidades continuam permitidos ("prazo de 15
 dias", "maior de 18 anos").
 
-Estilo: português do Brasil, tom de professor de cursinho, direto e
-didático. Entre 120 e 200 palavras por questão. Texto corrido, sem
+Estilo: português do Brasil, direto e didático. Comece pela própria
+explicação ("A alternativa C está correta porque..."), sem saudação,
+vocativo ou chamada ("Fala, pessoal!", "Olha a pegadinha!", "Atenção!"):
+o texto aparece logo abaixo da questão, para uma pessoa só, e não é aula
+falada. Entre 120 e 200 palavras por questão. Texto corrido, sem
 markdown (sem **, sem #, sem listas, sem blocos de código).
 
 Se, depois de analisar, você concluir que a alternativa correta NÃO é a do
@@ -346,6 +349,31 @@ function citacaoNumerada(texto) {
   return null;
 }
 
+// SAUDAÇÃO NO COMEÇO
+// O prompt antigo pedia "tom de professor de cursinho", e o Gemini Flash
+// passou a abrir algumas explicações como aula gravada: "Fala, pessoal!",
+// "Olá, futuros aprovados!", "Olha a pegadinha, futuro advogado!". O
+// conteúdo depois dela estava certo, então a abertura é cortada em vez de a
+// explicação inteira ser recusada (recusar gastaria outro pedido da cota).
+// Só corta frase CURTA terminada em "!" antes de "A alternativa"/"As
+// alternativas"/"A letra"/"O gabarito": "A alternativa D é a correta!" não
+// é saudação e, sem nada antes dela, não é tocada.
+//
+// O trecho cortado não pode ter conteúdo: se falar de alternativa, letra,
+// gabarito, resposta, certo/errado ou trouxer número, fica. Senão o corte
+// esconderia uma contradição ("A correta é a B! A alternativa C está
+// correta...") que `letraAfirmadaNoTexto` recusa logo depois, ou apagaria
+// uma frase jurídica ("Cuidado com o prazo de 15 dias! A alternativa...").
+const SAUDACAO_INICIAL =
+  /^(?:[^.!?\n]{1,80}!+(?:\s*\p{Extended_Pictographic})*\s+)+(?=(?:A|As)\s+alternativas?\b|A\s+letra\b|O\s+gabarito\b)/u;
+const CONTEUDO_NA_ABERTURA = /alternativ|letra|gabarito|respost|corret|errad|\d/iu;
+
+function semSaudacao(texto) {
+  const m = SAUDACAO_INICIAL.exec(texto);
+  if (!m || CONTEUDO_NA_ABERTURA.test(m[0])) return texto;
+  return texto.slice(m[0].length);
+}
+
 // Motivo da recusa do texto, ou null se passa.
 function problemaNoTexto(texto, letraOficial) {
   if (texto.includes('```')) return 'texto com cerca de markdown';
@@ -419,7 +447,7 @@ function interpretarResposta(texto, questoes) {
       continue;
     }
 
-    const explicacao = item.explicacao.trim();
+    const explicacao = semSaudacao(item.explicacao.trim());
     const problema = problemaNoTexto(explicacao, oficial);
     if (problema) {
       recusadas.push({ id, motivo: problema });
@@ -1585,6 +1613,7 @@ module.exports = {
   ESPERA_429_MS,
   letraAfirmadaNoTexto,
   citacaoNumerada,
+  semSaudacao,
   PROMPT_SISTEMA,
   PROMPT_CONFERENCIA,
   PREFERIDOS,
