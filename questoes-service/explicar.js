@@ -9,9 +9,12 @@
 //   node explicar.js --gerador openrouter    # gera pela OpenRouter mesmo com GEMINI_API_KEY
 //
 //   Chaves: GEMINI_API_KEY (Google AI Studio) e/ou OPENROUTER_API_KEY. Com a
-//   do Gemini, ele GERA e a OpenRouter CONFERE (ver PROVEDORES, abaixo):
+//   do Gemini, ele GERA e a OpenRouter CONFERE (ver PROVEDORES, abaixo). No
+//   servidor, a chave vai no AMBIENTE do processo e `-e NOME` SEM valor —
+//   nunca `-e NOME=valor`, que fica visível em `ps` para todo usuário:
 //   GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" \
-//   OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" node explicar.js --total 30 --aplicar
+//   OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" \
+//   docker exec -e GEMINI_API_KEY -e OPENROUTER_API_KEY <container> node explicar.js --total 30 --aplicar
 //
 //   # confere as 'ia' já gravadas (prévia); --excluir = quem as escreveu
 //   node explicar.js --conferir-gravadas --excluir <modelo-autor>
@@ -132,7 +135,7 @@ const { pool } = require('./app');
 const { migrate } = require('./migrate');
 const { modelosEmOrdem } = require('./openrouter');
 const { modelosGeminiEmOrdem, ocultarChave } = require('./gemini');
-const { PROVEDORES, qualificar, normalizar, provedorDe, excluido, ordenarConferentes } = require('./provedores');
+const { PROVEDORES, qualificar, normalizar, provedorDe, fabricante, excluido, ordenarConferentes } = require('./provedores');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // Rota compatível com OpenAI do Gemini (Google AI Studio).
@@ -657,8 +660,16 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
   let ultimoErro = null;
   let todos429 = true;
   let tentativas = 0;
+  // Provedor ESGOTADO = todos os modelos dele na lista foram tentados e
+  // todos deram 429 (a cota do dia da chave, quase sempre). O roteador usa
+  // para pular o provedor na conferência pelo resto da rodada.
+  const esgotados = () =>
+    Object.keys(porProvedor).filter(
+      (p) => n429[p] === porProvedor[p] && porProvedor[p] === candidatos.filter((c) => c.provedor === p).length
+    );
   const porProvedor = {};
   const com429 = new Set();
+  const n429 = {}; // 429 por provedor
 
   for (const c of candidatos) {
     tentativas++;
@@ -673,8 +684,10 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
 
-      if (res.status === 429) com429.add(c.provedor);
-      else todos429 = false;
+      if (res.status === 429) {
+        com429.add(c.provedor);
+        n429[c.provedor] = (n429[c.provedor] || 0) + 1;
+      } else todos429 = false;
       if (!res.ok) {
         ultimoErro = new Error(`${nome}: HTTP ${res.status}`);
         continue;
@@ -687,7 +700,7 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
         continue;
       }
 
-      return { conteudo, candidato: c, tentativas, porProvedor };
+      return { conteudo, candidato: c, tentativas, porProvedor, esgotados: esgotados() };
     } catch (err) {
       todos429 = false;
       ultimoErro = new Error(`${nome}: ${semChaves(err.message, candidatos)}`);
@@ -704,7 +717,39 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
   }
   erro.tentativas = tentativas;
   erro.porProvedor = porProvedor;
+  erro.esgotados = esgotados();
   throw erro;
+}
+
+// LIMITE POR MINUTO ≠ COTA DO DIA. Com vários modelos, todos em 429 é a
+// cota do dia. Com UM modelo Gemini só, um 429 pode ser o limite por minuto
+// do plano gratuito (que zera em 60 s): espera e tenta UMA vez antes de dar
+// a rodada por encerrada. `esperar` é injetável (teste com timer falso).
+const ESPERA_429_MS = 60 * 1000;
+
+const somarPorProvedor = (a, b) => {
+  const s = { ...a };
+  for (const [p, n] of Object.entries(b || {})) s[p] = (s[p] || 0) + n;
+  return s;
+};
+
+async function pedirComEspera(prompt, candidatos, params, { esperar, log }) {
+  try {
+    return await pedirEmOrdem(prompt, candidatos, params);
+  } catch (err) {
+    const unicoGemini = candidatos.length === 1 && candidatos[0].provedor === 'gemini';
+    if (!err.cotaEsgotada || !unicoGemini) throw err;
+    log(`  ⏳ ${candidatos[0].qualificado}: 429 com um só modelo Gemini — pode ser o limite por minuto; nova tentativa em ${ESPERA_429_MS / 1000} s`);
+    await esperar(ESPERA_429_MS);
+    try {
+      const r = await pedirEmOrdem(prompt, candidatos, params);
+      return { ...r, tentativas: r.tentativas + err.tentativas, porProvedor: somarPorProvedor(err.porProvedor, r.porProvedor) };
+    } catch (err2) {
+      err2.tentativas += err.tentativas;
+      err2.porProvedor = somarPorProvedor(err.porProvedor, err2.porProvedor);
+      throw err2;
+    }
+  }
 }
 
 function erroSemModelo(mensagem) {
@@ -794,7 +839,23 @@ function chamarConferencia(prompt, { chave, modelos, excluir = [] } = {}) {
 //   modelo do mesmo provedor do gerador, nunca o próprio gerador.
 // Os dois devolvem { conteudo, modelo: '<provedor>:<id>', tentativas,
 // porProvedor }.
-function criarRoteador({ chaves = {}, gerador, listar = {} } = {}) {
+//
+// COTA NA CONFERÊNCIA: o provedor que devolver 429 em TODOS os modelos dele
+// (ver `esgotados` em pedirEmOrdem) é pulado na conferência pelo resto da
+// rodada — re-tentar a cada lote só gastaria pedidos negados (e tempo). Um
+// aviso só, no log. Se todos os provedores ficarem sem cota, a conferência
+// lança `cotaEsgotada` sem pedido nenhum, e a rodada para.
+//
+// `log` e `esperar` injetáveis (teste).
+const NOME_PROVEDOR = { openrouter: 'OpenRouter', gemini: 'Gemini' };
+
+function criarRoteador({
+  chaves = {},
+  gerador,
+  listar = {},
+  log = console.log,
+  esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms)),
+} = {}) {
   const listadores = {
     openrouter: listar.openrouter || (() => modelosEmOrdem(PREFERIDOS)),
     gemini: listar.gemini || ((chave) => modelosGeminiEmOrdem(chave)),
@@ -807,6 +868,21 @@ function criarRoteador({ chaves = {}, gerador, listar = {} } = {}) {
   }
   // O outro provedor primeiro na conferência; o do gerador por último.
   const ordemConferencia = [...disponiveis.filter((p) => p !== gerador), gerador];
+  const semCotaNaConferencia = new Set();
+
+  function marcarSemCota(esgotados = []) {
+    for (const p of esgotados) {
+      if (semCotaNaConferencia.has(p)) continue;
+      semCotaNaConferencia.add(p);
+      const restam = ordemConferencia.filter((q) => !semCotaNaConferencia.has(q));
+      if (restam.length) {
+        log(
+          `  ⚠️  ${NOME_PROVEDOR[p]} sem cota: conferência cai para o mesmo fabricante ` +
+            `(só ${restam.map((q) => NOME_PROVEDOR[q]).join(', ')}) pelo resto da rodada`
+        );
+      }
+    }
+  }
 
   async function candidatosDe(provedor) {
     const chave = chaves[provedor];
@@ -840,30 +916,54 @@ function criarRoteador({ chaves = {}, gerador, listar = {} } = {}) {
       e.semGerador = true; // o lote seguinte falharia igual: a rodada para
       throw e;
     }
-    return resultado(await pedirEmOrdem(prompt, candidatos, PARAMS_GERACAO));
+    return resultado(await pedirComEspera(prompt, candidatos, PARAMS_GERACAO, { esperar, log }));
   }
 
   async function conferir(prompt, { excluir = [] } = {}) {
+    const ativos = ordemConferencia.filter((p) => !semCotaNaConferencia.has(p));
+    if (ativos.length === 0) {
+      const e = new Error(`sem cota para conferir em nenhum provedor (${ordemConferencia.join(', ')})`);
+      e.cotaEsgotada = true;
+      e.provedores429 = [...semCotaNaConferencia];
+      e.tentativas = 0;
+      throw e;
+    }
     const todos = [];
     const falhas = [];
-    for (const p of ordemConferencia) {
+    for (const p of ativos) {
       try {
         todos.push(...(await candidatosDe(p)));
       } catch (err) {
         falhas.push(err);
       }
     }
-    if (falhas.length === ordemConferencia.length) throw falhas[0];
+    if (falhas.length === ativos.length) throw falhas[0];
 
     const candidatos = ordenarConferentes(todos, excluir);
     if (candidatos.length === 0) {
       if (falhas.length) throw falhas[0];
       throw erroSemModelo(`nenhum modelo disponível além de ${excluir.join(', ')} para conferir`);
     }
-    return resultado(await pedirEmOrdem(prompt, candidatos, PARAMS_CONFERENCIA));
+    let r;
+    try {
+      r = await pedirComEspera(prompt, candidatos, PARAMS_CONFERENCIA, { esperar, log });
+    } catch (err) {
+      marcarSemCota(err.esgotados);
+      throw err;
+    }
+    marcarSemCota(r.esgotados);
+    return resultado(r);
   }
 
-  return { gerador, provedores: disponiveis, ordemConferencia, candidatosDe, gerar, conferir };
+  return {
+    gerador,
+    provedores: disponiveis,
+    ordemConferencia,
+    semCotaNaConferencia,
+    candidatosDe,
+    gerar,
+    conferir,
+  };
 }
 
 async function buscarPendentes(cliente, { exame, limite, refazerIa, ignorar = [] }) {
@@ -1059,6 +1159,7 @@ function novoResumo() {
     modelosConferencia: [],
     pedidos: 0,
     pedidosPorProvedor: {}, // { openrouter: n, gemini: n }
+    conferencias: [], // { ids, modelo, mesmoFabricante } — um por lote conferido
     interrompida: null,
   };
 }
@@ -1108,7 +1209,10 @@ const MAX_CONFERENTES = 2;
 // Lança nos casos de interpretarConferencia (depois da 2ª tentativa), e
 // quando o conferente devolvido é um excluído (defesa contra um
 // `conferirModelo` que ignore `excluir`).
-async function conferir(conferirModelo, explicadas, questoes, { excluir = [], resumo, log = () => {} }) {
+// `autores`: quem escreveu (o gerador, ou os autores gravados) — para
+// registrar o lote conferido por modelo do MESMO fabricante (provedores.js),
+// o que acontece quando o outro provedor falta ou está sem cota.
+async function conferir(conferirModelo, explicadas, questoes, { excluir = [], autores = [], resumo, log = () => {} }) {
   const prompt = montarPromptConferencia(explicadas, questoes);
   const ids = explicadas.map((e) => e.id);
   const proibidos = [...new Set(excluir.filter(Boolean))];
@@ -1132,13 +1236,19 @@ async function conferir(conferirModelo, explicadas, questoes, { excluir = [], re
     if (!r.modelo || excluido(r.modelo, proibidos)) {
       throw new Error(`conferência feita por modelo excluído — o próprio autor? (${r.modelo || 'modelo não informado'})`);
     }
+    let vereditos;
     try {
-      return interpretarConferencia(r.conteudo, ids);
+      vereditos = interpretarConferencia(r.conteudo, ids);
     } catch (err) {
       ultimoErro = new Error(`${r.modelo}: ${err.message}`);
       proibidos.push(r.modelo);
       if (tentativa + 1 < MAX_CONFERENTES) log(`  ↻ ${ultimoErro.message} — tentando outro conferente`);
+      continue;
     }
+    const mesmoFabricante = autores.filter(Boolean).some((a) => fabricante(a) === fabricante(r.modelo));
+    resumo.conferencias.push({ ids, modelo: r.modelo, mesmoFabricante });
+    log(`  🔎 lote [${ids.join(', ')}] conferido por ${r.modelo}${mesmoFabricante ? ' (MESMO fabricante do autor)' : ''}`);
+    return vereditos;
   }
   throw ultimoErro;
 }
@@ -1226,6 +1336,7 @@ async function explicar({
       try {
         vereditos = await conferir(conferirModelo, interpretada.aceitas, pendentes, {
           excluir: [...excluir, gerador],
+          autores: [gerador],
           resumo,
           log,
         });
@@ -1329,6 +1440,7 @@ async function conferirGravadas({
       try {
         vereditos = await conferir(conferirModelo, explicadas, gravadas, {
           excluir: [...excluir, ...autores],
+          autores,
           resumo,
           log,
         });
@@ -1399,6 +1511,27 @@ function linhaDeCusto(r) {
   return `custo: ${r.pedidos} pedido(s) — ${partes.join(' · ')}`;
 }
 
+// Conferente de cada lote e, se houver, quantos foram conferidos pelo
+// MESMO fabricante do autor (outro provedor sem chave ou sem cota), por modelo.
+function linhasDeConferentes(r) {
+  const conf = r.conferencias || [];
+  const linhas = conf.map(
+    (c) => `  lote [${c.ids.join(', ')}] conferido por ${c.modelo}${c.mesmoFabricante ? ' (mesmo fabricante)' : ''}`
+  );
+  const mesmos = conf.filter((c) => c.mesmoFabricante);
+  if (mesmos.length) {
+    const porModelo = {};
+    for (const c of mesmos) porModelo[c.modelo] = (porModelo[c.modelo] || 0) + 1;
+    linhas.push(
+      `⚠️  ${mesmos.length} de ${conf.length} lote(s) conferido(s) pelo MESMO fabricante do autor: ` +
+        Object.entries(porModelo)
+          .map(([m, n]) => `${m} (${n})`)
+          .join(', ')
+    );
+  }
+  return linhas;
+}
+
 function imprimirResumo(r, { aplicar, modo }) {
   console.log('');
   if (modo === 'conferir-gravadas') {
@@ -1425,6 +1558,7 @@ function imprimirResumo(r, { aplicar, modo }) {
     console.log(`gerador(es): ${r.modelos.length ? r.modelos.join(', ') : 'nenhum'}`);
   }
   console.log(`conferente(s): ${r.modelosConferencia.length ? r.modelosConferencia.join(', ') : 'nenhum'}`);
+  for (const linha of linhasDeConferentes(r)) console.log(linha);
   for (const rec of r.recusadas) console.log(`  recusada ${rec.id}: ${rec.motivo}`);
   for (const rep of r.reprovadas) {
     console.log(`  reprovada ${rep.exame}º/${rep.numero} (id ${rep.id}):`);
@@ -1447,6 +1581,8 @@ module.exports = {
   chamarConferencia,
   criarRoteador,
   linhaDeCusto,
+  linhasDeConferentes,
+  ESPERA_429_MS,
   letraAfirmadaNoTexto,
   citacaoNumerada,
   PROMPT_SISTEMA,
@@ -1502,8 +1638,10 @@ if (require.main === module) {
 
   if (!chaves.openrouter && !chaves.gemini) {
     console.error('❌ Nenhuma chave definida: OPENROUTER_API_KEY e/ou GEMINI_API_KEY.');
-    console.error('   Ex.: GEMINI_API_KEY="$(tr -d \'[:space:]\' < ~/.gemini-key)" \\');
-    console.error('        OPENROUTER_API_KEY="$(tr -d \'[:space:]\' < ~/.openrouter-key)" node explicar.js --aplicar');
+    console.error('   Ex. (a chave no ambiente e `-e NOME` sem valor: nunca `-e NOME=valor`, que aparece em `ps`):');
+    console.error('   GEMINI_API_KEY="$(tr -d \'[:space:]\' < ~/.gemini-key)" \\');
+    console.error('   OPENROUTER_API_KEY="$(tr -d \'[:space:]\' < ~/.openrouter-key)" \\');
+    console.error('   docker exec -e GEMINI_API_KEY -e OPENROUTER_API_KEY <container> node explicar.js --aplicar');
     process.exit(1);
   }
   if (geradorPedido && !PROVEDORES.includes(geradorPedido)) {

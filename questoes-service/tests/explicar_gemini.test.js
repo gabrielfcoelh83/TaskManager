@@ -12,6 +12,8 @@ const {
   conferirGravadas,
   criarRoteador,
   linhaDeCusto,
+  linhasDeConferentes,
+  ESPERA_429_MS,
   PROMPT_SISTEMA,
   PROMPT_CONFERENCIA,
   GEMINI_URL,
@@ -99,8 +101,8 @@ const pedidos = () =>
     return [c.messages[0].content === PROMPT_SISTEMA ? 'gera' : 'confere', `${provedor}:${c.model}`];
   });
 
-function rodar(chaves, { gerador, excluir = [], ...resto } = {}) {
-  const roteador = criarRoteador({ chaves, gerador, listar: LISTAS });
+function rodar(chaves, { gerador, excluir = [], logRoteador = silencio, ...resto } = {}) {
+  const roteador = criarRoteador({ chaves, gerador, listar: LISTAS, log: logRoteador });
   return explicar({
     exame: EXAME_TESTE,
     aplicar: true,
@@ -381,5 +383,117 @@ describe('--conferir-gravadas com autores antigos e novos', () => {
     expect(r.aprovadas).toBe(2);
     expect(await buscar(antiga)).toMatchObject({ explicacao_fonte: 'ia' });
     expect(await buscar(nova)).toMatchObject({ explicacao_fonte: 'ia' });
+  });
+});
+
+describe('conferência: provedor sem cota é pulado pelo resto da rodada', () => {
+  const OR_429 = {
+    'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free': 429,
+    'openrouter:google/gemma-4-31b-it:free': 429,
+    'openrouter:nvidia/nemotron-3-super-120b-a12b:free': 429,
+  };
+
+  it('OpenRouter toda em 429 no 1º lote: no 2º nem é tentada, um aviso só, custo sem tentativas puladas', async () => {
+    for (let n = 1; n <= 2; n++) await inserir(n);
+    global.fetch = fetchSimulado({ falhar: OR_429 });
+    const avisos = [];
+    const linhas = [];
+
+    const r = await rodar(
+      { gemini: CHAVE_GEMINI, openrouter: CHAVE_OR },
+      { lote: 1, logRoteador: (m) => avisos.push(m), log: (m) => linhas.push(m) }
+    );
+
+    expect(pedidos()).toEqual([
+      ['gera', 'gemini:gemini-3.8-flash'],
+      ['confere', 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
+      ['confere', 'openrouter:nvidia/nemotron-3-super-120b-a12b:free'],
+      ['confere', 'openrouter:google/gemma-4-31b-it:free'],
+      ['confere', 'gemini:gemini-3.7-flash'],
+      ['gera', 'gemini:gemini-3.8-flash'],
+      ['confere', 'gemini:gemini-3.7-flash'], // direto: a OpenRouter foi pulada
+    ]);
+    expect(avisos.filter((m) => /OpenRouter sem cota: conferência cai para o mesmo fabricante/.test(m))).toHaveLength(1);
+    expect(r).toMatchObject({ gravadas: 2, pedidos: 7, pedidosPorProvedor: { gemini: 4, openrouter: 3 } });
+
+    // O conferente de cada lote vai para o log e para o resumo.
+    expect(r.conferencias.map((c) => [c.modelo, c.mesmoFabricante])).toEqual([
+      ['gemini:gemini-3.7-flash', true],
+      ['gemini:gemini-3.7-flash', true],
+    ]);
+    expect(linhas.filter((m) => /conferido por gemini:gemini-3.7-flash \(MESMO fabricante do autor\)/.test(m))).toHaveLength(2);
+    expect(linhasDeConferentes(r).pop()).toBe(
+      '⚠️  2 de 2 lote(s) conferido(s) pelo MESMO fabricante do autor: gemini:gemini-3.7-flash (2)'
+    );
+  });
+
+  it('com outro fabricante conferindo, nada é marcado como mesmo fabricante', async () => {
+    await inserir(1);
+    global.fetch = fetchSimulado();
+    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
+    expect(r.conferencias).toEqual([
+      { ids: [expect.any(Number)], modelo: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', mesmoFabricante: false },
+    ]);
+    expect(linhasDeConferentes(r).some((l) => /MESMO fabricante/.test(l))).toBe(false);
+  });
+
+  it('todos os provedores sem cota na conferência: a rodada para, sem pedido de conferência a mais', async () => {
+    for (let n = 1; n <= 2; n++) await inserir(n);
+    global.fetch = fetchSimulado({
+      falhar: { ...OR_429, 'gemini:gemini-3.7-flash': 429, 'gemini:gemma-4-31b-it': 429 },
+    });
+    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR }, { lote: 1 });
+    expect(pedidos().filter(([p]) => p === 'gera')).toHaveLength(1);
+    expect(r.interrompida).toMatch(/429/);
+    expect(r).toMatchObject({ gravadas: 0, pedidos: 6 });
+  });
+});
+
+describe('um só modelo Gemini: 429 espera 60 s e tenta uma vez (timer falso)', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  const roteadorUnico = (avisos = []) =>
+    criarRoteador({
+      chaves: { gemini: CHAVE_GEMINI },
+      listar: { gemini: async () => [{ id: 'gemini-3.8-flash', pensa: true }] },
+      log: (m) => avisos.push(m),
+    });
+
+  it('429 e depois 200: espera os 60 s, tenta de novo e devolve, com custo 2', async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce({ ok: false, status: 429 }).mockResolvedValueOnce(ok('[]'));
+    const avisos = [];
+    const promessa = roteadorUnico(avisos).gerar('p');
+
+    await jest.advanceTimersByTimeAsync(ESPERA_429_MS - 1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(avisos.join('\n')).toMatch(/limite por minuto/);
+    await jest.advanceTimersByTimeAsync(1);
+
+    const r = await promessa;
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(r).toMatchObject({ modelo: 'gemini:gemini-3.8-flash', tentativas: 2, porProvedor: { gemini: 2 } });
+  });
+
+  it('429 de novo depois da espera: cota esgotada, uma tentativa extra só', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
+    const promessa = roteadorUnico().gerar('p').catch((e) => e);
+    await jest.advanceTimersByTimeAsync(ESPERA_429_MS);
+    const err = await promessa;
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(err).toMatchObject({ cotaEsgotada: true, tentativas: 2, porProvedor: { gemini: 2 } });
+    expect(err.message).not.toContain(CHAVE_GEMINI);
+  });
+
+  it('com dois modelos Gemini, todos em 429 é a cota do dia: não espera', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
+    const roteador = criarRoteador({
+      chaves: { gemini: CHAVE_GEMINI },
+      listar: { gemini: async () => ['gemini-3.8-flash', 'gemini-3.7-flash'] },
+      log: silencio,
+    });
+    const err = await roteador.gerar('p').catch((e) => e);
+    expect(err).toMatchObject({ cotaEsgotada: true, tentativas: 2 });
+    expect(jest.getTimerCount()).toBe(0);
   });
 });

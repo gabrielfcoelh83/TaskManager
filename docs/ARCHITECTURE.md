@@ -220,11 +220,26 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    prefixo. Rodada em produção:
 
    ```bash
-   docker exec \
-     -e GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" \
-     -e OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" \
-     taskmanager-questoes-service-1 node explicar.js --total N --aplicar
+   GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" \
+   OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" \
+   docker exec -e GEMINI_API_KEY -e OPENROUTER_API_KEY \
+     <container do questoes-service> node explicar.js --total N --aplicar
    ```
+
+   **Nunca a chave na linha de comando do `docker exec`** (`-e NOME=valor`):
+   os argumentos de um processo ficam visíveis em `ps` e `/proc/<pid>/cmdline`
+   para qualquer usuário do servidor. Com a chave só no ambiente do processo
+   e `-e NOME` sem valor, o Docker copia o valor do ambiente — e o ambiente
+   (`/proc/<pid>/environ`) só o dono do processo lê.
+
+   Durante a rodada, o log mostra o conferente de cada lote. Se um provedor
+   devolver 429 em todos os modelos na conferência, ele é pulado pelo resto
+   da rodada (um aviso só: "OpenRouter sem cota: conferência cai para o
+   mesmo fabricante"; as tentativas puladas não contam no custo), e o resumo
+   diz quantos lotes foram conferidos pelo mesmo fabricante do autor e por
+   qual modelo — esses merecem revisão humana primeiro. Com um único modelo
+   Gemini disponível, um 429 pode ser o limite por minuto, não a cota do
+   dia: a CLI espera 60 s e tenta uma vez antes de encerrar a rodada.
 
    Antes de qualquer pedido pago, a CLI lista os modelos de cada provedor
    com chave e imprime o gerador e a ordem da conferência; listagem que
