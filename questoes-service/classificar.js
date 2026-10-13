@@ -5,6 +5,11 @@
 //   node classificar.js --aplicar          # grava
 //   node classificar.js --exame 45 --lote 8 --aplicar
 //
+//   Chave: GEMINI_API_KEY (Google AI Studio, plano gratuito). No servidor, a
+//   chave vai no AMBIENTE do processo e `-e NOME` SEM valor — nunca
+//   `-e NOME=valor`, que fica visível em `ps` para todo usuário:
+//   GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" docker exec -e GEMINI_API_KEY <container> node classificar.js --aplicar
+//
 // ONDE ENTRA A IA, E ONDE NÃO ENTRA
 // O modelo escreve RÓTULOS. Ele não vê, não escreve e não pode alterar
 // enunciado, alternativas ou gabarito — essas colunas nem aparecem no UPDATE.
@@ -36,32 +41,20 @@
 
 const { pool } = require('./app');
 const { migrate } = require('./migrate');
-const { modelosEmOrdem } = require('./openrouter');
+const { modelosGeminiEmOrdem, montarPedidoGemini, ocultarChave } = require('./gemini');
 const { DISCIPLINAS } = require('./disciplinas');
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+// MODELOS: os mesmos geradores do explicar.js — Google Gemini, plano
+// gratuito, "flash" estáveis escolhidos pela listagem de AGORA (gemini.js;
+// GEMINI_MODELOS substitui), e qualquer falha cai para o próximo. Nenhum id
+// fica fixo aqui: uma lista fixa já quebrou duas vezes neste script (ids que
+// tinham sumido devolviam 404, o último também falhava, e o resultado era
+// "nenhum modelo respondeu" — que parece rede ruim ou chave inválida).
+// Escolher rótulo de uma lista fechada é tarefa fácil para um flash.
+// A chave vai em header (nunca na URL) e sai de toda mensagem de erro.
 
-// Ordem de preferência; qualquer falha cai para o próximo. Modelos gratuitos:
-// classificar 80 questões não justifica gasto, e escolher rótulo de uma lista
-// fechada é tarefa fácil o bastante para eles.
-//
-// Isto é só PREFERÊNCIA, não a lista usada: antes de cada rodada os ids são
-// conferidos contra GET /api/v1/models (openrouter.js), e os que não existirem
-// mais são pulados. Uma lista fixa já quebrou duas vezes aqui — os três ids da
-// primeira versão, copiados da rota de geração do front, não existiam, e
-// `openai/gpt-oss-20b:free`, conferido quando entrou, sumiu depois. Model id
-// errado devolve 404, o laço cai para o próximo, o último também falha, e o
-// resultado é "nenhum modelo respondeu" — que parece rede ruim ou chave
-// inválida. Se nenhum daqui existir, openrouter.js cai para os gratuitos de
-// maior contexto; a env IA_MODELOS substitui esta lista sem mexer no código.
-const PREFERIDOS = [
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'google/gemma-4-31b-it:free',
-  // O qwen/qwen3.8-27b:free saiu da OpenRouter (out/2026). Com ele, tirar o
-  // autor da conferência deixava um modelo só, e um 429 dele parava a rodada.
-  'nvidia/nemotron-3-super-120b-a12b:free',
-  'google/gemma-4-26b-a4b-it:free',
-];
+// Classificação sem resposta em 90 s é modelo travado: passa ao próximo.
+const TIMEOUT_MS = 90 * 1000;
 
 // Lista fechada: a de disciplinas.js, a mesma da tabela da prova. Uma cópia
 // aqui seria a forma de as duas divergirem sem ninguém perceber — foi o que
@@ -102,8 +95,8 @@ function montarPrompt(questoes) {
     // coerente com ela ("Cadeia de custódia" em Processual Penal, e não
     // "Homicídio" só porque o caso narra um).
     ...(q.disciplina ? { disciplina: q.disciplina } : {}),
-    // Enunciado cortado: o começo já diz a matéria, e mandar 80 enunciados
-    // inteiros estoura o contexto dos modelos gratuitos.
+    // Enunciado cortado: o começo já diz a matéria, e mandar enunciados
+    // inteiros só gasta tokens.
     enunciado: String(q.enunciado).slice(0, 700),
   }));
 
@@ -186,57 +179,69 @@ function interpretarResposta(texto, questoes) {
   return { aceitas, recusadas };
 }
 
-async function chamarOpenRouter(prompt, { chave, modelos } = {}) {
-  if (!chave) throw new Error('OPENROUTER_API_KEY não definida');
+// Um pedido ao Gemini, caindo para o próximo modelo em qualquer erro.
+// `modelos` (ids ou { id, pensa }) e `buscarModelos` injetáveis para o teste.
+// Devolve { conteudo, modelo }.
+async function chamarGemini(prompt, { chave, modelos, buscarModelos = modelosGeminiEmOrdem } = {}) {
+  if (!chave) throw new Error('GEMINI_API_KEY não definida');
 
-  // Descoberta a cada chamada, mas com cache de 1h em openrouter.js: numa
-  // rodada de vários lotes, a listagem sai uma vez só.
-  const ordem = modelos || (await modelosEmOrdem(PREFERIDOS));
-  if (ordem.length === 0) throw new Error('a OpenRouter não lista nenhum modelo gratuito');
+  // Descoberta a cada chamada, mas com cache de 1h em gemini.js: numa rodada
+  // de vários lotes, a listagem sai uma vez só.
+  let ordem = modelos;
+  if (!ordem) {
+    try {
+      ordem = await buscarModelos(chave);
+    } catch (err) {
+      throw new Error(ocultarChave(err.message, chave));
+    }
+  }
+  if (ordem.length === 0) throw new Error('o Gemini não lista nenhum modelo flash utilizável');
 
   let ultimoErro = null;
 
-  for (const modelo of ordem) {
+  for (const m of ordem) {
+    const id = typeof m === 'string' ? m : m.id;
+    const pensa = typeof m === 'object' && m.pensa === true;
     try {
-      const res = await fetch(OPENROUTER_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${chave}`,
-          'Content-Type': 'application/json',
-          'X-Title': 'MA Questoes - classificacao',
-        },
-        body: JSON.stringify({
-          model: modelo,
-          messages: [
-            { role: 'system', content: PROMPT_SISTEMA },
-            { role: 'user', content: prompt },
-          ],
+      const { url, headers, corpo } = montarPedidoGemini(
+        { id, chave, pensa },
+        {
+          prompt,
+          sistema: PROMPT_SISTEMA,
           // Zero: classificar não é tarefa criativa, e temperatura alta aqui
           // só produz variação entre rodadas do mesmo acervo.
-          temperature: 0,
-          max_tokens: 2048,
-        }),
+          temperatura: 0,
+          maxTokens: 2048,
+        }
+      );
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(corpo),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
       });
 
       if (!res.ok) {
-        ultimoErro = new Error(`${modelo}: HTTP ${res.status}`);
+        ultimoErro = new Error(`${id}: HTTP ${res.status}`);
         continue;
       }
 
       const dados = await res.json();
       const conteudo = dados?.choices?.[0]?.message?.content;
       if (!conteudo) {
-        ultimoErro = new Error(`${modelo}: resposta sem conteúdo`);
+        ultimoErro = new Error(`${id}: resposta sem conteúdo`);
         continue;
       }
 
-      return { conteudo, modelo };
+      return { conteudo, modelo: id };
     } catch (err) {
-      ultimoErro = err;
+      ultimoErro = new Error(`${id}: ${ocultarChave(err.message, chave)}`);
     }
   }
 
-  throw ultimoErro || new Error('nenhum modelo respondeu');
+  const erro = ultimoErro || new Error('nenhum modelo respondeu');
+  erro.message = ocultarChave(erro.message, chave);
+  throw erro;
 }
 
 async function buscarPendentes(cliente, { exame, limite, ignorar = [] }) {
@@ -375,7 +380,7 @@ async function classificar({
   return resumo;
 }
 
-module.exports = { classificar, interpretarResposta, montarPrompt, chamarOpenRouter, DISCIPLINAS };
+module.exports = { classificar, interpretarResposta, montarPrompt, chamarGemini, DISCIPLINAS };
 
 if (require.main === module) {
   const argv = process.argv.slice(2);
@@ -388,11 +393,13 @@ if (require.main === module) {
   const exame = valor('--exame', null);
   const lote = valor('--lote', 10);
   const total = valor('--total', 1000);
-  const chave = process.env.OPENROUTER_API_KEY;
+  // trim: chave com quebra de linha vira header inválido.
+  const chave = (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim()) || undefined;
 
   if (!chave) {
-    console.error('❌ OPENROUTER_API_KEY não definida.');
-    console.error('   Ex.: OPENROUTER_API_KEY=$(cat ~/.openrouter-key) node classificar.js --aplicar');
+    console.error('❌ GEMINI_API_KEY não definida.');
+    console.error('   Ex. (a chave no ambiente e `-e NOME` sem valor: nunca `-e NOME=valor`, que aparece em `ps`):');
+    console.error('   GEMINI_API_KEY="$(tr -d \'[:space:]\' < ~/.gemini-key)" docker exec -e GEMINI_API_KEY <container> node classificar.js --aplicar');
     process.exit(1);
   }
 
@@ -407,7 +414,7 @@ if (require.main === module) {
         lote,
         total,
         aplicar,
-        chamarModelo: (prompt) => chamarOpenRouter(prompt, { chave }),
+        chamarModelo: (prompt) => chamarGemini(prompt, { chave }),
       })
     )
     .then((r) => {
@@ -420,7 +427,7 @@ if (require.main === module) {
       return pool.end();
     })
     .catch((err) => {
-      console.error('❌', err.message);
+      console.error('❌', ocultarChave(err.message, chave));
       process.exit(1);
     });
 }
