@@ -232,6 +232,33 @@ function montarPedidoGemini(c, { prompt, sistema, temperatura, maxTokens }) {
 
 const padrao = criarDescobertaGemini();
 
+// RACIOCÍNIO NO TEXTO: pela rota compatível, o gemma-4 devolve o que pensou
+// DENTRO de `content`, num bloco "<thought>...</thought>" antes da resposta
+// (verificado em out/2026). Esse bloco tem rascunhos de lista JSON — inclusive
+// o exemplo do próprio prompt —, e quem lê a resposta procura a PRIMEIRA
+// lista: leria o rascunho como veredito. Então o bloco sai antes de qualquer
+// leitura. Bloco aberto e nunca fechado = resposta cortada no meio do
+// raciocínio: não sobra resposta nenhuma (string vazia), e quem chama trata
+// como "resposta sem conteúdo".
+function semRaciocinio(texto) {
+  let s = String(texto ?? '');
+  for (;;) {
+    // Tolera atributo e espaço na tag ("<thought type=x>", "< thought>").
+    const m = /^\s*<\s*(thought|think|thinking)\b[^>]*>/i.exec(s);
+    if (!m) return s.trim();
+    const fecha = new RegExp(`<\\s*/\\s*${m[1]}\\s*>`, 'i').exec(s.slice(m[0].length));
+    if (!fecha) return '';
+    s = s.slice(m[0].length + fecha.index + fecha[0].length);
+  }
+}
+
+// O gemma-4 raciocina antes de responder e é mais lento que os flash: 65 s
+// para conferir duas explicações curtas (out/2026). Com o teto de 90 s de
+// todo modelo, um lote de 5 cortaria no meio. Ele ganha mais tempo.
+const TIMEOUT_MS = 90 * 1000;
+const TIMEOUT_GEMMA_MS = 180 * 1000;
+const timeoutDe = (id) => (ehGemma(id) ? TIMEOUT_GEMMA_MS : TIMEOUT_MS);
+
 module.exports = {
   URL_MODELOS_GEMINI,
   GEMINI_URL,
@@ -247,6 +274,10 @@ module.exports = {
   criarDescobertaGemini,
   montarMensagens,
   montarPedidoGemini,
+  semRaciocinio,
+  timeoutDe,
+  TIMEOUT_MS,
+  TIMEOUT_GEMMA_MS,
   ocultarChave,
   listarModelosGemini: padrao.listarModelosGemini,
   modelosGeminiEmOrdem: padrao.modelosGeminiEmOrdem,

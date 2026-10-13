@@ -41,7 +41,7 @@
 
 const { pool } = require('./app');
 const { migrate } = require('./migrate');
-const { modelosGeminiEmOrdem, montarPedidoGemini, ocultarChave } = require('./gemini');
+const { modelosGeminiEmOrdem, montarPedidoGemini, ocultarChave, semRaciocinio, timeoutDe } = require('./gemini');
 const { DISCIPLINAS } = require('./disciplinas');
 
 // MODELOS: os mesmos geradores do explicar.js — Google Gemini, plano
@@ -53,8 +53,8 @@ const { DISCIPLINAS } = require('./disciplinas');
 // Escolher rótulo de uma lista fechada é tarefa fácil para um flash.
 // A chave vai em header (nunca na URL) e sai de toda mensagem de erro.
 
-// Classificação sem resposta em 90 s é modelo travado: passa ao próximo.
-const TIMEOUT_MS = 90 * 1000;
+// Classificação sem resposta no tempo de `timeoutDe` (gemini.js: 90 s, ou
+// mais para o gemma, que raciocina antes) é modelo travado: passa ao próximo.
 
 // Lista fechada: a de disciplinas.js, a mesma da tabela da prova. Uma cópia
 // aqui seria a forma de as duas divergirem sem ninguém perceber — foi o que
@@ -218,7 +218,7 @@ async function chamarGemini(prompt, { chave, modelos, buscarModelos = modelosGem
         method: 'POST',
         headers,
         body: JSON.stringify(corpo),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutDe(id)),
       });
 
       if (!res.ok) {
@@ -227,7 +227,8 @@ async function chamarGemini(prompt, { chave, modelos, buscarModelos = modelosGem
       }
 
       const dados = await res.json();
-      const conteudo = dados?.choices?.[0]?.message?.content;
+      // Sem o bloco <thought> do gemma (ver semRaciocinio, em gemini.js).
+      const conteudo = semRaciocinio(dados?.choices?.[0]?.message?.content);
       if (!conteudo) {
         ultimoErro = new Error(`${id}: resposta sem conteúdo`);
         continue;
