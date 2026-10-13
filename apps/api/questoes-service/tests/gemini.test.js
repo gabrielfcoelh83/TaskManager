@@ -3,12 +3,16 @@
 
 const {
   URL_MODELOS_GEMINI,
+  GEMINI_URL,
   ordemPadraoGemini,
+  ordemPadraoConferentes,
   ordenarGemini,
+  ordenarConferentesGemini,
   criarDescobertaGemini,
+  montarPedidoGemini,
   ocultarChave,
 } = require('../gemini');
-const { separar, normalizar, fabricante, exclui, excluido, ordenarConferentes } = require('../provedores');
+const { separar, normalizar, idBase, familia, exclui, excluido, ordenarConferentes } = require('../provedores');
 
 // Formato novo de chave (não começa com "AIza"): nada valida prefixo.
 const CHAVE = 'gk-teste-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHI';
@@ -151,47 +155,164 @@ describe('gemini.js: listagem (fetch simulado)', () => {
   });
 });
 
-describe('provedores.js: identidade com provedor', () => {
-  it('sem prefixo = OpenRouter (compatível com o que já está gravado)', () => {
+describe('gemini.js: conferentes (Gemma primeiro)', () => {
+  it('gemma -it por versão desc e tamanho desc, depois os flashes; pro fica de fora', () => {
+    expect(ordemPadraoConferentes(LISTAGEM_REAL)).toEqual([
+      'gemma-4-31b-it',
+      'gemma-4-26b-a4b-it',
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+    ]);
+  });
+
+  it('versão maior vence tamanho maior; sem -it ou sem tamanho fica de fora', () => {
+    expect(
+      ordemPadraoConferentes(['gemma-3-27b-it', 'gemma-4-12b-it', 'gemma-4-31b', 'gemma-3n-e4b-it', 'gemma-4-31b-it'])
+    ).toEqual(['gemma-4-31b-it', 'gemma-4-12b-it', 'gemma-3-27b-it']);
+  });
+
+  it('GEMINI_CONFERENTES substitui, na ordem dada, só com ids que existem', () => {
+    const modelos = LISTAGEM_REAL.map((id) => ({ id, pensa: false }));
+    expect(
+      ordenarConferentesGemini(modelos, ['gemini-3.6-flash', 'nao-existe', 'gemma-4-26b-a4b-it']).map((m) => m.id)
+    ).toEqual(['gemini-3.6-flash', 'gemma-4-26b-a4b-it']);
+    expect(ordenarConferentesGemini(modelos, ['nao-existe'])[0].id).toBe('gemma-4-31b-it');
+  });
+
+  it('descoberta: conferentes sem corte e com GEMINI_CONFERENTES (com prefixo)', async () => {
+    const buscar = jest.fn(async () => respostaJson({ models: LISTAGEM_REAL.map((id) => modeloApi(id)) }));
+    const d = criarDescobertaGemini({ buscar, env: {} });
+    expect((await d.conferentesGeminiEmOrdem(CHAVE)).map((m) => m.id)).toHaveLength(8);
+    // Geradores continuam só flash, com o teto de tentativas.
+    expect((await d.modelosGeminiEmOrdem(CHAVE)).map((m) => m.id)).toEqual([
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+    ]);
+    expect(buscar).toHaveBeenCalledTimes(1); // cache
+
+    const fixa = criarDescobertaGemini({ buscar, env: { GEMINI_CONFERENTES: 'gemini:gemma-4-26b-a4b-it' } });
+    expect((await fixa.conferentesGeminiEmOrdem(CHAVE)).map((m) => m.id)).toEqual(['gemma-4-26b-a4b-it']);
+  });
+});
+
+describe('gemini.js: pedido de chat', () => {
+  const params = { prompt: 'PERGUNTA', sistema: 'SISTEMA', temperatura: 0, maxTokens: 1000 };
+
+  it('gemma que pensa: folga no teto, mas sem reasoning_effort (a API recusa com 400)', () => {
+    const { corpo } = montarPedidoGemini(
+      { id: 'gemma-4-31b-it', chave: 'k', pensa: true },
+      { prompt: 'p', sistema: 's', temperatura: 0, maxTokens: 100 }
+    );
+    expect(corpo.reasoning_effort).toBeUndefined();
+    expect(corpo.max_tokens).toBeGreaterThan(100);
+    expect(corpo.messages).toEqual([{ role: 'user', content: 's\n\np' }]);
+  });
+
+  it('gemini: system + user, Bearer, rota compatível; reasoning_effort e folga só para quem pensa', () => {
+    const p = montarPedidoGemini({ id: 'gemini-3.8-flash', chave: CHAVE, pensa: true }, params);
+    expect(p.url).toBe(GEMINI_URL);
+    expect(p.url).not.toContain(CHAVE);
+    expect(p.headers.Authorization).toBe(`Bearer ${CHAVE}`);
+    expect(p.corpo.messages).toEqual([
+      { role: 'system', content: 'SISTEMA' },
+      { role: 'user', content: 'PERGUNTA' },
+    ]);
+    expect(p.corpo).toMatchObject({ reasoning_effort: 'low', temperature: 0 });
+    expect(p.corpo.max_tokens).toBeGreaterThan(1000);
+
+    const semPensar = montarPedidoGemini({ id: 'gemini-3.7-flash', chave: CHAVE, pensa: false }, params).corpo;
+    expect(semPensar.reasoning_effort).toBeUndefined();
+    expect(semPensar.max_tokens).toBe(1000);
+  });
+
+  it('gemma: sem mensagem system — o sistema vai no começo da mensagem do usuário', () => {
+    const { corpo } = montarPedidoGemini({ id: 'gemma-4-31b-it', chave: CHAVE, pensa: false }, params);
+    expect(corpo.messages).toEqual([{ role: 'user', content: 'SISTEMA\n\nPERGUNTA' }]);
+    expect(corpo.reasoning_effort).toBeUndefined();
+  });
+});
+
+describe('provedores.js: identidade e família', () => {
+  it('sem prefixo = Gemini; "gemini:" é o prefixo do único provedor', () => {
+    expect(separar('gemini-3.8-flash')).toEqual({ provedor: 'gemini', id: 'gemini-3.8-flash', prefixado: false });
+    expect(normalizar('gemini-3.8-flash')).toBe('gemini:gemini-3.8-flash');
+    expect(normalizar('gemini:gemma-4-31b-it')).toBe('gemini:gemma-4-31b-it');
+  });
+
+  it('ids antigos (prefixo de outro provedor, ou sem prefixo com "/") são lidos sem quebrar', () => {
+    expect(separar('openrouter:nvidia/x:free')).toEqual({ provedor: 'openrouter', id: 'nvidia/x:free', prefixado: true });
+    expect(separar('anthropic:claude-x')).toMatchObject({ provedor: 'anthropic', id: 'claude-x' });
+    // ":" depois da "/" não é prefixo.
     expect(separar('nvidia/nemotron-3-ultra-550b-a55b:free')).toEqual({
-      provedor: 'openrouter',
+      provedor: 'gemini',
       id: 'nvidia/nemotron-3-ultra-550b-a55b:free',
       prefixado: false,
     });
-    expect(normalizar('nvidia/x:free')).toBe('openrouter:nvidia/x:free');
-    expect(normalizar('gemini:gemini-3.8-flash')).toBe('gemini:gemini-3.8-flash');
-    expect(normalizar('openrouter:google/gemma-4-31b-it:free')).toBe('openrouter:google/gemma-4-31b-it:free');
+    // Outro fabricante não casa com modelo Gemini.
+    for (const antigo of ['anthropic:x', 'nvidia/x:free']) {
+      expect(excluido('gemini:gemini-3.8-flash', [antigo])).toBe(false);
+      expect(excluido('gemini:gemma-4-31b-it', [antigo])).toBe(false);
+    }
   });
 
-  it('fabricante: Gemini e gemma da OpenRouter são todos Google', () => {
-    expect(fabricante('gemini:gemini-3.8-flash')).toBe('google');
-    expect(fabricante('gemini:gemma-4-31b-it')).toBe('google');
-    expect(fabricante('google/gemma-4-31b-it:free')).toBe('google');
-    expect(fabricante('openrouter:nvidia/nemotron-3-ultra-550b-a55b:free')).toBe('nvidia');
+  it('mesmos pesos por outro provedor contam como o mesmo modelo (o autor não confere a si mesmo)', () => {
+    expect(idBase('openrouter:google/gemma-4-31b-it:free')).toBe('gemma-4-31b-it');
+    expect(idBase('gemini:models/Gemma-4-31B-it')).toBe('gemma-4-31b-it');
+    expect(idBase('nvidia/x:free')).toBe('nvidia/x');
+    expect(exclui('google/gemma-4-31b-it:free', 'gemini:gemma-4-31b-it')).toBe(true);
+    expect(exclui('openrouter:google/gemma-4-31b-it:free', 'gemini:gemma-4-31b-it')).toBe(true);
+    expect(exclui('models/gemini-3.8-flash', 'gemini:gemini-3.8-flash')).toBe(true);
+    expect(exclui('Gemini:gemini-3.8-flash', 'gemini:gemini-3.8-flash')).toBe(true);
+    // Lote misto (gemma antigo + flash novo): nenhum dos dois autores confere.
+    const ordem = ordenarConferentes(
+      ['gemini:gemma-4-31b-it', 'gemini:gemma-4-26b-a4b-it', 'gemini:gemini-3.8-flash', 'gemini:gemini-flash-latest'],
+      ['google/gemma-4-31b-it:free', 'gemini:gemini-3.8-flash']
+    );
+    expect(ordem).not.toContain('gemini:gemma-4-31b-it');
+    expect(ordem).not.toContain('gemini:gemini-3.8-flash');
   });
 
-  it('--excluir com prefixo exclui só naquele provedor; sem prefixo, em qualquer um', () => {
+  it('família: gemma ou gemini; ids antigos de outro fabricante têm família própria', () => {
+    expect(familia('gemini:gemini-3.8-flash')).toBe('gemini');
+    expect(familia('gemini-flash-latest')).toBe('gemini');
+    expect(familia('gemini:gemma-4-31b-it')).toBe('gemma');
+    expect(familia('gemma-4-26b-a4b-it')).toBe('gemma');
+    expect(familia('modelo-teste')).toBe('gemini');
+    expect(familia('openrouter:google/gemma-4-31b-it:free')).toBe('gemma');
+    expect(familia('nvidia/nemotron-3-ultra-550b-a55b:free')).toBe('nvidia');
+    expect(familia('anthropic:claude-x')).toBe('anthropic');
+  });
+
+  it('--excluir: com ou sem "gemini:" é o mesmo modelo', () => {
     expect(exclui('gemini:gemini-3.8-flash', 'gemini:gemini-3.8-flash')).toBe(true);
-    expect(exclui('openrouter:gemini-3.8-flash', 'gemini:gemini-3.8-flash')).toBe(false);
     expect(exclui('gemini-3.8-flash', 'gemini:gemini-3.8-flash')).toBe(true);
-    expect(exclui('nvidia/x:free', 'openrouter:nvidia/x:free')).toBe(true);
-    expect(exclui('nvidia/x:free', 'nvidia/x:free')).toBe(true);
+    expect(exclui('gemini-3.8-flash', 'gemini-3.8-flash')).toBe(true);
     expect(excluido('gemini:gemini-3.7-flash', ['gemini:gemini-3.8-flash'])).toBe(false);
   });
 
-  it('conferentes: outro fabricante primeiro, o gerador nunca', () => {
+  it('conferentes: outra família primeiro, o gerador nunca', () => {
     const candidatos = [
-      'openrouter:nvidia/ultra:free',
-      'openrouter:google/gemma-4-31b-it:free',
-      'openrouter:nvidia/super:free',
+      'gemini:gemma-4-31b-it',
+      'gemini:gemma-4-26b-a4b-it',
       'gemini:gemini-3.8-flash',
       'gemini:gemini-3.7-flash',
     ];
     expect(ordenarConferentes(candidatos, ['gemini:gemini-3.8-flash'])).toEqual([
-      'openrouter:nvidia/ultra:free',
-      'openrouter:nvidia/super:free',
-      'openrouter:google/gemma-4-31b-it:free',
+      'gemini:gemma-4-31b-it',
+      'gemini:gemma-4-26b-a4b-it',
       'gemini:gemini-3.7-flash',
+    ]);
+    // Gerador gemma (GEMINI_MODELOS apontando para um gemma): flash primeiro.
+    expect(ordenarConferentes(candidatos, ['gemma-4-31b-it'])).toEqual([
+      'gemini:gemini-3.8-flash',
+      'gemini:gemini-3.7-flash',
+      'gemini:gemma-4-26b-a4b-it',
     ]);
   });
 });

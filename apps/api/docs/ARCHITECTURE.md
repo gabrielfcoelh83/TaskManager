@@ -115,9 +115,10 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
 3. `node aplicar_disciplina_posicao.js [--exame N] [--aplicar]` — só para o
    acervo carregado antes da tabela, ou depois de a tabela mudar. Sem
    `--aplicar`, só mostra o que mudaria.
-4. `OPENROUTER_API_KEY=... node classificar.js [--aplicar]` — preenche o tema
-   (e a disciplina, onde a tabela não chega).
-5. `GEMINI_API_KEY=... OPENROUTER_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia] [--gerador openrouter|gemini]`
+4. `GEMINI_API_KEY=... node classificar.js [--aplicar]` — preenche o tema
+   (e a disciplina, onde a tabela não chega), com os mesmos modelos flash do
+   Gemini usados na geração das explicações (`gemini.js`).
+5. `GEMINI_API_KEY=... node explicar.js [--exame N] [--lote K] [--total T] [--aplicar] [--refazer-ia]`
    — escreve a **explicação** a partir do gabarito oficial (`explicacao_fonte = 'ia'`,
    `revisada = false`) e só grava a que **um segundo modelo conferiu e aprovou**.
    O modelo recebe a letra oficial e devolve, junto do texto,
@@ -141,8 +142,8 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    46º Exame (Ética), 2 de 6 explicações tinham a letra certa e direito errado
    (Procuradoria do Estado tratada como Ministério Público; quota litis "não
    precisa ser em pecúnia"). Por isso, depois da geração e antes do UPDATE, o
-   lote vai a um modelo **diferente do que escreveu** (mesma lista de
-   gratuitos conferida contra `/api/v1/models`, menos o gerador), que recebe
+   lote vai a um modelo **diferente do que escreveu** (de preferência um
+   Gemma, ver "Modelos" abaixo; nunca o gerador), que recebe
    enunciado, alternativas, letra oficial e explicação e devolve
    `[{id, aprovada, problemas}]`. O prompt (`PROMPT_CONFERENCIA`) manda
    reprovar afirmação jurídica falsa, contradição com a letra oficial,
@@ -159,7 +160,7 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    nunca vira aprovação (id numérico entre aspas, `"123"`, é aceito se casar
    com um id enviado); falha na listagem de modelos interrompe a rodada; sem
    segundo modelo disponível (ex.:
-   `IA_MODELOS` com um id só) nada é gravado — a CLI nem começa, e
+   `GEMINI_CONFERENTES` só com o gerador) nada é gravado — a CLI nem começa, e
    `explicar()` para a rodada. Um pedido de conferência **por lote** (não por
    questão): a saída é curta, e conferir uma a uma dobraria o custo. O
    conferente também erra: `revisada = false` continua valendo.
@@ -170,42 +171,53 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    gabarito) para não gravar sobre o que mudou no meio. `--refazer-ia` refaz
    só as `'ia'` ainda não revisadas.
 
-   **Provedores: Gemini gera, OpenRouter confere.** A cota gratuita da
-   OpenRouter (50 pedidos/dia) acaba numa rodada, então a geração pode sair
-   do Google Gemini (Google AI Studio, plano gratuito, cota própria por
-   modelo), pela rota compatível com OpenAI
-   (`/v1beta/openai/chat/completions`, `Authorization: Bearer`), com o mesmo
-   corpo e a mesma leitura da resposta. Regras:
-   - com `GEMINI_API_KEY` o gerador padrão é o Gemini; `--gerador
-     openrouter|gemini` escolhe à mão. **Sem `GEMINI_API_KEY` tudo segue
-     como antes** (só OpenRouter);
-   - modelos do Gemini vêm da listagem `GET /v1beta/models` (chave no header
+   **Modelos: só o Google Gemini.** Geração e conferência saem do Google AI
+   Studio (plano gratuito, cota própria **por modelo**), pela rota compatível
+   com OpenAI (`/v1beta/openai/chat/completions`, `Authorization: Bearer`).
+   Até out/2026 a conferência vinha de outro provedor gratuito; medido em
+   produção, em 3 rodadas ele não pegou nenhum erro real, aprovou 2
+   explicações com erro jurídico conhecido e respondeu fora do formato na
+   maior parte das vezes, com cota de 50 pedidos/dia — saiu. Regras:
+   - modelos vêm da listagem `GET /v1beta/models` (chave no header
      `x-goog-api-key`, nunca em `?key=`), só os que suportam
-     `generateContent`. Padrão (`gemini.js`), por lista branca: ids
-     exatamente `gemini-<versão>-flash` (flash estável), maior versão
-     primeiro, e depois `gemini-flash-latest`. Fica de fora todo o resto
-     (`-lite`, `-image`, `-tts`, `-live`, `-native-audio`, `-transcribe`,
-     preview/exp, pro, gemma, omni, nano-banana, lyria, robotics,
-     computer-use, antigravity, deep-research, embedding) sem precisar ser
-     nomeado. `GEMINI_MODELOS` (ids separados por vírgula) substitui a regra;
-   - o gerador não muda de provedor no meio da rodada: 429 passa ao próximo
-     modelo **do mesmo provedor**; todos em 429 = cota do dia, a rodada para;
-   - o conferente vem de preferência do **outro provedor e de outro
-     fabricante**: o gemma servido pela OpenRouter é Google como o Gemini,
-     então, com o Gemini gerando, o primeiro conferente é um não-Google
-     (nemotron). Sem `OPENROUTER_API_KEY`, ou com ela toda em 429, a
-     conferência cai para outro modelo Gemini, **nunca o próprio gerador**;
-     sem nenhum, não grava (como antes);
-   - ids passam a ser `<provedor>:<id>` (`provedores.js`), e o gerador vai
-     assim para `explicacao_modelo` (`gemini:gemini-3.8-flash`,
-     `openrouter:nvidia/...:free`). O que já está gravado sem prefixo é da
-     OpenRouter. Em `--excluir`, id com prefixo exclui só naquele provedor;
-     sem prefixo, o id em qualquer provedor;
-   - nos modelos que raciocinam (`thinking` na listagem) o pedido ao Gemini
-     leva `reasoning_effort: "low"` e uma folga no `max_tokens`, porque o
+     `generateContent`. Nenhuma versão fica fixa no código;
+   - **geração** (`gemini.js`), por lista branca: ids exatamente
+     `gemini-<versão>-flash` (flash estável), maior versão primeiro, e
+     depois `gemini-flash-latest`. Fica de fora todo o resto (`-lite`,
+     `-image`, `-tts`, `-live`, `-native-audio`, `-transcribe`,
+     preview/exp, pro — sem cota no plano gratuito, 429 já no 1º pedido —,
+     omni, nano-banana, lyria, robotics, computer-use, antigravity,
+     deep-research, embedding) sem precisar ser nomeado. `GEMINI_MODELOS`
+     (ids separados por vírgula) substitui a regra; 429 passa ao próximo
+     modelo; todos em 429 = cota do dia, a rodada para;
+   - **conferência**: primeiro a família **Gemma** (outro modelo, de pesos
+     abertos, servido pela mesma API): ids `gemma-<versão>-<tamanho>b...-it`,
+     maior versão e depois maior tamanho primeiro (`gemma-4-31b-it` antes de
+     `gemma-4-26b-a4b-it`); depois os flashes. `GEMINI_CONFERENTES`
+     substitui a lista (só vale o que a listagem confirma). Nunca o próprio
+     gerador do lote, e sempre preferindo **família** diferente da do
+     gerador e dos excluídos (`gemma` se o id começa com gemma, senão
+     `gemini`); sem nenhum outro modelo, não grava. O resumo diz quantos
+     lotes foram conferidos pela mesma família do autor e por qual modelo —
+     esses merecem revisão humana primeiro;
+   - para ids gemma o prompt de sistema vai junto da mensagem do usuário (o
+     Gemma 3 recusava mensagem `system` na API do Google);
+   - **erro transitório** (HTTP 500/502/503/504, timeout, rede): numa rodada
+     de 30, 7 de 10 lotes falharam com 503 ("model is experiencing high
+     demand"), não por cota. Se todos os modelos do pedido falham assim
+     (nenhum 429), a CLI espera 20 s, 40 s e 80 s e tenta a lista de novo; só
+     depois da 3ª espera o lote falha (e volta na próxima rodada);
+   - com um único modelo disponível, um 429 pode ser o limite por minuto,
+     não a cota do dia: a CLI espera 60 s e tenta uma vez;
+   - ids são `gemini:<id>` (`provedores.js`), e o gerador vai assim para
+     `explicacao_modelo`. Ids antigos de outros provedores já gravados (sem
+     prefixo, ou com o prefixo antigo) continuam sendo lidos: só não casam
+     com nenhum modelo Gemini. Em `--excluir`, id sem prefixo vale como
+     Gemini;
+   - nos modelos que raciocinam (`thinking` na listagem) o pedido leva
+     `reasoning_effort: "low"` e uma folga no `max_tokens`, porque o
      raciocínio sai do mesmo teto da resposta;
-   - a chave nunca aparece em log ou erro (`ocultarChave`);
-   - o resumo mostra os pedidos **por provedor**.
+   - a chave nunca aparece em log ou erro (`ocultarChave`).
 
    **Privacidade.** O plano gratuito do Google pode usar o conteúdo enviado
    para melhorar os produtos dele. Aqui só vão questões públicas da OAB e o
@@ -220,10 +232,8 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    prefixo. Rodada em produção:
 
    ```bash
-   GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" \
-   OPENROUTER_API_KEY="$(tr -d '[:space:]' < ~/.openrouter-key)" \
-   docker exec -e GEMINI_API_KEY -e OPENROUTER_API_KEY \
-     <container do questoes-service> node explicar.js --total N --aplicar
+   GEMINI_API_KEY="$(tr -d '[:space:]' < ~/.gemini-key)" docker exec -e GEMINI_API_KEY \
+     <container do questoes-service> node explicar.js --total 30 --aplicar
    ```
 
    **Nunca a chave na linha de comando do `docker exec`** (`-e NOME=valor`):
@@ -232,35 +242,28 @@ guarda a própria fonte (`disciplina_fonte`, `tema_fonte`, migrations 002 e 004)
    e `-e NOME` sem valor, o Docker copia o valor do ambiente — e o ambiente
    (`/proc/<pid>/environ`) só o dono do processo lê.
 
-   Durante a rodada, o log mostra o conferente de cada lote. Se um provedor
-   devolver 429 em todos os modelos na conferência, ele é pulado pelo resto
-   da rodada (um aviso só: "OpenRouter sem cota: conferência cai para o
-   mesmo fabricante"; as tentativas puladas não contam no custo), e o resumo
-   diz quantos lotes foram conferidos pelo mesmo fabricante do autor e por
-   qual modelo — esses merecem revisão humana primeiro. Com um único modelo
-   Gemini disponível, um 429 pode ser o limite por minuto, não a cota do
-   dia: a CLI espera 60 s e tenta uma vez antes de encerrar a rodada.
+   Durante a rodada, o log mostra o conferente de cada lote e uma linha a
+   cada espera por erro transitório.
 
-   Antes de qualquer pedido pago, a CLI lista os modelos de cada provedor
-   com chave e imprime o gerador e a ordem da conferência; listagem que
-   falha (chave errada, rede) aborta sem gastar cota.
+   Antes de qualquer pedido pago, a CLI lista os modelos e imprime a ordem
+   de geração e a de conferência; listagem que falha (chave errada, rede)
+   aborta sem gastar cota.
 
-   **Cota.** Padrão: lotes de 3, 30 questões por rodada. Cada lote custa 2
-   pedidos no caso bom (geração + conferência), até 7 com modelos falhando; a
-   cota gratuita é de 50 pedidos/dia — teto de ~75 questões/dia se nada
-   falhar, conte com umas 60. Com o Gemini gerando, só a conferência gasta
-   da OpenRouter (1 pedido por lote): ~50 lotes = ~150 questões/dia, se a
-   cota do Gemini acompanhar. A prévia (sem `--aplicar`) gera e confere, e
-   gasta cota igual. O resumo mostra geradas / aprovadas / reprovadas /
+   **Cota.** Padrão: lotes de 5, 30 questões por rodada (6 lotes). Cada lote
+   custa 2 pedidos no caso bom (1 de geração + 1 de conferência, em modelos
+   diferentes e, portanto, em cotas diferentes do Google), mais quando os
+   modelos falham ou há espera por erro transitório. A cota é só a do
+   Google, por modelo (ver o AI Studio). A prévia (sem `--aplicar`) gera e
+   confere, e gasta cota igual. O resumo mostra geradas / aprovadas / reprovadas /
    gravadas e o custo em pedidos. Se todos os modelos devolverem 429, a rodada
    para. Lotes recusados, reprovados ou com JSON quebrado voltam na próxima
    execução.
-6. `[GEMINI_API_KEY=...] OPENROUTER_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--excluir <modelo>]... [--backup <arquivo> --aplicar]`
+6. `GEMINI_API_KEY=... node explicar.js --conferir-gravadas [--exame N] [--excluir <modelo>]... [--backup <arquivo> --aplicar]`
    — confere, sem gerar, as explicações `'ia'` **já gravadas** e não revisadas
    (1 pedido por lote). O conferente nunca é o autor: o `explicacao_modelo`
    de cada linha é excluído automaticamente; para as gravadas antes da
    migration 006 (sem autor) a CLI **exige** `--excluir <modelo-autor>` ou
-   `IA_MODELOS` explícito, e aborta antes de gastar pedido se faltar. Com
+   `GEMINI_CONFERENTES` explícito, e aborta antes de gastar pedido se faltar. Com
    `--aplicar`, só as reprovadas (`aprovada === false`) são **limpas**
    (`explicacao`, `explicacao_fonte` e `explicacao_modelo` = NULL) e voltam
    à fila normal; aprovada com ressalvas fica e só mostra as ressalvas.

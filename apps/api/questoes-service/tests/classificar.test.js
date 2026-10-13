@@ -4,13 +4,15 @@
 //
 // Nenhuma chamada de rede: `chamarModelo` é injetado, e cada teste devolve a
 // resposta que quer exercitar — inclusive as respostas ruins, que são o motivo
-// do arquivo.
+// do arquivo. Onde se testa o cliente HTTP (chamarGemini), `fetch` é
+// substituído.
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'segredo-de-teste';
 
 const { pool } = require('../app');
 const { migrate } = require('../migrate');
-const { classificar, interpretarResposta } = require('../classificar');
+const { classificar, interpretarResposta, chamarGemini } = require('../classificar');
+const { GEMINI_URL } = require('../gemini');
 
 const EXAME_TESTE = 97;
 
@@ -259,5 +261,76 @@ describe('classificar', () => {
     expect(resumo.gravadas).toBe(5);
     // 5 questões em lotes de 2: três chamadas, e não uma só com tudo.
     expect(chamarModelo).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('chamarGemini (fetch simulado)', () => {
+  const CHAVE = 'gk-teste-classificar-0123456789';
+  const fetchOriginal = global.fetch;
+  afterEach(() => {
+    global.fetch = fetchOriginal;
+  });
+
+  const respostaOk = (conteudo) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: conteudo } }] }),
+  });
+
+  it('rota compatível do Gemini, Bearer, temperatura 0; cai para o próximo flash em erro', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce(respostaOk('[]'));
+
+    const r = await chamarGemini('PROMPT', {
+      chave: CHAVE,
+      modelos: [
+        { id: 'gemini-3.8-flash', pensa: true },
+        { id: 'gemini-3.7-flash', pensa: false },
+      ],
+    });
+
+    expect(r).toEqual({ conteudo: '[]', modelo: 'gemini-3.7-flash' });
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe(GEMINI_URL);
+    expect(url).not.toContain(CHAVE);
+    expect(opts.headers.Authorization).toBe(`Bearer ${CHAVE}`);
+    const corpo = JSON.parse(opts.body);
+    expect(corpo).toMatchObject({ model: 'gemini-3.8-flash', temperature: 0, reasoning_effort: 'low' });
+    expect(corpo.messages[0].role).toBe('system');
+    expect(corpo.messages[1].content).toBe('PROMPT');
+    const segundo = JSON.parse(global.fetch.mock.calls[1][1].body);
+    expect(segundo).toMatchObject({ model: 'gemini-3.7-flash', max_tokens: 2048 });
+    expect(segundo.reasoning_effort).toBeUndefined();
+  });
+
+  it('sem `modelos`, usa a listagem do Gemini (injetada) com a chave', async () => {
+    global.fetch = jest.fn().mockResolvedValue(respostaOk('[]'));
+    const buscarModelos = jest.fn(async () => [{ id: 'gemini-3.8-flash', pensa: false }]);
+    const r = await chamarGemini('p', { chave: CHAVE, buscarModelos });
+    expect(buscarModelos).toHaveBeenCalledWith(CHAVE);
+    expect(r.modelo).toBe('gemini-3.8-flash');
+  });
+
+  it('erro de rede e de listagem não mostram a chave', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error(`fetch failed: Bearer ${CHAVE}`));
+    const err = await chamarGemini('p', { chave: CHAVE, modelos: ['gemini-3.8-flash'] }).catch((e) => e);
+    expect(err.message).toMatch(/gemini-3.8-flash: fetch failed/);
+    expect(err.message).not.toContain(CHAVE);
+
+    const errLista = await chamarGemini('p', {
+      chave: CHAVE,
+      buscarModelos: async () => {
+        throw new Error(`HTTP 403 para ${CHAVE}`);
+      },
+    }).catch((e) => e);
+    expect(errLista.message).not.toContain(CHAVE);
+  });
+
+  it('recusa rodar sem chave, sem chamar a rede', async () => {
+    global.fetch = jest.fn();
+    await expect(chamarGemini('p', { modelos: ['gemini-3.8-flash'] })).rejects.toThrow(/GEMINI_API_KEY/);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
