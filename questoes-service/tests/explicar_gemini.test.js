@@ -371,6 +371,44 @@ describe('--excluir com e sem prefixo', () => {
   });
 });
 
+describe('conferente gemma com raciocínio no texto', () => {
+  it('o rascunho dentro de <thought> é ignorado; vale a lista depois dele', async () => {
+    const id = await inserir(1);
+    const base = fetchSimulado();
+    global.fetch = jest.fn(async (url, opts) => {
+      const res = await base(url, opts);
+      const { corpo } = lerPedido(opts);
+      if (!corpo.model.startsWith('gemma')) return res;
+      const lista = await res.json();
+      const veredito = lista.choices[0].message.content;
+      // Rascunho com o id real REPROVADO dentro do raciocínio: se fosse lido,
+      // o lote não seria gravado.
+      const rascunho = `<thought>Rascunho: [{"id": ${id}, "aprovada": false, "problemas": ["x"]}]</thought>`;
+      return ok(`${rascunho}\`\`\`json\n${veredito}\n\`\`\``);
+    });
+
+    const r = await rodar();
+
+    expect(r).toMatchObject({ gravadas: 1, aprovadas: 1 });
+    expect(r.modelosConferencia).toEqual(['gemini:gemma-4-31b-it']);
+  });
+
+  it('raciocínio cortado (sem </thought>) não vira veredito: passa a outro conferente', async () => {
+    await inserir(1);
+    const base = fetchSimulado();
+    global.fetch = jest.fn(async (url, opts) => {
+      const { corpo } = lerPedido(opts);
+      if (corpo.model === 'gemma-4-31b-it') return ok('<thought>pensando [{"id": 1, "aprovada": true}]');
+      return base(url, opts);
+    });
+
+    const r = await rodar();
+
+    expect(r.gravadas).toBe(1);
+    expect(r.modelosConferencia).not.toContain('gemini:gemma-4-31b-it');
+  });
+});
+
 describe('--conferir-gravadas com autores antigos e novos', () => {
   it('ids antigos (sem prefixo e "openrouter:...") em explicacao_modelo não quebram; o autor Gemini nunca confere', async () => {
     const semPrefixo = await inserir(1, {
