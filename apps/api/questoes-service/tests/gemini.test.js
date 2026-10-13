@@ -10,6 +10,10 @@ const {
   ordenarConferentesGemini,
   criarDescobertaGemini,
   montarPedidoGemini,
+  semRaciocinio,
+  timeoutDe,
+  TIMEOUT_MS,
+  TIMEOUT_GEMMA_MS,
   ocultarChave,
 } = require('../gemini');
 const { separar, normalizar, idBase, familia, exclui, excluido, ordenarConferentes } = require('../provedores');
@@ -314,5 +318,43 @@ describe('provedores.js: identidade e família', () => {
       'gemini:gemini-3.7-flash',
       'gemini:gemma-4-26b-a4b-it',
     ]);
+  });
+});
+
+describe('gemini.js: raciocínio do gemma no texto e tempo limite', () => {
+  // Formato real do gemma-4 pela rota compatível (out/2026): o raciocínio
+  // vem em `content`, com rascunhos de lista, antes da resposta.
+  const real =
+    '<thought>*   Constraint: Respond ONLY in JSON: `[{"id": 123, "aprovada": false, "problemas": ["..."]}]`.\n' +
+    '    *   Item 7: `aprovada: true`.</thought>```json\n[\n  {"id": 7, "aprovada": true, "problemas": []}\n]\n```';
+
+  it('tira o bloco <thought> e deixa só a resposta', () => {
+    expect(semRaciocinio(real)).toBe('```json\n[\n  {"id": 7, "aprovada": true, "problemas": []}\n]\n```');
+  });
+
+  it('sem bloco: devolve o texto como veio (aparado)', () => {
+    expect(semRaciocinio('  [{"id": 1}]  ')).toBe('[{"id": 1}]');
+  });
+
+  it('bloco aberto e nunca fechado (resposta cortada): não sobra resposta', () => {
+    expect(semRaciocinio('<thought>pensando [{"id": 7, "aprovada": true}]')).toBe('');
+  });
+
+  it('maiúsculas, espaço antes, atributo na tag e bloco fechado seguido de um aberto', () => {
+    expect(semRaciocinio('\n  <THOUGHT>a [1]</Thought>[2]')).toBe('[2]');
+    expect(semRaciocinio('<thought type="x">a [1]</thought >[2]')).toBe('[2]');
+    expect(semRaciocinio('< thought>a [1]')).toBe('');
+    expect(semRaciocinio('<think>a</think><thought>b [{"id": 1}]')).toBe('');
+  });
+
+  it('<think> e <thinking> também saem; texto nulo vira vazio', () => {
+    expect(semRaciocinio('<think>a</think><thinking>b</thinking>ok')).toBe('ok');
+    expect(semRaciocinio(null)).toBe('');
+  });
+
+  it('gemma tem tempo limite maior que os flash', () => {
+    expect(timeoutDe('gemini-3.8-flash')).toBe(TIMEOUT_MS);
+    expect(timeoutDe('gemma-4-31b-it')).toBe(TIMEOUT_GEMMA_MS);
+    expect(TIMEOUT_GEMMA_MS).toBeGreaterThan(TIMEOUT_MS);
   });
 });

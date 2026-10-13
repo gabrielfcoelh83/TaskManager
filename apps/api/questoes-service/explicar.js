@@ -143,6 +143,8 @@ const {
   ocultarChave,
   GEMINI_URL,
   MAX_TENTATIVAS,
+  semRaciocinio,
+  timeoutDe,
 } = require('./gemini');
 const { qualificar, normalizar, provedorDe, familia, excluido, ordenarConferentes } = require('./provedores');
 
@@ -169,9 +171,9 @@ const MAX_TOKENS = 4096;
 // A conferência devolve booleano + frases curtas por questão; 1500 sobra.
 const MAX_TOKENS_CONFERENCIA = 1500;
 
-// Explicação sem resposta em 90s é modelo travado; o pedido seguinte vai para
-// o próximo modelo da lista em vez de prender a rodada.
-const TIMEOUT_MS = 90 * 1000;
+// Explicação sem resposta no tempo de `timeoutDe` (gemini.js: 90 s, ou mais
+// para o gemma, que raciocina antes) é modelo travado; o pedido seguinte vai
+// para o próximo modelo da lista em vez de prender a rodada.
 
 // Validação do texto. O alvo do prompt é 120–200 palavras; a faixa aceita é
 // mais larga para não recusar uma explicação boa por 10 palavras, mas fecha
@@ -678,7 +680,7 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
         method: 'POST',
         headers,
         body: JSON.stringify(corpo),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutDe(c.id)),
       });
 
       if (res.status !== 429) todos429 = false;
@@ -695,7 +697,8 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
       // sobrecarga — não entra na espera de erro transitório.
       soEsperaveis = false;
       const dados = await res.json();
-      const conteudo = dados?.choices?.[0]?.message?.content;
+      // Sem o bloco <thought> do gemma (ver semRaciocinio, em gemini.js).
+      const conteudo = semRaciocinio(dados?.choices?.[0]?.message?.content);
       if (!conteudo) {
         ultimoErro = new Error(`${nome}: resposta sem conteúdo`);
         continue;
