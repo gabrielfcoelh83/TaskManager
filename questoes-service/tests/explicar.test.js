@@ -1134,6 +1134,7 @@ describe('explicar + roteador Gemini (fetch simulado)', () => {
 
     const r = await explicar({ exame: EXAME_TESTE, aplicar: true, log: silencio, ...ligar(['m1', 'm2']) });
 
+    // Um 429 só pode ser o limite por minuto: m1 continua na rodada.
     expect(modelosDosPedidos()).toEqual([
       ['gera', 'm1', 0.2],
       ['gera', 'm2', 0.2],

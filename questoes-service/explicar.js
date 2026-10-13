@@ -650,14 +650,23 @@ const HTTP_TRANSITORIO = new Set([500, 502, 503, 504]);
 // candidato, tentativas, porProvedor }; o erro também leva `tentativas` e
 // `porProvedor` (custo em pedidos, para o resumo), e:
 //   - `cotaEsgotada`: todos devolveram 429;
-//   - `transitorio`: todos falharam por erro transitório (nenhum 429, nenhum
-//     400/404, nenhuma resposta vazia).
+//   - `transitorio`: ao menos um falhou por erro transitório, e os outros só
+//     por transitório, 429 (sem cota) ou 404 (modelo que sumiu) — MISTURA
+//     DE 429 COM 503: os sem cota não voltam hoje, mas os sobrecarregados
+//     voltam em minutos, então vale esperar por eles. Um 400 de outro tipo
+//     ou uma resposta 200 ilegível cancela (é defeito, não sobrecarga).
+// Sucesso e erro levam também `semCota` (429) e `sumidos` (404): os ids
+// qualificados que falharam assim, para a nova passada e o roteador
+// deixarem esses modelos de fora.
 async function pedirEmOrdem(prompt, candidatos, opcoes) {
   let ultimoErro = null;
   let todos429 = true;
-  let todosTransitorios = true;
+  let houveTransitorio = false;
+  let soEsperaveis = true; // só transitório, 429 ou 404 até aqui
   let tentativas = 0;
   const porProvedor = {};
+  const semCota = [];
+  const sumidos = [];
 
   for (const c of candidatos) {
     tentativas++;
@@ -674,14 +683,17 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
 
       if (res.status !== 429) todos429 = false;
       if (!res.ok) {
-        if (!HTTP_TRANSITORIO.has(res.status)) todosTransitorios = false;
+        if (HTTP_TRANSITORIO.has(res.status)) houveTransitorio = true;
+        else if (res.status === 429) semCota.push(nome);
+        else if (res.status === 404) sumidos.push(nome);
+        else soEsperaveis = false;
         ultimoErro = new Error(`${nome}: HTTP ${res.status}`);
         continue;
       }
 
       // 200: daqui em diante, o que falhar é defeito da resposta, não
       // sobrecarga — não entra na espera de erro transitório.
-      todosTransitorios = false;
+      soEsperaveis = false;
       const dados = await res.json();
       const conteudo = dados?.choices?.[0]?.message?.content;
       if (!conteudo) {
@@ -689,11 +701,12 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
         continue;
       }
 
-      return { conteudo, candidato: c, tentativas, porProvedor };
+      return { conteudo, candidato: c, tentativas, porProvedor, semCota, sumidos };
     } catch (err) {
       // Timeout (AbortSignal) e erro de rede caem aqui; um JSON ilegível
-      // num 200 também, mas aí `todosTransitorios` já é false.
+      // num 200 também, mas aí `soEsperaveis` já é false.
       todos429 = false;
+      houveTransitorio = true;
       ultimoErro = new Error(`${nome}: ${semChaves(err.message, candidatos)}`);
     }
   }
@@ -703,9 +716,11 @@ async function pedirEmOrdem(prompt, candidatos, opcoes) {
   // Todos os modelos em 429 é, quase sempre, a cota diária deles. Seguir
   // para o próximo lote só gastaria mais pedidos negados.
   if (todos429 && tentativas > 0) erro.cotaEsgotada = true;
-  else if (todosTransitorios && tentativas > 0) erro.transitorio = true;
+  else if (houveTransitorio && soEsperaveis && tentativas > 0) erro.transitorio = true;
   erro.tentativas = tentativas;
   erro.porProvedor = porProvedor;
+  erro.semCota = semCota;
+  erro.sumidos = sumidos;
   throw erro;
 }
 
@@ -734,10 +749,24 @@ async function pedirComEspera(prompt, candidatos, params, { esperar, log }) {
   let gastos = { tentativas: 0, porProvedor: {} };
   let esperas503 = 0;
   let esperou429 = false;
+  const semCota = new Set();
+  const sumidos = new Set();
+  const juntar = (x) => {
+    for (const m of x.semCota || []) semCota.add(m);
+    for (const m of x.sumidos || []) sumidos.add(m);
+    x.semCota = [...semCota];
+    x.sumidos = [...sumidos];
+  };
 
   for (;;) {
     try {
       const r = await pedirEmOrdem(prompt, candidatos, params);
+      // Quem acabou de responder 200 não está sem cota nem sumiu, mesmo que
+      // tenha dado 429 numa passada anterior (limite por minuto, que a
+      // espera de 60 s resolveu).
+      semCota.delete(r.candidato.qualificado);
+      sumidos.delete(r.candidato.qualificado);
+      juntar(r);
       return {
         ...r,
         tentativas: r.tentativas + gastos.tentativas,
@@ -747,11 +776,15 @@ async function pedirComEspera(prompt, candidatos, params, { esperar, log }) {
       err.tentativas += gastos.tentativas;
       err.porProvedor = somarPorProvedor(gastos.porProvedor, err.porProvedor);
       gastos = { tentativas: err.tentativas, porProvedor: err.porProvedor };
+      juntar(err);
 
       if (err.transitorio && esperas503 < ESPERAS_TRANSITORIAS_MS.length) {
+        // A nova passada só vai aos que podem voltar: sem cota (429) e
+        // sumidos (404) ficam de fora.
+        candidatos = candidatos.filter((c) => !semCota.has(c.qualificado) && !sumidos.has(c.qualificado));
         const ms = ESPERAS_TRANSITORIAS_MS[esperas503++];
         log(
-          `  ⏳ todos os modelos com erro transitório (${err.message}); ` +
+          `  ⏳ modelos sobrecarregados ou fora do ar (${err.message}); os sem cota ficam de fora; ` +
             `nova tentativa em ${ms / 1000} s (${esperas503}/${ESPERAS_TRANSITORIAS_MS.length})`
         );
         await esperar(ms);
@@ -803,6 +836,48 @@ function criarRoteador({
   esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms)),
 } = {}) {
   if (!chave) throw new Error('GEMINI_API_KEY não definida');
+  // FORA DA RODADA: modelo que deu 404 (sumiu) ou 429 em DOIS pedidos da
+  // rodada não é tentado de novo nos lotes seguintes — cada tentativa
+  // gastaria um pedido e, no 503 misturado, adiaria a espera. Um 429 só
+  // pode ser o limite POR MINUTO do plano gratuito, que passa; o segundo,
+  // em outro pedido, é quase sempre a cota do dia. Um aviso por modelo.
+  const foraDaRodada = new Map(); // qualificado -> motivo
+  const n429 = new Map();
+  const LIMITE_429 = 2;
+  function tirar(m, motivo) {
+    if (foraDaRodada.has(m)) return;
+    foraDaRodada.set(m, motivo);
+    log(`  ⚠️  ${m}: ${motivo} — fora pelo resto da rodada`);
+  }
+  function marcarFora(x) {
+    for (const m of x?.sumidos || []) tirar(m, 'não existe mais (404)');
+    for (const m of x?.semCota || []) {
+      const n = (n429.get(m) || 0) + 1;
+      n429.set(m, n);
+      if (n >= LIMITE_429) tirar(m, `429 em ${n} pedidos (cota do dia, provavelmente)`);
+    }
+  }
+  function semOsDeFora(candidatos, papel) {
+    const restam = candidatos.filter((c) => !foraDaRodada.has(c.qualificado));
+    if (restam.length === 0 && candidatos.length > 0) {
+      const e = new Error(`todos os modelos de ${papel} estão sem cota ou fora do ar hoje (${candidatos.map((c) => c.qualificado).join(', ')})`);
+      e.cotaEsgotada = true;
+      e.tentativas = 0;
+      throw e;
+    }
+    return restam;
+  }
+  async function pedirMarcando(prompt, candidatos, params) {
+    try {
+      const r = await pedirComEspera(prompt, candidatos, params, { esperar, log });
+      marcarFora(r);
+      return r;
+    } catch (err) {
+      marcarFora(err);
+      throw err;
+    }
+  }
+
   const listadores = {
     geradores: listar.geradores || ((k) => modelosGeminiEmOrdem(k)),
     conferentes: listar.conferentes || ((k) => conferentesGeminiEmOrdem(k)),
@@ -846,18 +921,21 @@ function criarRoteador({
       e.semGerador = true; // o lote seguinte falharia igual: a rodada para
       throw e;
     }
-    return resultado(await pedirComEspera(prompt, candidatos, PARAMS_GERACAO, { esperar, log }));
+    return resultado(await pedirMarcando(prompt, semOsDeFora(candidatos, 'geração'), PARAMS_GERACAO));
   }
 
   async function conferir(prompt, { excluir = [] } = {}) {
-    const candidatos = ordenarConferentes(await candidatosDe('conferentes'), excluir).slice(0, MAX_TENTATIVAS);
-    if (candidatos.length === 0) {
+    const todos = ordenarConferentes(await candidatosDe('conferentes'), excluir);
+    if (todos.length === 0) {
       throw erroSemModelo(`nenhum modelo disponível além de ${excluir.join(', ')} para conferir`);
     }
-    return resultado(await pedirComEspera(prompt, candidatos, PARAMS_CONFERENCIA, { esperar, log }));
+    // O corte em MAX_TENTATIVAS vem DEPOIS de tirar os de fora: senão um
+    // conferente bom além do 4º nunca seria tentado.
+    const candidatos = semOsDeFora(todos, 'conferência').slice(0, MAX_TENTATIVAS);
+    return resultado(await pedirMarcando(prompt, candidatos, PARAMS_CONFERENCIA));
   }
 
-  return { candidatosDe, gerar, conferir };
+  return { candidatosDe, gerar, conferir, foraDaRodada };
 }
 
 async function buscarPendentes(cliente, { exame, limite, refazerIa, ignorar = [] }) {
