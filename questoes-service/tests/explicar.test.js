@@ -17,8 +17,7 @@ const {
   interpretarConferencia,
   montarPrompt,
   montarPromptConferencia,
-  chamarOpenRouter,
-  chamarConferencia,
+  criarRoteador,
   PROMPT_CONFERENCIA,
   letraAfirmadaNoTexto,
   citacaoNumerada,
@@ -441,7 +440,7 @@ describe('interpretarResposta', () => {
   });
 });
 
-describe('chamarOpenRouter (fetch simulado)', () => {
+describe('roteador Gemini (fetch simulado)', () => {
   const fetchOriginal = global.fetch;
   afterEach(() => {
     global.fetch = fetchOriginal;
@@ -453,6 +452,14 @@ describe('chamarOpenRouter (fetch simulado)', () => {
     json: async () => ({ choices: [{ message: { content: conteudo } }] }),
   });
 
+  const roteador = (modelos, esperar = jest.fn(async () => {})) =>
+    criarRoteador({
+      chave: 'k',
+      listar: { geradores: async () => modelos, conferentes: async () => modelos },
+      log: silencio,
+      esperar,
+    });
+
   it('envia o prompt com a letra oficial e cai para o próximo modelo em 429/503', async () => {
     const prompt = montarPrompt([
       { id: 5, enunciado: 'Caso.', alternativas: ['a', 'b', 'c', 'd'], gabarito: 1 },
@@ -463,9 +470,9 @@ describe('chamarOpenRouter (fetch simulado)', () => {
       .mockResolvedValueOnce({ ok: false, status: 503 })
       .mockResolvedValueOnce(respostaOk('[]'));
 
-    const r = await chamarOpenRouter(prompt, { chave: 'k', modelos: ['m1', 'm2', 'm3'] });
+    const r = await roteador(['m1', 'm2', 'm3']).gerar(prompt);
 
-    expect(r).toEqual({ conteudo: '[]', modelo: 'm3', tentativas: 3 });
+    expect(r).toEqual({ conteudo: '[]', modelo: 'gemini:m3', tentativas: 3, porProvedor: { gemini: 3 } });
     expect(global.fetch).toHaveBeenCalledTimes(3);
     const corpo = JSON.parse(global.fetch.mock.calls[0][1].body);
     expect(corpo.messages[0].content).toBe(PROMPT_SISTEMA);
@@ -475,9 +482,7 @@ describe('chamarOpenRouter (fetch simulado)', () => {
 
   it('marca cota esgotada quando todos os modelos devolvem 429', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
-    await expect(chamarOpenRouter('p', { chave: 'k', modelos: ['m1', 'm2'] })).rejects.toMatchObject({
-      cotaEsgotada: true,
-    });
+    await expect(roteador(['m1', 'm2']).gerar('p')).rejects.toMatchObject({ cotaEsgotada: true });
   });
 
   it('não marca cota esgotada quando a falha é outra', async () => {
@@ -485,12 +490,12 @@ describe('chamarOpenRouter (fetch simulado)', () => {
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 429 })
       .mockResolvedValueOnce({ ok: false, status: 503 });
-    const err = await chamarOpenRouter('p', { chave: 'k', modelos: ['m1', 'm2'] }).catch((e) => e);
+    const err = await roteador(['m1', 'm2']).gerar('p').catch((e) => e);
     expect(err.cotaEsgotada).toBeUndefined();
   });
 
-  it('recusa rodar sem chave', async () => {
-    await expect(chamarOpenRouter('p', { modelos: ['m1'] })).rejects.toThrow(/OPENROUTER_API_KEY/);
+  it('recusa rodar sem chave', () => {
+    expect(() => criarRoteador({ listar: {} })).toThrow(/GEMINI_API_KEY/);
   });
 });
 
@@ -1054,9 +1059,10 @@ describe('explicar com conferência', () => {
   });
 });
 
-// Ponta a ponta pelo cliente HTTP real (chamarOpenRouter / chamarConferencia),
-// com `fetch` simulado: nenhum pedido sai para a OpenRouter.
-describe('explicar + OpenRouter (fetch simulado)', () => {
+// Ponta a ponta pelo cliente HTTP real (criarRoteador), com `fetch`
+// simulado: nenhum pedido sai para o Google. Ids de teste (m1, m2...) são
+// todos da mesma família, então vale a ordem da lista.
+describe('explicar + roteador Gemini (fetch simulado)', () => {
   const fetchOriginal = global.fetch;
   afterEach(() => {
     global.fetch = fetchOriginal;
@@ -1088,10 +1094,18 @@ describe('explicar + OpenRouter (fetch simulado)', () => {
     });
   }
 
-  const ligar = (modelos) => ({
-    chamarModelo: (p) => chamarOpenRouter(p, { chave: 'k', modelos }),
-    conferirModelo: (p, { excluir }) => chamarConferencia(p, { chave: 'k', modelos, excluir }),
-  });
+  const ligar = (modelos) => {
+    const r = criarRoteador({
+      chave: 'k',
+      listar: { geradores: async () => modelos, conferentes: async () => modelos },
+      log: silencio,
+      esperar: async () => {},
+    });
+    return {
+      chamarModelo: (p) => r.gerar(p),
+      conferirModelo: (p, { excluir }) => r.conferir(p, { excluir }),
+    };
+  };
 
   const modelosDosPedidos = () =>
     global.fetch.mock.calls.map(([, o]) => {
@@ -1109,7 +1123,8 @@ describe('explicar + OpenRouter (fetch simulado)', () => {
       ['gera', 'm1', 0.2],
       ['confere', 'm2', 0],
     ]);
-    expect(r).toMatchObject({ gravadas: 1, pedidos: 2, modelos: ['m1'], modelosConferencia: ['m2'] });
+    expect(r).toMatchObject({ gravadas: 1, pedidos: 2, modelos: ['gemini:m1'], modelosConferencia: ['gemini:m2'] });
+    expect((await buscar(id)).explicacao_modelo).toBe('gemini:m1');
     expect((await buscar(id)).explicacao_fonte).toBe('ia');
   });
 
@@ -1264,8 +1279,8 @@ describe('conferência: ressalvas, autor, nova tentativa e listagem', () => {
       chamarModelo: modeloQueConcorda(),
       conferirModelo: conferenteQueAprova(),
     });
-    // Qualificado com o provedor; id sem prefixo vindo do gerador = OpenRouter.
-    expect(await buscar(id)).toMatchObject({ explicacao_fonte: 'ia', explicacao_modelo: 'openrouter:modelo-teste' });
+    // Qualificado com o provedor; id sem prefixo vindo do gerador = Gemini.
+    expect(await buscar(id)).toMatchObject({ explicacao_fonte: 'ia', explicacao_modelo: 'gemini:modelo-teste' });
   });
 
   it('resposta 200 ilegível do 1º conferente: o 2º (outro modelo) confere e o lote é gravado', async () => {
@@ -1298,7 +1313,7 @@ describe('conferência: ressalvas, autor, nova tentativa e listagem', () => {
     for (let n = 1; n <= 4; n++) await inserir(n);
     const gerador = modeloQueConcorda();
     const conferente = jest.fn(async () => {
-      const e = new Error('não foi possível listar os modelos da OpenRouter (HTTP 503)');
+      const e = new Error('não foi possível listar os modelos do Gemini (HTTP 503)');
       e.listagem = true;
       e.tentativas = 0;
       throw e;
@@ -1309,14 +1324,16 @@ describe('conferência: ressalvas, autor, nova tentativa e listagem', () => {
     expect(r.gravadas).toBe(0);
   });
 
-  it('chamarOpenRouter marca `listagem` quando /models falha, sem pedir completion', async () => {
+  it('o roteador marca `listagem` quando /models falha, sem pedir completion', async () => {
     const fetchOriginal = global.fetch;
     global.fetch = jest.fn(async () => ({ ok: false, status: 503 }));
     try {
-      const err = await chamarConferencia('p', { chave: 'k', excluir: ['x'] }).catch((e) => e);
+      const err = await criarRoteador({ chave: 'k', log: silencio })
+        .conferir('p', { excluir: ['x'] })
+        .catch((e) => e);
       expect(err).toMatchObject({ listagem: true, tentativas: 0 });
       expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch.mock.calls[0][0]).toMatch(/\/models$/);
+      expect(global.fetch.mock.calls[0][0]).toMatch(/\/v1beta\/models\?/);
     } finally {
       global.fetch = fetchOriginal;
     }
@@ -1328,8 +1345,8 @@ describe('conferirGravadas: autor, ressalvas e backup', () => {
     await inserir(1, { explicacao: textoBom('[a]').trim(), explicacao_fonte: 'ia', explicacao_modelo: 'autor-1' });
     await inserir(2, { explicacao: textoBom('[b]').trim(), explicacao_fonte: 'ia' });
     const conferente = conferenteQueAprova();
-    await conferirGravadas({ exame: EXAME_TESTE, excluir: ['nvidia/nemotron-3-ultra-550b-a55b:free'], log: silencio, conferirModelo: conferente });
-    expect(conferente.mock.calls[0][1]).toEqual({ excluir: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'autor-1'] });
+    await conferirGravadas({ exame: EXAME_TESTE, excluir: ['gemini:gemini-3.8-flash'], log: silencio, conferirModelo: conferente });
+    expect(conferente.mock.calls[0][1]).toEqual({ excluir: ['gemini:gemini-3.8-flash', 'autor-1'] });
 
     const autor = jest.fn(async (prompt) => ({ ...(await conferenteQueAprova()(prompt)), modelo: 'autor-1' }));
     const r = await conferirGravadas({ exame: EXAME_TESTE, log: silencio, conferirModelo: autor });

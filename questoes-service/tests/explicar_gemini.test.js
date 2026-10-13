@@ -1,7 +1,7 @@
-// Gemini gerando e OpenRouter conferindo, pelo cliente HTTP real
-// (criarRoteador) com `fetch` simulado: nenhum pedido sai para o Google nem
-// para a OpenRouter. As listas de modelos são injetadas (a descoberta tem
-// teste próprio em gemini.test.js).
+// Gemini gerando (flash) e conferindo (Gemma, de preferência), pelo cliente
+// HTTP real (criarRoteador) com `fetch` simulado: nenhum pedido sai para o
+// Google. As listas de modelos são injetadas (a descoberta tem teste próprio
+// em gemini.test.js), e `esperar` também (nenhuma espera de verdade).
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'segredo-de-teste';
 
@@ -14,6 +14,8 @@ const {
   linhaDeCusto,
   linhasDeConferentes,
   ESPERA_429_MS,
+  ESPERAS_TRANSITORIAS_MS,
+  LOTE_PADRAO,
   PROMPT_SISTEMA,
   PROMPT_CONFERENCIA,
   GEMINI_URL,
@@ -21,9 +23,7 @@ const {
 
 const EXAME_TESTE = 94;
 const silencio = () => {};
-const CHAVE_GEMINI = 'gk-teste-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHI';
-const CHAVE_OR = 'sk-or-teste-chave';
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const CHAVE = 'gk-teste-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHI';
 
 const limpar = () => pool.query('DELETE FROM questoes WHERE exame = $1', [EXAME_TESTE]);
 
@@ -59,50 +59,64 @@ const textoBom = (marca = '') =>
 const itens = (prompt) => JSON.parse(prompt.slice(prompt.indexOf('['), prompt.indexOf(']\n\nResponda') + 1));
 const ok = (conteudo) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: conteudo } }] }) });
 
-const LISTAS = {
-  openrouter: async () => [
-    'nvidia/nemotron-3-ultra-550b-a55b:free',
-    'google/gemma-4-31b-it:free',
-    'nvidia/nemotron-3-super-120b-a12b:free',
-  ],
-  gemini: async () => [
-    { id: 'gemini-3.8-flash', pensa: true },
-    { id: 'gemini-3.7-flash', pensa: true },
-    { id: 'gemma-4-31b-it', pensa: false },
-  ],
-};
+const GERADORES = [
+  { id: 'gemini-3.8-flash', pensa: true },
+  { id: 'gemini-3.7-flash', pensa: true },
+];
+const CONFERENTES = [
+  { id: 'gemma-4-31b-it', pensa: false },
+  { id: 'gemma-4-26b-a4b-it', pensa: false },
+  { id: 'gemini-3.8-flash', pensa: true },
+  { id: 'gemini-3.7-flash', pensa: true },
+];
+const LISTAS = { geradores: async () => GERADORES, conferentes: async () => CONFERENTES };
 
-// Responde pelo provedor da URL; `falhar` = { '<provedor>:<modelo>': status };
-// `lancar` = provedor:modelo cujo fetch rejeita com `lancar[...]` (mensagem).
+// Papel e prompt do usuário de um pedido. Para gemma, o sistema vem no
+// começo da única mensagem (sem `system`).
+function lerPedido(opts) {
+  const corpo = JSON.parse(opts.body);
+  const ultimo = corpo.messages[corpo.messages.length - 1].content;
+  const sistema = corpo.messages.length > 1 ? corpo.messages[0].content : ultimo;
+  const papel = sistema.startsWith(PROMPT_SISTEMA) ? 'gera' : sistema.startsWith(PROMPT_CONFERENCIA) ? 'confere' : null;
+  const prefixo = papel === 'gera' ? PROMPT_SISTEMA : PROMPT_CONFERENCIA;
+  const usuario = corpo.messages.length > 1 ? ultimo : ultimo.slice(prefixo.length + 2);
+  return { corpo, papel, usuario };
+}
+
+// `falhar` = { 'gemini:<modelo>': status | (n-ésima chamada) => status|null };
+// `lancar` = { 'gemini:<modelo>': mensagem } (o fetch rejeita).
 function fetchSimulado({ falhar = {}, lancar = {} } = {}) {
+  const chamadas = {};
   return jest.fn(async (url, opts) => {
-    const provedor = url === GEMINI_URL ? 'gemini' : url === OPENROUTER_URL ? 'openrouter' : null;
-    if (!provedor) throw new Error(`URL inesperada: ${url}`);
-    const corpo = JSON.parse(opts.body);
-    const nome = `${provedor}:${corpo.model}`;
+    if (url !== GEMINI_URL) throw new Error(`URL inesperada: ${url}`);
+    const { corpo, papel, usuario } = lerPedido(opts);
+    const nome = `gemini:${corpo.model}`;
+    chamadas[nome] = (chamadas[nome] || 0) + 1;
     if (lancar[nome]) throw new Error(lancar[nome]);
-    if (falhar[nome]) return { ok: false, status: falhar[nome] };
-    const [sistema, usuario] = corpo.messages.map((m) => m.content);
-    if (sistema === PROMPT_SISTEMA) {
+    const f = falhar[nome];
+    const status = typeof f === 'function' ? f(chamadas[nome]) : f;
+    if (status) return { ok: false, status };
+    if (papel === 'gera') {
       return ok(JSON.stringify(itens(usuario).map((q) => ({ id: q.id, correta: q.gabarito_oficial, explicacao: textoBom(`[${q.id}]`) }))));
     }
-    if (sistema === PROMPT_CONFERENCIA) {
+    if (papel === 'confere') {
       return ok(JSON.stringify(itens(usuario).map((q) => ({ id: q.id, aprovada: true, problemas: [] }))));
     }
     throw new Error('prompt de sistema desconhecido');
   });
 }
 
-// [papel, provedor:modelo] de cada pedido feito.
+// [papel, gemini:modelo] de cada pedido feito.
 const pedidos = () =>
-  global.fetch.mock.calls.map(([url, o]) => {
-    const c = JSON.parse(o.body);
-    const provedor = url === GEMINI_URL ? 'gemini' : 'openrouter';
-    return [c.messages[0].content === PROMPT_SISTEMA ? 'gera' : 'confere', `${provedor}:${c.model}`];
+  global.fetch.mock.calls.map(([, o]) => {
+    const { corpo, papel } = lerPedido(o);
+    return [papel, `gemini:${corpo.model}`];
   });
 
-function rodar(chaves, { gerador, excluir = [], logRoteador = silencio, ...resto } = {}) {
-  const roteador = criarRoteador({ chaves, gerador, listar: LISTAS, log: logRoteador });
+const semEspera = () => jest.fn(async () => {});
+
+function rodar({ excluir = [], listar = LISTAS, esperar = semEspera(), logRoteador = silencio, ...resto } = {}) {
+  const roteador = criarRoteador({ chave: CHAVE, listar, log: logRoteador, esperar });
   return explicar({
     exame: EXAME_TESTE,
     aplicar: true,
@@ -131,244 +145,251 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('Gemini gera, OpenRouter confere', () => {
-  it('grava com explicacao_modelo "gemini:..." e conferente de outro fabricante (não o gemma)', async () => {
+describe('flash gera, Gemma confere', () => {
+  it('grava com explicacao_modelo "gemini:..." e conferente Gemma (outra família, nunca o gerador)', async () => {
     const id = await inserir(1);
     global.fetch = fetchSimulado();
 
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
+    const r = await rodar();
 
     expect(pedidos()).toEqual([
       ['gera', 'gemini:gemini-3.8-flash'],
-      ['confere', 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
+      ['confere', 'gemini:gemma-4-31b-it'],
     ]);
     expect(r).toMatchObject({
       gravadas: 1,
       pedidos: 2,
-      pedidosPorProvedor: { gemini: 1, openrouter: 1 },
+      pedidosPorProvedor: { gemini: 2 },
       modelos: ['gemini:gemini-3.8-flash'],
-      modelosConferencia: ['openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
+      modelosConferencia: ['gemini:gemma-4-31b-it'],
     });
+    expect(r.conferencias).toEqual([{ ids: [id], modelo: 'gemini:gemma-4-31b-it', mesmaFamilia: false }]);
+    expect(linhasDeConferentes(r).some((l) => /MESMA família/.test(l))).toBe(false);
     expect(await buscar(id)).toMatchObject({ explicacao_fonte: 'ia', explicacao_modelo: 'gemini:gemini-3.8-flash' });
-    expect(linhaDeCusto(r)).toMatch(/OpenRouter 1 .*Gemini 1/);
+    expect(linhaDeCusto(r)).toBe('custo: 2 pedido(s) ao Gemini (cota gratuita do Google: por modelo, ver AI Studio)');
   });
 
-  it('pedido ao Gemini: rota compatível, Bearer, chave fora da URL, reasoning_effort só para quem pensa', async () => {
+  it('pedidos: rota compatível, Bearer, chave fora da URL; reasoning_effort só para quem pensa; gemma sem `system`', async () => {
     await inserir(1);
     global.fetch = fetchSimulado();
-    await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
+    await rodar();
 
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
-    expect(url).not.toContain(CHAVE_GEMINI);
-    expect(opts.headers.Authorization).toBe(`Bearer ${CHAVE_GEMINI}`);
+    expect(url).not.toContain(CHAVE);
+    expect(opts.headers.Authorization).toBe(`Bearer ${CHAVE}`);
     const corpo = JSON.parse(opts.body);
     expect(corpo).toMatchObject({ model: 'gemini-3.8-flash', temperature: 0.2, reasoning_effort: 'low' });
+    expect(corpo.messages.map((m) => m.role)).toEqual(['system', 'user']);
     expect(corpo.max_tokens).toBeGreaterThan(4096);
-    // O conferente da OpenRouter recebe o corpo de sempre, sem campo do Gemini.
+
     const conf = JSON.parse(global.fetch.mock.calls[1][1].body);
+    expect(conf.model).toBe('gemma-4-31b-it');
     expect(conf.reasoning_effort).toBeUndefined();
     expect(conf).toMatchObject({ temperature: 0, max_tokens: 1500 });
-    expect(global.fetch.mock.calls[1][1].headers.Authorization).toBe(`Bearer ${CHAVE_OR}`);
+    expect(conf.messages).toHaveLength(1);
+    expect(conf.messages[0].role).toBe('user');
+    expect(conf.messages[0].content.startsWith(`${PROMPT_CONFERENCIA}\n\n`)).toBe(true);
   });
 
-  it('429 no Gemini passa ao próximo modelo Gemini (não à OpenRouter)', async () => {
+  it('429 no 1º flash passa ao próximo flash; o conferente continua sendo o Gemma', async () => {
     const id = await inserir(1);
     global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': 429 } });
 
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
+    const r = await rodar();
 
     expect(pedidos()).toEqual([
       ['gera', 'gemini:gemini-3.8-flash'],
       ['gera', 'gemini:gemini-3.7-flash'],
-      ['confere', 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
+      ['confere', 'gemini:gemma-4-31b-it'],
     ]);
-    expect(r).toMatchObject({ gravadas: 1, pedidosPorProvedor: { gemini: 2, openrouter: 1 } });
+    expect(r).toMatchObject({ gravadas: 1, pedidos: 3 });
     expect((await buscar(id)).explicacao_modelo).toBe('gemini:gemini-3.7-flash');
   });
 
-  it('todos os Gemini em 429: rodada interrompida com mensagem clara, sem gerar pela OpenRouter', async () => {
+  it('todos os geradores em 429: rodada interrompida com mensagem de cota, sem conferir', async () => {
     for (let n = 1; n <= 4; n++) await inserir(n);
-    global.fetch = fetchSimulado({
-      falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemini-3.7-flash': 429, 'gemini:gemma-4-31b-it': 429 },
-    });
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemini-3.7-flash': 429 } });
+    const esperar = semEspera();
 
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR }, { lote: 2 });
+    const r = await rodar({ lote: 2, esperar });
 
-    expect(pedidos().every(([papel, m]) => papel === 'gera' && m.startsWith('gemini:'))).toBe(true);
-    expect(pedidos()).toHaveLength(3); // só o 1º lote; o 2º nem é tentado
-    expect(r.interrompida).toMatch(/429.*\(gemini\).*|\(gemini\) devolveram 429/);
+    expect(pedidos()).toEqual([
+      ['gera', 'gemini:gemini-3.8-flash'],
+      ['gera', 'gemini:gemini-3.7-flash'],
+    ]); // só o 1º lote; o 2º nem é tentado
+    expect(esperar).not.toHaveBeenCalled(); // 429 em vários modelos é cota: não espera
+    expect(r.interrompida).toMatch(/429/);
     expect(r.interrompida).toMatch(/cota/);
-    expect(r).toMatchObject({ gravadas: 0, pedidosPorProvedor: { gemini: 3 } });
+    expect(r).toMatchObject({ gravadas: 0, pedidos: 2 });
   });
 
-  it('OpenRouter toda em 429 na conferência: cai para outro modelo Gemini, nunca o gerador', async () => {
+  it('Gemmas em 429 na conferência: cai para outro flash (mesma família, marcada), nunca o gerador', async () => {
     const id = await inserir(1);
-    global.fetch = fetchSimulado({
-      falhar: {
-        'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free': 429,
-        'openrouter:google/gemma-4-31b-it:free': 429,
-        'openrouter:nvidia/nemotron-3-super-120b-a12b:free': 429,
-      },
-    });
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemma-4-31b-it': 429, 'gemini:gemma-4-26b-a4b-it': 429 } });
+    const linhas = [];
 
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
+    const r = await rodar({ log: (m) => linhas.push(m) });
 
     const confere = pedidos().filter(([p]) => p === 'confere').map(([, m]) => m);
-    expect(confere).toEqual([
-      'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free',
-      'openrouter:nvidia/nemotron-3-super-120b-a12b:free',
-      'openrouter:google/gemma-4-31b-it:free',
-      'gemini:gemini-3.7-flash',
-    ]);
+    expect(confere).toEqual(['gemini:gemma-4-31b-it', 'gemini:gemma-4-26b-a4b-it', 'gemini:gemini-3.7-flash']);
     expect(confere).not.toContain('gemini:gemini-3.8-flash');
     expect(r).toMatchObject({ gravadas: 1, modelosConferencia: ['gemini:gemini-3.7-flash'] });
+    expect(r.conferencias[0].mesmaFamilia).toBe(true);
+    expect(linhas.some((m) => /conferido por gemini:gemini-3.7-flash \(MESMA família do autor\)/.test(m))).toBe(true);
+    expect(linhasDeConferentes(r).pop()).toBe(
+      '⚠️  1 de 1 lote(s) conferido(s) pela MESMA família do autor: gemini:gemini-3.7-flash (1)'
+    );
     expect((await buscar(id)).explicacao_modelo).toBe('gemini:gemini-3.8-flash');
   });
 
-  it('só com GEMINI_API_KEY: confere com outro modelo Gemini, nunca o gerador', async () => {
+  it('gerador Gemma (GEMINI_MODELOS apontando para um): a conferência prefere a outra família (flash)', async () => {
     await inserir(1);
     global.fetch = fetchSimulado();
+    const r = await rodar({
+      listar: { geradores: async () => [{ id: 'gemma-4-31b-it', pensa: false }], conferentes: LISTAS.conferentes },
+    });
+    expect(pedidos()).toEqual([
+      ['gera', 'gemini:gemma-4-31b-it'],
+      ['confere', 'gemini:gemini-3.8-flash'],
+    ]);
+    expect(r.conferencias[0].mesmaFamilia).toBe(false);
+  });
 
-    const r = await rodar({ gemini: CHAVE_GEMINI });
-
+  it('conferentes fixos (GEMINI_CONFERENTES) com o gerador entre eles: o gerador é pulado', async () => {
+    await inserir(1);
+    global.fetch = fetchSimulado();
+    await rodar({
+      listar: {
+        geradores: LISTAS.geradores,
+        conferentes: async () => [{ id: 'gemini-3.8-flash', pensa: true }, { id: 'gemini-3.7-flash', pensa: true }],
+      },
+    });
     expect(pedidos()).toEqual([
       ['gera', 'gemini:gemini-3.8-flash'],
       ['confere', 'gemini:gemini-3.7-flash'],
     ]);
-    expect(r.gravadas).toBe(1);
-    expect(global.fetch.mock.calls.every(([url]) => url === GEMINI_URL)).toBe(true);
   });
 
-  it('só um modelo Gemini e nenhuma OpenRouter: não grava e para (sem conferente)', async () => {
+  it('nenhum conferente além do gerador: não grava e para (sem conferente)', async () => {
     const id = await inserir(1);
     global.fetch = fetchSimulado();
-    const roteador = criarRoteador({ chaves: { gemini: CHAVE_GEMINI }, listar: { gemini: async () => ['gemini-3.8-flash'] } });
-    const r = await explicar({
-      exame: EXAME_TESTE,
-      aplicar: true,
-      log: silencio,
-      chamarModelo: (p) => roteador.gerar(p),
-      conferirModelo: (p, o) => roteador.conferir(p, o),
+    const r = await rodar({
+      listar: { geradores: async () => ['gemini-3.8-flash'], conferentes: async () => ['gemini-3.8-flash'] },
     });
+    expect(pedidos()).toEqual([['gera', 'gemini:gemini-3.8-flash']]);
     expect(r).toMatchObject({ gravadas: 0, semConferente: 1 });
     expect(r.interrompida).toMatch(/sem segundo modelo/);
     expect((await buscar(id)).explicacao).toBeNull();
   });
-});
 
-describe('sem GEMINI_API_KEY nada muda', () => {
-  it('gera e confere só pela OpenRouter, nos modelos de sempre', async () => {
-    const id = await inserir(1);
-    global.fetch = fetchSimulado();
-
-    const roteador = criarRoteador({ chaves: { openrouter: CHAVE_OR }, listar: LISTAS });
-    expect(roteador.gerador).toBe('openrouter');
-    const r = await rodar({ openrouter: CHAVE_OR });
-
-    expect(pedidos()).toEqual([
-      ['gera', 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
-      ['confere', 'openrouter:google/gemma-4-31b-it:free'],
-    ]);
-    expect(global.fetch.mock.calls.every(([url]) => url === OPENROUTER_URL)).toBe(true);
-    const corpo = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(Object.keys(corpo).sort()).toEqual(['max_tokens', 'messages', 'model', 'temperature']);
-    expect(r).toMatchObject({ gravadas: 1, pedidosPorProvedor: { openrouter: 2 } });
-    expect(linhaDeCusto(r)).toBe('custo: 2 pedido(s) à OpenRouter (cota gratuita: 50/dia)');
-    expect((await buscar(id)).explicacao_modelo).toBe('openrouter:nvidia/nemotron-3-ultra-550b-a55b:free');
+  it('sem chave, o roteador nem é criado', () => {
+    expect(() => criarRoteador({ listar: LISTAS })).toThrow(/GEMINI_API_KEY/);
   });
 
-  it('--gerador gemini sem GEMINI_API_KEY é recusado antes de qualquer pedido', () => {
-    expect(() => criarRoteador({ chaves: { openrouter: CHAVE_OR }, gerador: 'gemini' })).toThrow(/GEMINI_API_KEY/);
-  });
-
-  it('--gerador openrouter com as duas chaves: OpenRouter gera, o Gemini pode conferir', async () => {
-    await inserir(1);
+  it(`lote padrão de ${LOTE_PADRAO}: 7 pendentes = um pedido de 5 e um de 2`, async () => {
+    expect(LOTE_PADRAO).toBe(5);
+    for (let n = 1; n <= 7; n++) await inserir(n);
     global.fetch = fetchSimulado();
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR }, { gerador: 'openrouter' });
-    expect(pedidos()).toEqual([
-      ['gera', 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
-      ['confere', 'gemini:gemini-3.8-flash'],
-    ]);
-    expect(r.gravadas).toBe(1);
+    const r = await rodar();
+    const tamanhos = global.fetch.mock.calls
+      .map(([, o]) => lerPedido(o))
+      .filter((p) => p.papel === 'gera')
+      .map((p) => itens(p.usuario).length);
+    expect(tamanhos).toEqual([5, 2]);
+    expect(r).toMatchObject({ gravadas: 7, pedidos: 4 });
   });
 });
 
 describe('chave fora das mensagens de erro', () => {
-  it('erro de rede que traz a chave sai no resumo sem ela', async () => {
+  it('erro de rede que traz a chave sai no resumo sem ela (depois das esperas de erro transitório)', async () => {
     await inserir(1);
     global.fetch = fetchSimulado({
       lancar: {
-        'gemini:gemini-3.8-flash': `fetch failed: Authorization: Bearer ${CHAVE_GEMINI}`,
-        'gemini:gemini-3.7-flash': `ECONNRESET ?key=${CHAVE_GEMINI}`,
-        'gemini:gemma-4-31b-it': `timeout ${CHAVE_GEMINI}`,
+        'gemini:gemini-3.8-flash': `fetch failed: Authorization: Bearer ${CHAVE}`,
+        'gemini:gemini-3.7-flash': `ECONNRESET ?key=${CHAVE}`,
       },
     });
+    const avisos = [];
 
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
+    const r = await rodar({ logRoteador: (m) => avisos.push(m) });
 
     expect(r.lotesComErro).toBe(1);
-    const texto = JSON.stringify(r);
-    expect(texto).not.toContain(CHAVE_GEMINI);
+    expect(r.interrompida).toBeNull(); // falha transitória não para a rodada
+    const texto = JSON.stringify(r) + avisos.join('\n');
+    expect(texto).not.toContain(CHAVE);
     expect(texto).toContain('[chave oculta]');
   });
 
-  it('falha de listagem do Gemini no roteador não vaza a chave', async () => {
+  it('falha de listagem no roteador não vaza a chave', async () => {
     const roteador = criarRoteador({
-      chaves: { gemini: CHAVE_GEMINI },
+      chave: CHAVE,
       listar: {
-        gemini: async (chave) => {
+        geradores: async (chave) => {
           throw new Error(`HTTP 403 para ${chave}`);
         },
       },
     });
     const err = await roteador.gerar('p').catch((e) => e);
     expect(err).toMatchObject({ listagem: true, tentativas: 0 });
-    expect(err.message).not.toContain(CHAVE_GEMINI);
+    expect(err.message).not.toContain(CHAVE);
   });
 });
 
 describe('--excluir com e sem prefixo', () => {
   it('"gemini:gemini-3.8-flash" tira esse modelo da geração e da conferência', async () => {
     const id = await inserir(1);
-    global.fetch = fetchSimulado();
-    await rodar({ gemini: CHAVE_GEMINI }, { excluir: ['gemini:gemini-3.8-flash'] });
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemma-4-31b-it': 429, 'gemini:gemma-4-26b-a4b-it': 429 } });
+    await rodar({ excluir: ['gemini:gemini-3.8-flash'] });
     expect(pedidos()).toEqual([
       ['gera', 'gemini:gemini-3.7-flash'],
       ['confere', 'gemini:gemma-4-31b-it'],
+      ['confere', 'gemini:gemma-4-26b-a4b-it'],
+      // nem o gerador (3.7) nem o excluído (3.8) são tentados como conferente
     ]);
-    expect((await buscar(id)).explicacao_modelo).toBe('gemini:gemini-3.7-flash');
+    expect((await buscar(id)).explicacao).toBeNull();
   });
 
-  it('sem prefixo exclui o id em qualquer provedor', async () => {
+  it('sem prefixo vale como modelo Gemini', async () => {
     await inserir(1);
     global.fetch = fetchSimulado();
-    await rodar({ gemini: CHAVE_GEMINI }, { excluir: ['gemini-3.8-flash'] });
-    expect(pedidos()[0]).toEqual(['gera', 'gemini:gemini-3.7-flash']);
+    await rodar({ excluir: ['gemini-3.8-flash', 'gemma-4-31b-it'] });
+    expect(pedidos()).toEqual([
+      ['gera', 'gemini:gemini-3.7-flash'],
+      ['confere', 'gemini:gemma-4-26b-a4b-it'],
+    ]);
   });
 
-  it('"openrouter:<id>" não exclui o modelo de mesmo nome do Gemini', async () => {
-    await inserir(1);
-    global.fetch = fetchSimulado();
-    await rodar({ gemini: CHAVE_GEMINI }, { excluir: ['openrouter:gemini-3.8-flash'] });
-    expect(pedidos()[0]).toEqual(['gera', 'gemini:gemini-3.8-flash']);
+  it('id com prefixo antigo, "models/" ou maiúsculas exclui o mesmo modelo (mesmos pesos)', async () => {
+    for (const forma of ['openrouter:gemini-3.8-flash', 'models/gemini-3.8-flash', 'Gemini:GEMINI-3.8-flash']) {
+      await inserir(1);
+      global.fetch = fetchSimulado();
+      await rodar({ excluir: [forma] });
+      expect(pedidos().some(([, m]) => m === 'gemini:gemini-3.8-flash')).toBe(false);
+      await pool.query('DELETE FROM questoes WHERE exame = $1', [EXAME_TESTE]);
+    }
   });
 });
 
 describe('--conferir-gravadas com autores antigos e novos', () => {
-  it('autor gravado sem prefixo (OpenRouter, antes deste PR) nunca confere; "gemini:..." também não', async () => {
-    const antiga = await inserir(1, {
+  it('ids antigos (sem prefixo e "openrouter:...") em explicacao_modelo não quebram; o autor Gemini nunca confere', async () => {
+    const semPrefixo = await inserir(1, {
       explicacao: textoBom('[a]').trim(),
       explicacao_fonte: 'ia',
       explicacao_modelo: 'nvidia/nemotron-3-ultra-550b-a55b:free',
     });
-    const nova = await inserir(2, {
+    const comPrefixoAntigo = await inserir(2, {
       explicacao: textoBom('[b]').trim(),
+      explicacao_fonte: 'ia',
+      explicacao_modelo: 'openrouter:google/gemma-4-31b-it:free',
+    });
+    const nova = await inserir(3, {
+      explicacao: textoBom('[c]').trim(),
       explicacao_fonte: 'ia',
       explicacao_modelo: 'gemini:gemini-3.8-flash',
     });
     global.fetch = fetchSimulado();
-    const roteador = criarRoteador({ chaves: { gemini: CHAVE_GEMINI, openrouter: CHAVE_OR }, listar: LISTAS });
+    const roteador = criarRoteador({ chave: CHAVE, listar: LISTAS, log: silencio, esperar: semEspera() });
 
     const r = await conferirGravadas({
       exame: EXAME_TESTE,
@@ -376,87 +397,195 @@ describe('--conferir-gravadas com autores antigos e novos', () => {
       conferirModelo: (p, o) => roteador.conferir(p, o),
     });
 
-    // Autores: nvidia e google → nenhum fabricante "de fora"; o 1º não excluído.
-    expect(r.modelosConferencia).toEqual(['openrouter:google/gemma-4-31b-it:free']);
-    expect(r.modelosConferencia).not.toContain('openrouter:nvidia/nemotron-3-ultra-550b-a55b:free');
+    // O gemma antigo (outro provedor, mesmos pesos) e o flash autor ficam de
+    // fora: nenhum deles confere o que escreveu.
+    expect(r.modelosConferencia).not.toContain('gemini:gemma-4-31b-it');
     expect(r.modelosConferencia).not.toContain('gemini:gemini-3.8-flash');
-    expect(r.aprovadas).toBe(2);
-    expect(await buscar(antiga)).toMatchObject({ explicacao_fonte: 'ia' });
-    expect(await buscar(nova)).toMatchObject({ explicacao_fonte: 'ia' });
+    expect(r.modelosConferencia.length).toBeGreaterThan(0);
+    expect(r).toMatchObject({ aprovadas: 3, lotesComErro: 0, interrompida: null });
+    for (const id of [semPrefixo, comPrefixoAntigo, nova]) {
+      expect(await buscar(id)).toMatchObject({ explicacao_fonte: 'ia' });
+    }
+    expect((await buscar(semPrefixo)).explicacao_modelo).toBe('nvidia/nemotron-3-ultra-550b-a55b:free');
+  });
+
+  it('autor gravado "gemini:gemma-4-31b-it" nunca confere a própria explicação', async () => {
+    await inserir(1, { explicacao: textoBom('[g]').trim(), explicacao_fonte: 'ia', explicacao_modelo: 'gemini:gemma-4-31b-it' });
+    global.fetch = fetchSimulado();
+    const roteador = criarRoteador({ chave: CHAVE, listar: LISTAS, log: silencio, esperar: semEspera() });
+    const r = await conferirGravadas({ exame: EXAME_TESTE, log: silencio, conferirModelo: (p, o) => roteador.conferir(p, o) });
+    expect(r.modelosConferencia).toEqual(['gemini:gemini-3.8-flash']); // outra família primeiro
   });
 });
 
-describe('conferência: provedor sem cota é pulado pelo resto da rodada', () => {
-  const OR_429 = {
-    'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free': 429,
-    'openrouter:google/gemma-4-31b-it:free': 429,
-    'openrouter:nvidia/nemotron-3-super-120b-a12b:free': 429,
-  };
+describe('erro transitório (503 etc.): espera e tenta a lista de novo', () => {
+  const roteadorCom = ({ esperar = semEspera(), avisos = [], geradores = GERADORES } = {}) =>
+    criarRoteador({
+      chave: CHAVE,
+      listar: { geradores: async () => geradores, conferentes: LISTAS.conferentes },
+      log: (m) => avisos.push(m),
+      esperar,
+    });
 
-  it('OpenRouter toda em 429 no 1º lote: no 2º nem é tentada, um aviso só, custo sem tentativas puladas', async () => {
-    for (let n = 1; n <= 2; n++) await inserir(n);
-    global.fetch = fetchSimulado({ falhar: OR_429 });
+  it('as esperas são 20 s, 40 s e 80 s', () => {
+    expect(ESPERAS_TRANSITORIAS_MS).toEqual([20000, 40000, 80000]);
+  });
+
+  it('503 em todos: espera 20 s, tenta de novo e devolve, somando o custo', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce(ok('[]'));
+    const esperar = semEspera();
     const avisos = [];
-    const linhas = [];
 
-    const r = await rodar(
-      { gemini: CHAVE_GEMINI, openrouter: CHAVE_OR },
-      { lote: 1, logRoteador: (m) => avisos.push(m), log: (m) => linhas.push(m) }
-    );
+    const r = await roteadorCom({ esperar, avisos }).gerar('p');
 
+    expect(esperar.mock.calls).toEqual([[20000]]);
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]).toMatch(/erro transitório.*HTTP 503.*20 s \(1\/3\)/);
+    expect(r).toMatchObject({ modelo: 'gemini:gemini-3.8-flash', tentativas: 3, porProvedor: { gemini: 3 } });
+  });
+
+  it('desiste depois de 3 esperas (20, 40, 80 s): 4 passadas pela lista, erro transitório', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 });
+    const esperar = semEspera();
+    const avisos = [];
+
+    const err = await roteadorCom({ esperar, avisos }).gerar('p').catch((e) => e);
+
+    expect(esperar.mock.calls).toEqual([[20000], [40000], [80000]]);
+    expect(avisos).toHaveLength(3);
+    expect(global.fetch).toHaveBeenCalledTimes(8);
+    expect(err).toMatchObject({ transitorio: true, tentativas: 8, porProvedor: { gemini: 8 } });
+    expect(err.cotaEsgotada).toBeUndefined();
+  });
+
+  it('rodada para depois de 2 lotes seguidos com o Google sobrecarregado', async () => {
+    for (let i = 1; i <= 15; i++) await inserir(i);
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 });
+    const r = await rodar({ lote: 5 });
+    expect(r.lotesComErro).toBe(2);
+    expect(r.interrompida).toMatch(/2 lotes seguidos com o Google sobrecarregado/);
+  });
+
+  it('500, 502, 504, timeout e erro de rede também contam como transitórios', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: false, status: 502 })
+      .mockResolvedValueOnce({ ok: false, status: 504 })
+      .mockRejectedValueOnce(timeout)
+      .mockRejectedValueOnce(new Error('fetch failed'))
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce(ok('[]'));
+    const esperar = semEspera();
+
+    const r = await roteadorCom({ esperar }).gerar('p');
+
+    expect(esperar.mock.calls).toEqual([[20000], [40000], [80000]]);
+    expect(r).toMatchObject({ tentativas: 7 });
+  });
+
+  it('429 em algum modelo: não entra na espera de erro transitório', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({ ok: false, status: 503 });
+    const esperar = semEspera();
+
+    const err = await roteadorCom({ esperar }).gerar('p').catch((e) => e);
+
+    expect(esperar).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(err.transitorio).toBeUndefined();
+    expect(err.cotaEsgotada).toBeUndefined();
+  });
+
+  it('erro não transitório (400/404) também não espera', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: false, status: 404 });
+    const esperar = semEspera();
+    const err = await roteadorCom({ esperar }).gerar('p').catch((e) => e);
+    expect(esperar).not.toHaveBeenCalled();
+    expect(err.transitorio).toBeUndefined();
+  });
+
+  it('na rodada: 503 nos Gemma na conferência, depois 200 — o lote é conferido e gravado', async () => {
+    const id = await inserir(1);
+    const primeiraVez = (n) => (n === 1 ? 503 : null);
+    global.fetch = fetchSimulado({
+      falhar: {
+        'gemini:gemma-4-31b-it': primeiraVez,
+        'gemini:gemma-4-26b-a4b-it': primeiraVez,
+        'gemini:gemini-3.7-flash': primeiraVez,
+      },
+    });
+    const esperar = semEspera();
+
+    const r = await rodar({ esperar });
+
+    expect(esperar.mock.calls).toEqual([[20000]]);
     expect(pedidos()).toEqual([
       ['gera', 'gemini:gemini-3.8-flash'],
-      ['confere', 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free'],
-      ['confere', 'openrouter:nvidia/nemotron-3-super-120b-a12b:free'],
-      ['confere', 'openrouter:google/gemma-4-31b-it:free'],
+      ['confere', 'gemini:gemma-4-31b-it'],
+      ['confere', 'gemini:gemma-4-26b-a4b-it'],
       ['confere', 'gemini:gemini-3.7-flash'],
-      ['gera', 'gemini:gemini-3.8-flash'],
-      ['confere', 'gemini:gemini-3.7-flash'], // direto: a OpenRouter foi pulada
+      ['confere', 'gemini:gemma-4-31b-it'],
     ]);
-    expect(avisos.filter((m) => /OpenRouter sem cota: conferência cai para o mesmo fabricante/.test(m))).toHaveLength(1);
-    expect(r).toMatchObject({ gravadas: 2, pedidos: 7, pedidosPorProvedor: { gemini: 4, openrouter: 3 } });
-
-    // O conferente de cada lote vai para o log e para o resumo.
-    expect(r.conferencias.map((c) => [c.modelo, c.mesmoFabricante])).toEqual([
-      ['gemini:gemini-3.7-flash', true],
-      ['gemini:gemini-3.7-flash', true],
-    ]);
-    expect(linhas.filter((m) => /conferido por gemini:gemini-3.7-flash \(MESMO fabricante do autor\)/.test(m))).toHaveLength(2);
-    expect(linhasDeConferentes(r).pop()).toBe(
-      '⚠️  2 de 2 lote(s) conferido(s) pelo MESMO fabricante do autor: gemini:gemini-3.7-flash (2)'
-    );
+    expect(r).toMatchObject({ gravadas: 1, pedidos: 5, lotesComErro: 0 });
+    expect((await buscar(id)).explicacao_fonte).toBe('ia');
   });
 
-  it('com outro fabricante conferindo, nada é marcado como mesmo fabricante', async () => {
-    await inserir(1);
-    global.fetch = fetchSimulado();
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR });
-    expect(r.conferencias).toEqual([
-      { ids: [expect.any(Number)], modelo: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', mesmoFabricante: false },
-    ]);
-    expect(linhasDeConferentes(r).some((l) => /MESMO fabricante/.test(l))).toBe(false);
+  it('na rodada: 503 sem fim na geração — o lote falha depois de 3 esperas; o 2º lote igual para a rodada', async () => {
+    for (let n = 1; n <= 3; n++) await inserir(n);
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': 503, 'gemini:gemini-3.7-flash': 503 } });
+    const esperar = semEspera();
+
+    const r = await rodar({ lote: 1, esperar });
+
+    expect(esperar).toHaveBeenCalledTimes(6); // 3 por lote
+    expect(r).toMatchObject({ lotesComErro: 2, gravadas: 0, pedidos: 16 });
+    expect(r.interrompida).toMatch(/2 lotes seguidos com o Google sobrecarregado/); // o 3º lote nem é tentado
   });
 
-  it('todos os provedores sem cota na conferência: a rodada para, sem pedido de conferência a mais', async () => {
-    for (let n = 1; n <= 2; n++) await inserir(n);
-    global.fetch = fetchSimulado({
-      falhar: { ...OR_429, 'gemini:gemini-3.7-flash': 429, 'gemini:gemma-4-31b-it': 429 },
-    });
-    const r = await rodar({ gemini: CHAVE_GEMINI, openrouter: CHAVE_OR }, { lote: 1 });
-    expect(pedidos().filter(([p]) => p === 'gera')).toHaveLength(1);
-    expect(r.interrompida).toMatch(/429/);
-    expect(r).toMatchObject({ gravadas: 0, pedidos: 6 });
+  it('com timer falso: a 2ª passada só sai depois dos 20 s', async () => {
+    jest.useFakeTimers();
+    try {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 503 })
+        .mockResolvedValueOnce(ok('[]'));
+      const roteador = criarRoteador({
+        chave: CHAVE,
+        listar: { geradores: async () => ['gemini-3.8-flash'], conferentes: LISTAS.conferentes },
+        log: silencio,
+      });
+      const promessa = roteador.gerar('p');
+      await jest.advanceTimersByTimeAsync(ESPERAS_TRANSITORIAS_MS[0] - 1);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      const r = await promessa;
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(r.tentativas).toBe(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
-describe('um só modelo Gemini: 429 espera 60 s e tenta uma vez (timer falso)', () => {
+describe('um só modelo: 429 espera 60 s e tenta uma vez (timer falso)', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
   const roteadorUnico = (avisos = []) =>
     criarRoteador({
-      chaves: { gemini: CHAVE_GEMINI },
-      listar: { gemini: async () => [{ id: 'gemini-3.8-flash', pensa: true }] },
+      chave: CHAVE,
+      listar: { geradores: async () => [{ id: 'gemini-3.8-flash', pensa: true }], conferentes: LISTAS.conferentes },
       log: (m) => avisos.push(m),
     });
 
@@ -482,14 +611,14 @@ describe('um só modelo Gemini: 429 espera 60 s e tenta uma vez (timer falso)', 
     const err = await promessa;
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(err).toMatchObject({ cotaEsgotada: true, tentativas: 2, porProvedor: { gemini: 2 } });
-    expect(err.message).not.toContain(CHAVE_GEMINI);
+    expect(err.message).not.toContain(CHAVE);
   });
 
-  it('com dois modelos Gemini, todos em 429 é a cota do dia: não espera', async () => {
+  it('com dois modelos, todos em 429 é a cota do dia: não espera', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
     const roteador = criarRoteador({
-      chaves: { gemini: CHAVE_GEMINI },
-      listar: { gemini: async () => ['gemini-3.8-flash', 'gemini-3.7-flash'] },
+      chave: CHAVE,
+      listar: { geradores: async () => ['gemini-3.8-flash', 'gemini-3.7-flash'], conferentes: LISTAS.conferentes },
       log: silencio,
     });
     const err = await roteador.gerar('p').catch((e) => e);
