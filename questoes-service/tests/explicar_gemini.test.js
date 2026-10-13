@@ -427,6 +427,68 @@ describe('erro transitório (503 etc.): espera e tenta a lista de novo', () => {
       esperar,
     });
 
+  it('429 misturado com 503: espera pelo sobrecarregado e não tenta mais o sem cota', async () => {
+    global.fetch = fetchSimulado({
+      falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemini-3.7-flash': (n) => (n === 1 ? 503 : 0) },
+    });
+    const esperar = semEspera();
+    const avisos = [];
+    const roteador = roteadorCom({ esperar, avisos });
+
+    const r = await roteador.gerar(`Explique.\n\n${JSON.stringify([{ id: 1, gabarito_oficial: 'C' }])}\n\nResponda`);
+
+    expect(esperar.mock.calls).toEqual([[20000]]);
+    expect(r.modelo).toBe('gemini:gemini-3.7-flash');
+    // 3.8 (429), 3.7 (503) e, depois da espera, só o 3.7.
+    expect(pedidos().map(([, m]) => m)).toEqual(['gemini:gemini-3.8-flash', 'gemini:gemini-3.7-flash', 'gemini:gemini-3.7-flash']);
+    // Um 429 só (pode ser o limite por minuto): ainda não sai da rodada.
+    expect(roteador.foraDaRodada.size).toBe(0);
+  });
+
+  it('modelo com 429 em 2 pedidos ou sumido (404) não é tentado nos lotes seguintes', async () => {
+    for (let n = 1; n <= 15; n++) await inserir(n);
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemma-4-31b-it': 404 } });
+
+    const r = await rodar({ lote: 5 });
+
+    expect(r).toMatchObject({ gravadas: 15, lotesComErro: 0, interrompida: null });
+    const contar = (m) => pedidos().filter(([, x]) => x === m).length;
+    // O 3.8 gera nos lotes 1 e 2 (429 nos dois) e sai; o gemma-31b sai no 1º 404.
+    expect(contar('gemini:gemini-3.8-flash')).toBe(2);
+    expect(contar('gemini:gemma-4-31b-it')).toBe(1);
+  });
+
+  it('todos os geradores sem cota: a rodada para sem gastar mais pedidos', async () => {
+    for (let n = 1; n <= 10; n++) await inserir(n);
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemini-3.7-flash': 429 } });
+
+    const r = await rodar({ lote: 5 });
+
+    expect(r.gravadas).toBe(0);
+    expect(r.interrompida).toMatch(/429|cota/);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('um modelo só: 429, espera de 60 s, 200 — continua na rodada e o 2º lote também grava', async () => {
+    for (let n = 1; n <= 10; n++) await inserir(n);
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': (n) => (n === 1 ? 429 : 0) } });
+    const esperar = semEspera();
+    const listar = { geradores: async () => [GERADORES[0]], conferentes: LISTAS.conferentes };
+
+    const r = await rodar({ lote: 5, esperar, listar });
+
+    expect(esperar.mock.calls).toEqual([[60000]]);
+    expect(r).toMatchObject({ gravadas: 10, interrompida: null });
+  });
+
+  it('429 misturado com um 400 que não é cota: não espera (é defeito, não sobrecarga)', async () => {
+    global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemini-3.7-flash': 400 } });
+    const esperar = semEspera();
+    const err = await roteadorCom({ esperar }).gerar('p').catch((e) => e);
+    expect(esperar).not.toHaveBeenCalled();
+    expect(err.transitorio).toBeUndefined();
+  });
+
   it('as esperas são 20 s, 40 s e 80 s', () => {
     expect(ESPERAS_TRANSITORIAS_MS).toEqual([20000, 40000, 80000]);
   });
@@ -444,7 +506,7 @@ describe('erro transitório (503 etc.): espera e tenta a lista de novo', () => {
 
     expect(esperar.mock.calls).toEqual([[20000]]);
     expect(avisos).toHaveLength(1);
-    expect(avisos[0]).toMatch(/erro transitório.*HTTP 503.*20 s \(1\/3\)/);
+    expect(avisos[0]).toMatch(/sobrecarregados.*HTTP 503.*20 s \(1\/3\)/);
     expect(r).toMatchObject({ modelo: 'gemini:gemini-3.8-flash', tentativas: 3, porProvedor: { gemini: 3 } });
   });
 
@@ -489,26 +551,39 @@ describe('erro transitório (503 etc.): espera e tenta a lista de novo', () => {
     expect(r).toMatchObject({ tentativas: 7 });
   });
 
-  it('429 em algum modelo: não entra na espera de erro transitório', async () => {
+  it('429 + 503 sem fim: espera 3 vezes, e as novas passadas vão só ao modelo com 503', async () => {
     global.fetch = jest
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 429 })
-      .mockResolvedValueOnce({ ok: false, status: 503 });
+      .mockResolvedValue({ ok: false, status: 503 });
     const esperar = semEspera();
 
     const err = await roteadorCom({ esperar }).gerar('p').catch((e) => e);
 
-    expect(esperar).not.toHaveBeenCalled();
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(err.transitorio).toBeUndefined();
+    expect(esperar.mock.calls).toEqual([[20000], [40000], [80000]]);
+    expect(global.fetch).toHaveBeenCalledTimes(5); // 2 na 1ª passada + 1 em cada uma das 3 seguintes
+    expect(err.transitorio).toBe(true);
     expect(err.cotaEsgotada).toBeUndefined();
+    expect(err.semCota).toEqual(['gemini:gemini-3.8-flash']);
   });
 
-  it('erro não transitório (400/404) também não espera', async () => {
+  it('503 + 404: espera, sem tentar de novo o modelo que sumiu', async () => {
     global.fetch = jest
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 503 })
-      .mockResolvedValueOnce({ ok: false, status: 404 });
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce(ok('[]'));
+    const esperar = semEspera();
+    const r = await roteadorCom({ esperar }).gerar('p');
+    expect(esperar.mock.calls).toEqual([[20000]]);
+    expect(r.modelo).toBe('gemini:gemini-3.8-flash');
+  });
+
+  it('erro que não é sobrecarga nem cota (400) não espera', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: false, status: 400 });
     const esperar = semEspera();
     const err = await roteadorCom({ esperar }).gerar('p').catch((e) => e);
     expect(esperar).not.toHaveBeenCalled();
