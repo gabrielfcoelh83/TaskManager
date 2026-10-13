@@ -507,6 +507,23 @@ describe('erro transitório (503 etc.): espera e tenta a lista de novo', () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('caso real da prévia: 429 → espera de 60 s → 503 → o modelo continua na lista e responde depois', async () => {
+    // 3.8 sem cota o tempo todo; 3.7: 503, 429, 503, 200.
+    const seq37 = [503, 429, 503, 0];
+    global.fetch = fetchSimulado({
+      falhar: { 'gemini:gemini-3.8-flash': 429, 'gemini:gemini-3.7-flash': (n) => seq37[n - 1] ?? 0 },
+    });
+    const esperar = semEspera();
+    const roteador = roteadorCom({ esperar });
+
+    const r = await roteador.gerar(`Explique.\n\n${JSON.stringify([{ id: 1, gabarito_oficial: 'C' }])}\n\nResponda`);
+
+    expect(r.modelo).toBe('gemini:gemini-3.7-flash');
+    // 20 s (503 + 429), 60 s (429 com um só), 40 s (503), e a 4ª chamada do 3.7 responde.
+    expect(esperar.mock.calls).toEqual([[20000], [60000], [40000]]);
+    expect(global.fetch).toHaveBeenCalledTimes(5); // 2 na 1ª passada, depois só o 3.7
+  });
+
   it('um modelo só: 429, espera de 60 s, 200 — continua na rodada e o 2º lote também grava', async () => {
     for (let n = 1; n <= 10; n++) await inserir(n);
     global.fetch = fetchSimulado({ falhar: { 'gemini:gemini-3.8-flash': (n) => (n === 1 ? 429 : 0) } });

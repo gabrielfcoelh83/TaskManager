@@ -661,6 +661,13 @@ const HTTP_TRANSITORIO = new Set([500, 502, 503, 504]);
 // qualificados que falharam assim, para a nova passada e o roteador
 // deixarem esses modelos de fora.
 async function pedirEmOrdem(prompt, candidatos, opcoes) {
+  if (candidatos.length === 0) {
+    // Nunca deveria chegar aqui vazio; se chegar, que o erro diga.
+    const e = new Error('nenhum modelo na lista para tentar');
+    e.tentativas = 0;
+    e.porProvedor = {};
+    throw e;
+  }
   let ultimoErro = null;
   let todos429 = true;
   let houveTransitorio = false;
@@ -779,12 +786,20 @@ async function pedirComEspera(prompt, candidatos, params, { esperar, log }) {
       err.tentativas += gastos.tentativas;
       err.porProvedor = somarPorProvedor(gastos.porProvedor, err.porProvedor);
       gastos = { tentativas: err.tentativas, porProvedor: err.porProvedor };
+      // O que ESTA passada disse de cada modelo — antes de juntar com as
+      // anteriores. O filtro usa só isto: um modelo que deu 429 (limite por
+      // minuto, já esperado) e agora deu 503 está sobrecarregado, não sem
+      // cota, e tem de continuar na lista. Filtrar pelo acumulado esvaziava
+      // a lista e o lote falhava com "nenhum modelo respondeu".
+      const foraDestaPassada = new Set([...(err.semCota || []), ...(err.sumidos || [])]);
       juntar(err);
 
       if (err.transitorio && esperas503 < ESPERAS_TRANSITORIAS_MS.length) {
         // A nova passada só vai aos que podem voltar: sem cota (429) e
-        // sumidos (404) ficam de fora.
-        candidatos = candidatos.filter((c) => !semCota.has(c.qualificado) && !sumidos.has(c.qualificado));
+        // sumidos (404) nesta passada ficam de fora.
+        const restam = candidatos.filter((c) => !foraDestaPassada.has(c.qualificado));
+        if (restam.length === 0) throw err; // defesa: `transitorio` exige um que pode voltar
+        candidatos = restam;
         const ms = ESPERAS_TRANSITORIAS_MS[esperas503++];
         log(
           `  ⏳ modelos sobrecarregados ou fora do ar (${err.message}); os sem cota ficam de fora; ` +
