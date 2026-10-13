@@ -82,7 +82,7 @@ curl -X POST http://localhost:5173/api/enriquecer-questao \
 
 ## Integração com /api/gerar-questoes
 
-Após gerar questões no skill integrate-openrouter, chamar enriquecimento:
+Histórico: o app não gera mais questões por IA (só as reais da OAB). Exemplo antigo de enriquecimento:
 
 ```javascript
 // Em pages/api/gerar-questoes.js, após gerar questões:

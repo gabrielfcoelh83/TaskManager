@@ -20,8 +20,8 @@ async function obterToken() {
   return data.token;
 }
 
-// Sem login, nenhuma rota que gasta cota de serviço externo (DATAJUD hoje; a
-// OpenRouter, quando o chat existir) pode responder: é a garantia que
+// Sem login, nenhuma rota que gasta cota de serviço externo (DATAJUD hoje; o
+// Gemini, quando o chat existir) pode responder: é a garantia que
 // api/_lib/auth.js existe para dar.
 async function testRotasSemToken() {
   console.log('Testing rotas protegidas sem token (should be 401)...');

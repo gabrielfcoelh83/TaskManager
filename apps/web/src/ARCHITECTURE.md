@@ -58,7 +58,7 @@ src/
 api/                      # Funções serverless (Vercel)
 ├── enriquecer-questao.js
 ├── buscar-datajud.js     # DataJud (CNJ)
-└── _lib/                 # auth.js (exige login), datajud.js, ia.js (OpenRouter, só modelos gratuitos)
+└── _lib/                 # auth.js (exige login), datajud.js, ia.js (Gemini, plano gratuito)
 
 server/dev-api.js         # Serve as rotas de api/ em dev (o Vite não serve)
 scripts/testes-lib.js     # Roda os testes de lib/ (npm run test:lib)
@@ -587,24 +587,29 @@ Vercel. Hoje nenhuma tela do app as chama.
 
 ### Camada de IA (`api/_lib/ia.js`)
 
-Único lugar que fala com modelo de linguagem, pela OpenRouter, e só com
-modelos gratuitos (id `:free` e preço zero de entrada e saída). Ainda nenhuma
-rota a usa; é a base do chat.
+Único lugar que fala com modelo de linguagem, pelo Google Gemini (Google AI
+Studio, plano gratuito — o mesmo provedor do questoes-service, que escreve as
+explicações). Ainda nenhuma rota a usa; é a base do chat. Até out/2026 era a
+OpenRouter, que saiu por cota curta (50/dia) e respostas fora do formato.
 
 - **Modelos descobertos, não fixados.** Os ids somem — a lista fixa já quebrou
-  duas vezes. `listarModelosGratuitos()` lê `GET /api/v1/models` (público,
-  sem chave) com cache de 1 h, e usa o último cache se a rede falhar. Dos
-  `PREFERIDOS` (ou da env `IA_MODELOS`, separada por vírgula, que os
-  substitui) só entram os que existem; se nenhum existir, vão os gratuitos
-  de maior contexto.
-- **`completar({ sistema, mensagens, json })`** tenta até 4 modelos: 429,
-  5xx, 404, 400 e timeout passam ao próximo; 401/403 param na hora
-  (`IaChaveInvalida`, status 500 — não 401, que o front leria como sessão
-  expirada). Tudo falhando: `IaIndisponivel`, status 503. Com `json: true`,
-  JSON inválido também passa ao próximo modelo.
-- **Cota:** a chave gratuita tem 20 pedidos/min e 50/dia (1000/dia depois de
-  US$ 10 em créditos). `OPENROUTER_API_KEY` fica em `.env.local` (dev) e
-  nas variáveis do projeto na Vercel.
+  duas vezes. `listarModelos()` lê `GET /v1beta/models` (chave no header
+  `x-goog-api-key`, nunca na URL) com cache de 1 h, e usa o último cache se a
+  rede falhar. Regra padrão: `gemini-<versão>-flash` estável, da maior versão
+  para a menor, depois `gemini-flash-latest`; pro, lite, preview e gemma ficam
+  fora. A env `GEMINI_MODELOS` (separada por vírgula) substitui a regra, só
+  com o que existe.
+- **`completar({ sistema, mensagens, json })`** tenta até 4 modelos pela rota
+  compatível com OpenAI (`/v1beta/openai/chat/completions`): 429, 503, 404,
+  400 que não é de chave e timeout passam ao próximo; chave recusada (401/403
+  ou o 400 "API key not valid" do Google) para na hora (`IaChaveInvalida`,
+  status 500 — não 401, que o front leria como sessão expirada). Tudo
+  falhando: `IaIndisponivel`, status 503. Com `json: true`, JSON inválido
+  também passa ao próximo modelo. Modelo que raciocina recebe
+  `reasoning_effort: "low"` e folga no teto de tokens.
+- **Cota:** a do plano gratuito do Google, diária e por modelo.
+  `GEMINI_API_KEY` fica em `.env.local` (dev) e nas variáveis do projeto na
+  Vercel.
 
 O gateway que ele consulta vem de `VITE_API_URL` **no ambiente do processo
 das funções** — e, sem ela, cai no gateway de **produção**. Em dev isso
@@ -677,9 +682,9 @@ de verdade e se pula quando não há rota ou seed.
 `test:api` precisa de tudo no ar — backend na 3000, dev-api na 3100 com
 `VITE_API_URL` local. Rodado sem isso, falha com 401.
 
-`tests/ia.test.js` (entra no `test:lib`) usa uma OpenRouter de mentira: sem
-rede e sem chave. Com `IA_TESTE_REDE=1` ele também lista os modelos de
-verdade (endpoint público, sem gastar cota) e avisa se algum preferido sumiu.
+`tests/ia.test.js` (entra no `test:lib`) usa um Gemini de mentira: sem rede e
+sem chave. Com `IA_TESTE_REDE=1` e `GEMINI_API_KEY` ele também lista os
+modelos de verdade (listar não gasta cota de geração).
 
 Os testes da `lib/` rodam no `node` puro, sem navegador. Valem para os módulos
 `.js` que não tocam `import.meta.env` — `lib/api/api.js` é a exceção, e é por

@@ -26,7 +26,7 @@ Setup, testing, validation, CI/CD infrastructure, and deployment automation
 ## Module 2: Initial Setup
 - **Verify**: Node version >= 18
 - **Install**: npm install (install all dependencies)
-- **Environment**: Create .env.local with NEXT_PUBLIC_OPENROUTER_API_KEY
+- **Environment**: Create .env.local with GEMINI_API_KEY (server-side only, never VITE_/NEXT_PUBLIC_)
 - **Start**: npm run dev (verify app starts in http://localhost:5173)
 - **Validate**: No console errors, app loads in browser
 - **Commit**: "Chore: setup inicial + .env"
@@ -35,7 +35,7 @@ Setup, testing, validation, CI/CD infrastructure, and deployment automation
 - **Test All Modules**: 1-7 implemented completely
 - **Manual Flow Test**:
   - Select discipline → answer 5 questions → view performance
-  - Generate with AI (OpenRouter) → verify 5 questions generated
+  - AI layer (Gemini, api/_lib/ia.js) → npm run test:ia passes
   - Enrich with DATAJUD → verify jurisprudence appears
   - localStorage persistence → refresh page → data persists
 - **Console Validation**: Zero errors or warnings
@@ -53,7 +53,7 @@ Setup, testing, validation, CI/CD infrastructure, and deployment automation
   3. E2E tests (playwright)
   4. Build (vite build)
   5. Deploy (Vercel, only on main push)
-- **Secrets**: OPENROUTER_API_KEY, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+- **Secrets**: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
 - **Conditional Deploy**: Only on main branch, only if VERCEL_TOKEN exists
 
 ## Test Files
@@ -102,7 +102,7 @@ Setup, testing, validation, CI/CD infrastructure, and deployment automation
 ### Module 2 (Setup)
 - [ ] Node 18+ installed
 - [ ] npm install completed
-- [ ] .env.local created with NEXT_PUBLIC_OPENROUTER_API_KEY
+- [ ] .env.local created with GEMINI_API_KEY
 - [ ] npm run dev starts without errors
 - [ ] App loads in http://localhost:5173
 - [ ] Zero console errors
@@ -111,7 +111,7 @@ Setup, testing, validation, CI/CD infrastructure, and deployment automation
 - [ ] All modules 1-7 implemented ✅
 - [ ] npm run dev without errors
 - [ ] Flow: select discipline → answer 5 → see performance ✅
-- [ ] OpenRouter: generate 5 questions (quality OK) ✅
+- [ ] Gemini AI layer: npm run test:ia ✅
 - [ ] DATAJUD: enrich 3 questions (jurisprudence appears) ✅
 - [ ] localStorage: refresh page → data persists ✅
 - [ ] Zero console errors or warnings

@@ -1,9 +1,9 @@
 // api/_lib/auth.js
 //
 // Exige um JWT válido antes de rotas que chamam serviço externo com cota
-// (DATAJUD hoje; OpenRouter, via _lib/ia.js, quando o chat existir). Sem isto,
+// (DATAJUD hoje; Gemini, via _lib/ia.js, quando o chat existir). Sem isto,
 // qualquer um na internet podia chamar essas rotas e gastar a cota — a chave
-// gratuita da OpenRouter tem só 50 pedidos por dia — sem estar logado.
+// gratuita do Gemini tem cota diária por modelo — sem estar logado.
 //
 // Verifica contra o gateway (POST /api/auth/verify -> auth-service /verify)
 // em vez de reimplementar jwt.verify aqui: evita duplicar JWT_SECRET numa

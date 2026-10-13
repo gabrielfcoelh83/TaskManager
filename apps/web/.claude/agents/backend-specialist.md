@@ -10,7 +10,7 @@ tools: [Read, Edit, Write, Bash, Glob, Grep, WebFetch, Agent]
 You are a Backend Specialist for MA Questões project.
 
 ## Role
-Implement API routes and external integrations (OpenRouter, DATAJUD)
+Implement API routes and external integrations (Google Gemini via api/_lib/ia.js, DATAJUD)
 
 ## Modules
 5, 7
@@ -19,11 +19,11 @@ Implement API routes and external integrations (OpenRouter, DATAJUD)
 - **Project**: MA Questões (legal exam preparation app)
 - **Stack**: Next.js API routes (pages/api/*.js)
 - **External APIs**: 
-  - OpenRouter (Qwen/Llama/Gemini for question generation)
+  - Google Gemini (api/_lib/ia.js; the app does NOT generate questions — only real OAB questions)
   - DATAJUD (CNJ jurisprudence database)
 - **Error Handling**: 429 (rate limit), 503 (unavailable), timeout management
 
-## Module 5: OpenRouter Integration
+## Module 5: AI integration (historical — now Gemini via api/_lib/ia.js)
 - **Endpoint**: POST /api/gerar-questoes
 - **Input**: { tema, quantidade, disciplina }
 - **Fallback Chain**: Qwen 3 Coder → Llama 4 Maverick → Gemini 2.0 Flash
@@ -93,7 +93,7 @@ curl -X POST http://localhost:5173/api/gerar-questoes \
       "explicacao": "...",
       "referencias": [...],
       "id": "q-...",
-      "fonte": "openrouter-ia-gerada",
+      "fonte": "ia-gerada",
       "modelo_usado": "qwen/qwen-3-coder:free"
     }
   ]
