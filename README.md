@@ -6,13 +6,16 @@ Plataforma de tarefas dividida em serviços independentes, cada um com seu próp
 
 ```
                     ┌─────────────┐
-   Cliente ────────▶│ API Gateway │  :3000
+   Cliente ────────▶│    Nginx    │  :443 (dev: localhost:3000 → :8080)
+                    └──────┬──────┘
+                    ┌──────▼──────┐
+                    │ API Gateway │  :3000 (só rede interna)
                     └──────┬──────┘
                            │
               ┌────────────┼────────────┐
               ▼            ▼            ▼
         ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │   Auth   │◀│   User   │ │  Estudo/ │
+        │   Auth   │ │   User   │ │  Estudo/ │
         │  :3001   │ │  :3002   │ │ Questões │
         └────┬─────┘ └────┬─────┘ └────┬─────┘
              │            │            │
@@ -20,10 +23,10 @@ Plataforma de tarefas dividida em serviços independentes, cada um com seu próp
           auth_db      user_db    estudo_db/questoes_db
              └─────── PostgreSQL :5432 ───────┘
 
-              Redis :6379 (cache / eventos)
+   Auth ──XADD──▶ Redis :6379 (stream user-events) ──XREADGROUP──▶ User
 ```
 
-**Padrão aplicado:** database-per-service. Cada serviço é dono dos seus dados e só conversa com os outros via HTTP.
+**Padrão aplicado:** database-per-service. Cada serviço é dono dos seus dados e só conversa com os outros via HTTP ou pelo stream do Redis.
 
 ## Serviços
 
@@ -35,7 +38,8 @@ Plataforma de tarefas dividida em serviços independentes, cada um com seu próp
 | `estudo-service` | 3004 | Tentativas de resposta |
 | `questoes-service` | 3005 | Acervo de questões |
 | `postgres` | 5432 | Persistência (múltiplos bancos) |
-| `redis` | 6379 | Cache e message broker |
+| `redis` | 6379 | Message broker (stream `user-events`); ainda sem cache |
+| `nginx` | 80/443 | TLS, CORS, rate limit por IP, proxy para o gateway |
 
 ## Como rodar
 
@@ -135,12 +139,12 @@ Cada item abaixo é uma modificação real neste código. Faça na ordem.
 - Derrube só o estudo-service (`docker compose stop estudo-service`) e veja o gateway responder DOWN
 - Entre num container: `docker compose exec postgres psql -U postgres auth_db`
 
-**2. Comunicação entre serviços**
-- Hoje user-service, estudo-service e questoes-service chamam auth-service em *toda* requisição para validar o token. Isso é um gargalo e um ponto único de falha. Substitua por validação local da assinatura JWT.
-- Depois compare: quando validação centralizada faz sentido? (revogação de token)
+**2. Comunicação entre serviços** — ✅ FEITO
+- user-service, estudo-service e questoes-service validam a assinatura do JWT localmente (`verifyToken` em cada `app.js`), sem chamar o auth-service a cada requisição.
+- Ainda vale comparar: quando validação centralizada faz sentido? (revogação de token — hoje um JWT emitido vale até expirar)
 
 **3. Cache com Redis**
-- O Redis está no compose mas nenhum serviço usa. Adicione cache de perfil no user-service.
+- O Redis só é usado para o stream de eventos; nenhum serviço faz cache. Adicione cache de perfil no user-service.
 - Resolva a invalidação: o que acontece com o cache quando o perfil é atualizado?
 
 **4. Eventos assíncronos** — ✅ FEITO
@@ -184,11 +188,11 @@ docker compose exec <serviço> sh   # shell no container
 ## Verificar um backup
 
 Os dumps ficam em `backups/`. Para testar um arquivo sem tocar nos bancos de
-produção, execute o verificador dentro de um container PostgreSQL com acesso
-ao servidor:
+produção, execute o verificador dentro do container de backup (na VM, com o
+compose de produção, que é o único que monta a pasta `scripts/` em `/scripts`):
 
 ```bash
-docker compose exec -T backup sh /scripts/verify-backup.sh \
+docker compose -f docker-compose.prod.yml exec -T backup sh /scripts/verify-backup.sh \
   /backups/auth_db-YYYYmmdd-HHMMSS.sql.gz
 ```
 

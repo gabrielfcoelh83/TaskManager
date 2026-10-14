@@ -1,4 +1,4 @@
-# Compose de produção: consome as imagens publicadas no Docker Hub pelo
+# Compose de produção: consome as imagens publicadas no GHCR (ghcr.io) pelo
 # workflow de CI/CD, em vez de buildar a partir do código-fonte.
 # As variáveis vêm do .env gerado na VM a cada deploy (nunca commitado).
 # Nome fixo: sem isso o Compose deriva o projeto do nome da pasta, e mudar
@@ -167,7 +167,7 @@ services:
     networks:
       - microservices-network
 
-  # Backup diário dos três bancos. Fica no mesmo host do Postgres, o que
+  # Backup diário dos quatro bancos. Fica no mesmo host do Postgres, o que
   # protege contra erro humano e corrupção lógica — mas não contra perda da
   # VM. Cópia fora da máquina continua sendo o passo seguinte.
   backup:
