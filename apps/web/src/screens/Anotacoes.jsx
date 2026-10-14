@@ -84,12 +84,12 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
     });
   };
 
-  const campoInvisivel = { border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit' };
+  const campoInvisivel = { border: 'none', background: 'transparent', fontFamily: 'inherit' };
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 1.3fr', gap: 16, alignItems: 'start' }}>
       <div style={{ ...s.card, padding: 14 }}>
-        <div style={{ ...s.sectionTitle, fontSize: 13.5 }}>Pastas</div>
+        <h2 style={{ ...s.sectionTitle, fontSize: 13.5 }}>Pastas</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 10 }}>
           {pastas.map((f) => {
             const quantas = f === 'Todas' ? itens.length : itens.filter((n) => (n.disciplina || SEM_DISCIPLINA) === f).length;
@@ -120,7 +120,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
 
       <div style={{ ...s.card, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ ...s.sectionTitle, fontSize: 13.5 }}>Minhas anotações ({visiveis.length})</div>
+          <h2 style={{ ...s.sectionTitle, fontSize: 13.5 }}>Minhas anotações ({visiveis.length})</h2>
           <button data-testid="nova-anotacao" style={{ ...s.btnPrimary, padding: '6px 12px', fontSize: 12 }} onClick={novaNota}>+ Nova</button>
         </div>
 
@@ -156,6 +156,8 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <input
+                aria-label="Título da anotação"
+                className="foco-visivel"
                 style={{ ...campoInvisivel, fontSize: 19, fontWeight: 700, color: '#1c1b19', width: '100%' }}
                 value={ativa.titulo}
                 onChange={(e) => editar(ativa.id, 'titulo', e.target.value)}
@@ -173,6 +175,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
 
             <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
               <select
+                aria-label="Disciplina da anotação"
                 value={ativa.disciplina || SEM_DISCIPLINA}
                 onChange={(e) => editar(ativa.id, 'disciplina', e.target.value)}
                 style={{ fontSize: 11.5, border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, padding: '4px 10px', color: '#4f4b45', background: '#fff' }}
@@ -183,6 +186,7 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
               </select>
 
               <select
+                aria-label="Etiqueta da anotação"
                 value={ativa.tag}
                 onChange={(e) => editar(ativa.id, 'tag', e.target.value)}
                 style={{ ...tagStyle(ativa.tag), border: 'none', padding: '4px 10px', cursor: 'pointer' }}
@@ -196,7 +200,9 @@ export default function Anotacoes({ theme, s, notas, setNotas, disciplinas }) {
             </div>
 
             <textarea
-              style={{ width: '100%', minHeight: 420, marginTop: 18, border: 'none', outline: 'none', resize: 'vertical', fontSize: 14, lineHeight: 1.7, color: '#3a3540', fontFamily: 'inherit' }}
+              aria-label="Conteúdo da anotação"
+              className="foco-visivel"
+              style={{ width: '100%', minHeight: 420, marginTop: 18, border: 'none', resize: 'vertical', fontSize: 14, lineHeight: 1.7, color: '#3a3540', fontFamily: 'inherit' }}
               value={ativa.conteudo}
               onChange={(e) => editar(ativa.id, 'conteudo', e.target.value)}
               placeholder="Escreva aqui…"

@@ -7,7 +7,7 @@ export default function Favoritos({ theme, s, toggleFavorito, revisao, revisarQu
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ ...s.card, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <div style={s.sectionTitle}><Icon name="star" color={theme.primary} size={20} />Suas questões favoritas</div>
+          <h2 style={s.sectionTitle}><Icon name="star" color={theme.primary} size={20} />Suas questões favoritas</h2>
           <div style={{ fontSize: 13, color: '#7a766f', marginTop: 4 }}>
             {favoritas.length > 0
               ? `${favoritas.length} ${favoritas.length === 1 ? 'questão marcada' : 'questões marcadas'} · guardadas neste navegador`

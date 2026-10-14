@@ -289,6 +289,13 @@ function paraFormatoLocal(linha) {
     // do localStorage de um jeito difícil de rastrear.
     tipo: linha.tipo ?? null,
     certeza: linha.certeza ?? null,
+    // Motivo do erro, anotado no Caderno de Erros (migration 005 do
+    // estudo-service). Mesmo `?? null`, pelo mesmo motivo: servidor anterior
+    // à migration não manda as chaves.
+    motivo: linha.motivo ?? null,
+    motivo_nota: linha.motivo_nota ?? null,
+    // De onde veio (migration 007); nula nas tentativas anteriores a ela.
+    origem: linha.origem ?? null,
   };
 }
 
@@ -436,7 +443,7 @@ export async function listarQuestoes(filtros = {}) {
   return acervo;
 }
 
-export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg }) {
+export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg, origem }) {
   const linha = await req('/api/tentativas', {
     method: 'POST',
     body: {
@@ -446,6 +453,26 @@ export async function registrarTentativa({ questaoId, correta, alternativa, temp
       correta: correta === true,
       alternativa: Number.isInteger(alternativa) ? alternativa : null,
       tempo_seg: Number.isInteger(tempoSeg) && tempoSeg >= 0 ? tempoSeg : null,
+      // 'quiz', 'simulado' ou 'revisao' (migration 007). Servidor anterior a
+      // ela ignora o campo, então mandar sempre é seguro.
+      origem: origem || null,
+    },
+  });
+
+  return paraFormatoLocal(linha);
+}
+
+/**
+ * Anota por que a pessoa errou. É PATCH sobre a tentativa já gravada: o
+ * motivo chega na revisão, às vezes dias depois do erro. `null` limpa.
+ */
+export async function anotarMotivoDoErro({ tentativaId, motivo, nota }) {
+  const linha = await req(`/api/tentativas/${encodeURIComponent(tentativaId)}`, {
+    method: 'PATCH',
+    body: {
+      motivo: motivo || null,
+      // O serviço recusa texto só de espaços; vazio aqui quer dizer "sem nota".
+      motivo_nota: nota && nota.trim() ? nota.trim() : null,
     },
   });
 

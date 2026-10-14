@@ -69,13 +69,14 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
 
         {tipo === 'disciplina' && (
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#1c1b19' }}>Disciplina</div>
+            <label htmlFor="simulado-disciplina" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#1c1b19' }}>Disciplina</label>
             {opcoes.length === 0 ? (
               <div style={{ fontSize: 12.5, color: '#7a766f', lineHeight: 1.5 }}>
                 As questões do acervo ainda não foram separadas por matéria. O simulado geral já usa todas.
               </div>
             ) : (
               <select
+                id="simulado-disciplina"
                 data-testid="disciplina-simulado"
                 value={disciplina || ''}
                 onChange={(e) => setDisciplina(e.target.value || null)}
@@ -91,8 +92,9 @@ export default function ConfigSimulado({ theme, s, onConfirm, disciplinas = [], 
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: '#f8f7f3', borderRadius: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1b19' }}>Qtd. Questões:</div>
+          <label htmlFor="simulado-quantidade" style={{ fontSize: 13, fontWeight: 600, color: '#1c1b19' }}>Qtd. Questões:</label>
           <select
+            id="simulado-quantidade"
             data-testid="qtd-questoes"
             value={quantidade}
             onChange={(e) => setQuantidade(parseInt(e.target.value, 10))}

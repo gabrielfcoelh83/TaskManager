@@ -80,16 +80,22 @@ const Link001 = ({
     </a>
   );
 };
+// `as="button"`: o mesmo visual para o que troca de tela sem URL (o app não
+// tem rotas). <a href="#"> ali era link que não leva a lugar nenhum.
 const Link002 = ({
   children,
   href,
   className,
+  as: Tag = "a",
   ...props
 }) => {
+  const doBotao = Tag === "button"
+    ? { type: "button", style: { background: "none", border: "none", padding: 0, font: "inherit", ...props.style } }
+    : { href };
   return (
-    <a
-      href={href}
+    <Tag
       {...props}
+      {...doBotao}
       className={cn(
         "group relative flex items-center",
         className,
@@ -115,7 +121,7 @@ const Link002 = ({
           strokeLinejoin="round"
         ></path>
       </svg>
-    </a>
+    </Tag>
   );
 };
 const Link003 = ({

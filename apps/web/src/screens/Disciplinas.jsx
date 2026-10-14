@@ -168,7 +168,7 @@ export default function Disciplinas({ theme, s, data, disc, setDisc, disciplinas
         </div>
       )}
 
-      <div style={{ ...s.sectionTitle, marginTop: 22 }}>Temas</div>
+      <h2 style={{ ...s.sectionTitle, marginTop: 22 }}>Temas</h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
         {temas.map((t) => (
           <div key={t.nome} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 14px', background: '#faf9f6', borderRadius: 12, flexWrap: 'wrap' }}>

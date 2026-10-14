@@ -256,3 +256,17 @@ button:not(:disabled):active {
     background: rgba(28, 27, 25, 0.04);
   }
 }
+
+/* --- Foco visível onde o estilo inline tirava o contorno ---------------- */
+
+/* Gráfico focável e campos "invisíveis" (sem borda) das anotações: sem isto,
+   quem navega por Tab chegava neles sem ver onde estava. `:focus-visible` e
+   não `:focus` — o clique de mouse no gráfico não acende o anel. */
+.foco-visivel:focus {
+  outline: none;
+}
+.foco-visivel:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 6px;
+}

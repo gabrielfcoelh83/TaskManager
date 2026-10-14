@@ -63,6 +63,24 @@ export function corrigirSimulado(questoes = [], respostas = {}) {
   };
 }
 
+// O que vai para o servidor ao finalizar: TODAS as questões da prova, as em
+// branco inclusive — como erradas e sem alternativa, que o servidor lê como
+// "não respondeu". `tempoSeg` nulo porque o cronômetro é da prova inteira, e
+// dividir o total por questão inventaria um tempo que ninguém mediu.
+export function respostasParaRegistrar(questoes = [], respostas = {}) {
+  return questoes.map((q) => {
+    const marcada = respostas[q.id];
+    const emBranco = marcada === undefined || marcada === null;
+    return {
+      questaoId: q.id,
+      correta: !emBranco && marcada === q.correta,
+      alternativa: emBranco ? null : marcada,
+      tempoSeg: null,
+      origem: 'simulado',
+    };
+  });
+}
+
 // Situação de uma questão na revisão do resultado.
 export function situacaoDaResposta(q, respostas = {}) {
   const r = respostas[q.id];

@@ -40,7 +40,7 @@ export default function Configuracoes({
     ancoraUsada?.();
   }, [ancora, ancoraUsada, perfil]);
 
-  const label = { fontSize: 12, color: '#7a766f', marginBottom: 5 };
+  const label = { display: 'block', fontSize: 12, color: '#7a766f', marginBottom: 5 };
   const input = { width: '100%', fontSize: 13.5, border: '1px solid rgba(0,0,0,.1)', borderRadius: 9, padding: '9px 12px', color: '#1c1b19', fontFamily: 'inherit' };
 
   const salvarNome = async () => {
@@ -57,12 +57,13 @@ export default function Configuracoes({
   return (
     <div style={{ maxWidth: 620, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={s.card}>
-        <div style={s.sectionTitle}>Perfil</div>
+        <h2 style={s.sectionTitle}>Perfil</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
           <div>
-            <div style={label}>Nome</div>
+            <label htmlFor="config-nome" style={label}>Nome</label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
+                id="config-nome"
                 data-testid="campo-nome-perfil"
                 style={input}
                 value={nomeLocal}
@@ -87,8 +88,8 @@ export default function Configuracoes({
           </div>
 
           <div>
-            <div style={label}>E-mail</div>
-            <input style={{ ...input, background: '#faf9f6', color: '#7a766f' }} value={perfil?.email || ''} readOnly />
+            <label htmlFor="config-email" style={label}>E-mail</label>
+            <input id="config-email" style={{ ...input, background: '#faf9f6', color: '#7a766f' }} value={perfil?.email || ''} readOnly />
             {/* Editar aqui mudaria só o cadastro do user-service; o login
                 continua sendo o e-mail guardado pelo auth-service. Um campo
                 editável prometeria uma troca de e-mail que não acontece. */}
@@ -100,11 +101,12 @@ export default function Configuracoes({
       </div>
 
       <div style={s.card}>
-        <div style={s.sectionTitle}>Seu estudo</div>
+        <h2 style={s.sectionTitle}>Seu estudo</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
           <div>
-            <div style={label}>Meta diária de questões</div>
+            <label htmlFor="config-meta" style={label}>Meta diária de questões</label>
             <input
+              id="config-meta"
               data-testid="campo-meta"
               style={input}
               type="number"
@@ -122,8 +124,9 @@ export default function Configuracoes({
           </div>
 
           <div>
-            <div style={label}>Data da sua prova</div>
+            <label htmlFor="config-data-prova" style={label}>Data da sua prova</label>
             <input
+              id="config-data-prova"
               data-testid="campo-data-prova"
               style={input}
               type="date"
@@ -154,7 +157,7 @@ export default function Configuracoes({
       />
 
       <div style={s.card}>
-        <div style={s.sectionTitle}>Aparência</div>
+        <h2 style={s.sectionTitle}>Aparência</h2>
         <div style={{ fontSize: 12.5, color: '#7a766f', marginTop: 4 }}>
           Escolha a paleta de cores. Fica guardada neste navegador.
         </div>
@@ -206,7 +209,7 @@ export default function Configuracoes({
       </div>
 
       <div style={s.card}>
-        <div style={s.sectionTitle}>Avisos</div>
+        <h2 style={s.sectionTitle}>Avisos</h2>
         <div style={{ fontSize: 12.5, color: '#7a766f', marginTop: 8, lineHeight: 1.6 }}>
           O sino no topo mostra o que está pendente agora: meta do dia, questões
           erradas esperando revisão e a contagem para a prova. São calculados na

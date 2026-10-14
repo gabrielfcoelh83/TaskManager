@@ -101,8 +101,8 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, alignItems: 'start' }}>
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}><Icon name="calendar" color={theme.primary} size={20} />Hoje</div>
-            <Link002 href="#" onClick={(e) => { e.preventDefault(); go('cronograma'); }} style={s.link}>Ver a semana</Link002>
+            <h2 style={s.sectionTitle}><Icon name="calendar" color={theme.primary} size={20} />Hoje</h2>
+            <Link002 as="button" onClick={() => go('cronograma')} style={s.link}>Ver a semana</Link002>
           </div>
           <div style={{ marginTop: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#4f4b45', marginBottom: 8 }}>
@@ -149,8 +149,9 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
 
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}>Simulados</div>
+            <h2 style={s.sectionTitle}>Simulados</h2>
             <select
+              aria-label="Período dos simulados"
               style={{ fontSize: 12, border: '1px solid rgba(0,0,0,.08)', borderRadius: 8, padding: '5px 8px', color: '#4f4b45', background: '#fff' }}
               value={period}
               onChange={(e) => setDash({ period: e.target.value })}
@@ -200,8 +201,8 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
       {/* Evolução dos estudos — por disciplina */}
       <div style={s.card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={s.sectionTitle}>Evolução dos estudos <span style={{ fontSize: 12, fontWeight: 400, color: '#7a766f' }}>· por disciplina</span></div>
-          <Link002 href="#" onClick={(e) => { e.preventDefault(); go('desempenho'); }} style={s.link}>Ver mais</Link002>
+          <h2 style={s.sectionTitle}>Evolução dos estudos <span style={{ fontSize: 12, fontWeight: 400, color: '#7a766f' }}>· por disciplina</span></h2>
+          <Link002 as="button" onClick={() => go('desempenho')} style={s.link}>Ver mais</Link002>
         </div>
         {evolucao.length ? (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${evolucao.length}, 1fr)`, gap: 16, marginTop: 16 }}>
@@ -236,7 +237,7 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}>Matérias mais estudadas</div><Link002 href="#" onClick={(e) => { e.preventDefault(); go('disciplinas'); }} style={s.link}>ver todas</Link002>
+            <h2 style={s.sectionTitle}>Matérias mais estudadas</h2><Link002 as="button" onClick={() => go('disciplinas')} style={s.link}>ver todas</Link002>
           </div>
           {maisEstudadas.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
@@ -256,7 +257,7 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
         </div>
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={s.sectionTitle}>Menor desempenho</div><Link002 href="#" onClick={(e) => { e.preventDefault(); go('desempenho'); }} style={s.link}>ver todas</Link002>
+            <h2 style={s.sectionTitle}>Menor desempenho</h2><Link002 as="button" onClick={() => go('desempenho')} style={s.link}>ver todas</Link002>
           </div>
           {piores.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
@@ -279,8 +280,8 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
       {/* Desempenho completo — todas as disciplinas DO ACERVO */}
       <div style={s.card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={s.sectionTitle}>Desempenho completo</div>
-          <Link002 href="#" onClick={(e) => { e.preventDefault(); go('desempenho'); }} style={s.link}>Abrir análise</Link002>
+          <h2 id="titulo-desempenho-completo" style={s.sectionTitle}>Desempenho completo</h2>
+          <Link002 as="button" onClick={() => go('desempenho')} style={s.link}>Abrir análise</Link002>
         </div>
         {(disciplinas || []).length === 0 ? (
           <EmptyHint>
@@ -290,15 +291,15 @@ export default function Dashboard({ theme, s, data, go, dash, setDash, config, u
           </EmptyHint>
         ) : (
           <div style={{ overflowX: 'auto', marginTop: 12 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table aria-labelledby="titulo-desempenho-completo" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: '#7a766f', fontSize: 11.5 }}>
-                  <th style={{ padding: '8px 10px', fontWeight: 600 }}>Disciplina</th>
-                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>No acervo</th>
-                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Respondidas</th>
-                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Acertos</th>
-                  <th style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>% Acerto</th>
-                  <th style={{ padding: '8px 10px', fontWeight: 600 }}>Status</th>
+                  <th scope="col" style={{ padding: '8px 10px', fontWeight: 600 }}>Disciplina</th>
+                  <th scope="col" style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>No acervo</th>
+                  <th scope="col" style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Respondidas</th>
+                  <th scope="col" style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>Acertos</th>
+                  <th scope="col" style={{ padding: '8px 10px', fontWeight: 600, textAlign: 'right' }}>% Acerto</th>
+                  <th scope="col" style={{ padding: '8px 10px', fontWeight: 600 }}>Status</th>
                 </tr>
               </thead>
               <tbody>

@@ -11,10 +11,28 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose -f docker-compose.e2e.yml"
 PORTA="${GATEWAY_PORT:-3000}"
 EMAIL="${E2E_EMAIL:-maria.lais@email.com}"
 SENHA="${E2E_SENHA:-senha-de-teste-123}"
+
+# O compose exige o segredo e não tem valor padrão de propósito (nenhum segredo
+# fixo no repo). O CI gera um por execução; fora dele, gera-se aqui e fica
+# guardado para a próxima subida — trocar o segredo a cada execução recriaria
+# os containers à toa. Vem antes do `down` porque o compose interpola o
+# arquivo inteiro até para derrubar.
+#
+# Vai por `--env-file`, e não só pelo ambiente: no WSL o `docker` costuma ser
+# o docker.exe do Docker Desktop, e variável exportada no Linux não chega ao
+# processo do Windows. O arquivo, ele lê pelo caminho relativo.
+# `.env.e2e.local` cai no `*.local` do .gitignore.
+ENV_E2E=.env.e2e.local
+if [ -z "${E2E_JWT_SECRET:-}" ] && [ -f "$ENV_E2E" ]; then
+  E2E_JWT_SECRET=$(sed -n 's/^E2E_JWT_SECRET=//p' "$ENV_E2E")
+fi
+export E2E_JWT_SECRET="${E2E_JWT_SECRET:-$(openssl rand -hex 32)}"
+printf 'E2E_JWT_SECRET=%s\n' "$E2E_JWT_SECRET" > "$ENV_E2E"
+
+COMPOSE="docker compose --env-file $ENV_E2E -f docker-compose.e2e.yml"
 
 if [ "${1:-up}" = "down" ]; then
   # -v porque o banco tem de nascer vazio na próxima subida: é o que garante

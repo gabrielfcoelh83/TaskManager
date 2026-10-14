@@ -61,7 +61,7 @@ export default function Desempenho({ theme, s, perf, setPerf, usuarioTentativas,
       {fracas.length > 0 && (
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-            <div style={s.sectionTitle}><Icon name="trending-down" color="#B4413A" size={18} />Onde você mais perde ponto</div>
+            <h2 style={s.sectionTitle}><Icon name="trending-down" color="#B4413A" size={18} />Onde você mais perde ponto</h2>
             {revisao?.errei?.length > 0 && (
               <button
                 style={s.btnOutline}
@@ -93,7 +93,7 @@ export default function Desempenho({ theme, s, perf, setPerf, usuarioTentativas,
 
       {dominadas.length > 0 && (
         <div style={s.card}>
-          <div style={s.sectionTitle}><Icon name="trending-up" color="#4A7A4A" size={18} />Você domina {dominadas.length} {dominadas.length === 1 ? 'disciplina' : 'disciplinas'}</div>
+          <h2 style={s.sectionTitle}><Icon name="trending-up" color="#4A7A4A" size={18} />Você domina {dominadas.length} {dominadas.length === 1 ? 'disciplina' : 'disciplinas'}</h2>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
             {dominadas.sort((a, b) => b.pct - a.pct).map((d) => (
               <span key={d.nome} style={s.pill('#E4EEE1', '#355E35')}>{d.nome} · {d.pct}%</span>
@@ -104,7 +104,7 @@ export default function Desempenho({ theme, s, perf, setPerf, usuarioTentativas,
 
       <div style={s.card}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={s.sectionTitle}>Evolução da taxa de acertos</div>
+          <h2 style={s.sectionTitle}>Evolução da taxa de acertos</h2>
           <div style={{ display: 'flex', gap: 6 }}>
             {Object.keys(SEMANAS).map((p) => (
               <button
@@ -143,7 +143,7 @@ export default function Desempenho({ theme, s, perf, setPerf, usuarioTentativas,
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
         <div style={s.card}>
-          <div style={s.sectionTitle}>Acertos e erros por disciplina</div>
+          <h2 style={s.sectionTitle}>Acertos e erros por disciplina</h2>
           {comAtividade.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
               {[...comAtividade].sort((a, b) => b.tentativas - a.tentativas).map((d) => (
@@ -165,7 +165,7 @@ export default function Desempenho({ theme, s, perf, setPerf, usuarioTentativas,
         </div>
 
         <div style={s.card}>
-          <div style={s.sectionTitle}>Tempo médio por questão</div>
+          <h2 style={s.sectionTitle}>Tempo médio por questão</h2>
           {tempos.length ? (
             <>
               <div style={{ marginTop: 16 }}>

@@ -1,6 +1,7 @@
 # Arquitetura do Frontend - MlDireito
 
-SPA em React 18 + Vite, publicada na Vercel. Não usa React Router nem
+SPA em React 19 + Vite, publicada na Vercel, em migração gradual para
+TypeScript (ver "Convenções"). Não usa React Router nem
 biblioteca de estado: a navegação é um campo do estado (`state.screen`) e tudo
 desce de `App.jsx` por props.
 
@@ -310,6 +311,21 @@ linha própria no proxy do Vite):
 - **Desconectar** pede confirmação na própria tela ("Sim, desconectar" /
   "Cancelar") e mostra o erro se o DELETE falhar.
 
+### Revisões (Caderno de Erros)
+
+Na aba "Errei", cada erro pode receber um motivo opcional ("Por que errei?"):
+os valores de `MOTIVOS_DO_ERRO` (`lib/revisao.js`) mais uma nota livre. O
+motivo é gravado na **última** tentativa (a errada) por `anotarMotivoDoErro`,
+e `substituirTentativa` (`lib/historico.js`) troca a tentativa no estado sem
+mexer na ordem do histórico. Acrescentar, em vez de trocar, mudaria qual é a
+"última tentativa". `classificarRevisao` conta `errosSemMotivo` para o
+lembrete da tela. Errar de novo gera tentativa nova, sem motivo.
+
+O simulado registra **todas** as questões da prova
+(`respostasParaRegistrar`, `lib/simulado.js`): as em branco vão como erradas
+e sem alternativa, para chegarem ao Caderno de Erros. A taxa de acerto de
+quem deixa muitas em branco cai, e essa queda é real.
+
 ### Ficha de boas-vindas
 
 Toda conta preenche um perfil de estudo curto antes de usar o app — conta
@@ -567,7 +583,8 @@ erro do acervo aparece na própria tela de Questões, com botão de recarregar.
 | `entrarComGoogle` | `POST /api/auth/google` | manda o ID token do Google; o auth-service confere e devolve o JWT da plataforma, criando a conta na primeira vez |
 | `buscarPerfil`, `salvarPerfil` | `GET`/`PUT /api/users/:id` | nome e `profile_data` (o PUT mescla no 1º nível: mande só as chaves que mudaram, pela fila de preferências); o GET tem 10 s de prazo |
 | `listarTentativas` → `buscarPaginaDeTentativas` | `GET /api/tentativas?limite=1000&paginado=1[&offset=N]` | percorre as páginas até somar `total` (`percorrerPaginas`, teto de 50 páginas; passando dele, a lista vem cortada e o aviso vai só para o console), descarta repetidas pelo id, aceita o formato antigo (array) e agrupa por questão, em ordem cronológica. No `App`, a carga é mesclada com o que foi respondido enquanto ela corria (`mesclarTentativas`) |
-| `registrarTentativa` | `POST /api/tentativas` | |
+| `registrarTentativa` | `POST /api/tentativas` | manda `origem` (`'quiz'`, `'simulado'`; migration 007 do estudo-service); servidor anterior a ela ignora o campo |
+| `anotarMotivoDoErro` | `PATCH /api/tentativas/:id` | `{motivo, motivo_nota}` (migration 005); `null` limpa; nota até 280 caracteres, motivo até 40 |
 | `listarDiscursivas(area)` | `GET /api/discursivas?area=civil` | `[{id, exame, numero, area, resumo}]`; 404 (gateway sem a rota) vira acervo vazio na tela |
 | `buscarDiscursiva(id)` | `GET /api/discursivas/:id` | enunciado, `fonte` e `itens: [{letra, pergunta, valor, gabarito, distribuicao?}]`; item sem letra é descartado |
 | `salvarRespostaDiscursiva` | `POST /api/discursivas/respostas` | `{questao_id, respostas: {A: '…'}, fundamentos: {citados, esperados}}`; até 6000 caracteres por item, e `fundamentos` só com esses dois inteiros |
@@ -779,7 +796,10 @@ mostrou um dia a menos no Brasil com a CI verde.
 3. Biblioteca de componentes de interface (botão, card, modal, abas, etc.) no
    lugar dos estilos inline repetidos.
 4. Quebrar as telas maiores (`Questoes`, `Simulados`, `Dashboard`).
-5. TypeScript nas props e validação das respostas da API.
+5. TypeScript nas props e validação das respostas da API. A base já está
+   pronta (`tsconfig.json`, `npm run typecheck`, `typescript-eslint`); falta
+   converter os arquivos. `src/lib/` espera a CI sair do Node 20, que não
+   executa `.ts` nos testes de lib.
 6. Testes de componente, além dos unitários e do e2e que já existem.
 
 ---
@@ -789,6 +809,9 @@ mostrou um dia a menos no Brasil com a CI verde.
 - **Componentes:** PascalCase (`ConfigSimulado.jsx`)
 - **Funções:** camelCase, em português (`montarDisciplinas`, `embaralhar`)
 - **Constantes:** UPPER_SNAKE_CASE (`DEFAULT_STATE`, `THEMES`)
+- **TypeScript gradual:** componente ou tela nova em `.tsx` (strict, checado
+  por `npm run typecheck`); `.js/.jsx` existentes não são checados até serem
+  convertidos. Em `lib/`, continue em `.js` enquanto a CI usar Node 20.
 - **Lógica nova** vai para `lib/` como função pura, com teste em `tests/`.
 - **Dado que é do servidor** não entra em `state` nem no localStorage.
 - **Comentários** explicam o porquê — o bug que a linha evita — e não o quê.
