@@ -210,7 +210,7 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
         {!erroAcervo && (
           <div>
             <div style={{ margin: '12px 0 0', paddingBottom: 10, borderBottom: '1px solid #e6e2da', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-              <div style={{ ...s.pageTitle, fontSize: 21 }}>Treino por matéria</div>
+              <h2 style={{ ...s.pageTitle, fontSize: 21 }}>Treino por matéria</h2>
               <div style={{ fontSize: 12.5, color: '#7a766f' }}>Simulado curto ou prática livre em uma disciplina</div>
             </div>
 
@@ -267,7 +267,7 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
         {/* Histórico */}
         {hist.length > 0 && (
           <div style={s.card}>
-            <div style={s.sectionTitle}><Icon name="chart-column" color={theme.primary} size={18} />Histórico de Simulados</div>
+            <h2 style={s.sectionTitle}><Icon name="chart-column" color={theme.primary} size={18} />Histórico de Simulados</h2>
             <div style={{ fontSize: 11.5, color: '#7a766f', marginTop: 6, lineHeight: 1.5 }}>
               As respostas de cada simulado entram no seu histórico no servidor
               e contam no desempenho por disciplina. Já a nota final da prova
@@ -468,7 +468,7 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
 
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div style={s.sectionTitle}><Icon name="clipboard-list" color={theme.primary} size={18} />Revisão do simulado</div>
+            <h2 style={s.sectionTitle}><Icon name="clipboard-list" color={theme.primary} size={18} />Revisão do simulado</h2>
             <div style={{ display: 'flex', gap: 6 }}>
               {[['todas', 'Todas'], ['erradas', 'Erradas e em branco']].map(([k, rotulo]) => (
                 <button

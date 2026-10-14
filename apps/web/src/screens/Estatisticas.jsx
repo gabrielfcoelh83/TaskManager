@@ -66,16 +66,16 @@ export default function Estatisticas({ theme, s, data, filtros, setFiltros, usua
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ ...s.card, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'end' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <div style={{ fontSize: 11.5, color: '#7a766f' }}>Período</div>
-          <select style={seletor} value={filtros.range} onChange={(e) => setFiltros({ range: e.target.value })}>
+          <label htmlFor="estat-periodo" style={{ fontSize: 11.5, color: '#7a766f' }}>Período</label>
+          <select id="estat-periodo" style={seletor} value={filtros.range} onChange={(e) => setFiltros({ range: e.target.value })}>
             <option value="7d">Últimos 7 dias</option>
             <option value="30d">Últimos 30 dias</option>
             <option value="all">Desde o início</option>
           </select>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <div style={{ fontSize: 11.5, color: '#7a766f' }}>Disciplina</div>
-          <select style={seletor} value={filtros.disc} onChange={(e) => setFiltros({ disc: e.target.value })}>
+          <label htmlFor="estat-disciplina" style={{ fontSize: 11.5, color: '#7a766f' }}>Disciplina</label>
+          <select id="estat-disciplina" style={seletor} value={filtros.disc} onChange={(e) => setFiltros({ disc: e.target.value })}>
             {['Todas', ...lista.map((d) => d.nome)].map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
@@ -105,7 +105,7 @@ export default function Estatisticas({ theme, s, data, filtros, setFiltros, usua
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
         <div style={s.card}>
-          <div style={s.sectionTitle}>Cobertura do acervo</div>
+          <h2 style={s.sectionTitle}>Cobertura do acervo</h2>
           <div style={{ fontSize: 12, color: '#7a766f', marginTop: 4 }}>
             Questões distintas que você já respondeu ao menos uma vez.
           </div>
@@ -130,7 +130,7 @@ export default function Estatisticas({ theme, s, data, filtros, setFiltros, usua
         </div>
 
         <div style={s.card}>
-          <div style={s.sectionTitle}>Onde você mais respondeu</div>
+          <h2 style={s.sectionTitle}>Onde você mais respondeu</h2>
           {porDisciplina.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: 16 }}>
               {porDisciplina.map((d) => (

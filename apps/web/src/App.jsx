@@ -879,7 +879,14 @@ export default function App() {
       }}
     >
       <span>{erroSync}</span>
-      <span onClick={() => setErroSync(null)} style={{ fontWeight: 700, cursor: 'pointer' }}>×</span>
+      <button
+        type="button"
+        aria-label="Fechar aviso"
+        onClick={() => setErroSync(null)}
+        style={{ fontWeight: 700, background: 'none', border: 'none', padding: '0 4px', color: 'inherit', fontSize: 'inherit' }}
+      >
+        ×
+      </button>
     </div>
   );
 
@@ -904,54 +911,59 @@ export default function App() {
     if (estreita) {
       return (
         <div style={{ ...s.app, flexDirection: 'column' }}>
-          <div style={{ flex: 'none', background: '#fff', borderBottom: '1px solid #e6e2da', padding: '12px 14px', display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+          <header style={{ flex: 'none', background: '#fff', borderBottom: '1px solid #e6e2da', padding: '12px 14px', display: 'flex', alignItems: 'flex-end', gap: 12 }}>
             <SeletorDeFase theme={theme} s={s} fase={fase} onTrocar={trocarFase} compacto />
             <div style={{ display: 'flex', alignItems: 'center', flex: 'none', paddingBottom: 2 }}>
               {menuDaConta(false, 'end')}
             </div>
-          </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 14px 28px' }}>
-            <div style={{ ...s.pageTitle, fontSize: 19 }}>{fase.titulo}</div>
+          </header>
+          <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 14px 28px' }}>
+            <h1 style={{ ...s.pageTitle, fontSize: 19 }}>{fase.titulo}</h1>
             <div style={{ ...s.pageSub, marginBottom: 14 }}>{fase.sub}</div>
             {faixaDeErro}
             {segundaFase}
-          </div>
+          </main>
         </div>
       );
     }
 
     return (
       <div style={s.app}>
-        <div style={s.sidebar}>
+        {/* Mesmas tags, na mesma posição, do layout da 1ª fase (aside > …,
+            div > header + main): ao trocar de fase o React reaproveita os nós
+            em vez de remontar a subárvore. */}
+        <aside style={s.sidebar}>
           <SeletorDeFase theme={theme} s={s} fase={fase} onTrocar={trocarFase} />
-          <div
-            data-testid="nav-discursivas"
-            aria-current="page"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10, marginTop: 8,
-              fontSize: 13.5, fontWeight: 600, color: theme.primaryDark, background: theme.primarySoft,
-            }}
-          >
-            <Icon name="pencil" color={theme.primaryDark} size={20} />
-            <span>Questões discursivas</span>
-          </div>
+          <nav aria-label="Navegação principal" style={{ marginTop: 8 }}>
+            <div
+              data-testid="nav-discursivas"
+              aria-current="page"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10,
+                fontSize: 13.5, fontWeight: 600, color: theme.primaryDark, background: theme.primarySoft,
+              }}
+            >
+              <Icon name="pencil" color={theme.primaryDark} size={20} />
+              <span>Questões discursivas</span>
+            </div>
+          </nav>
           <div style={{ fontSize: 12, color: '#7a766f', lineHeight: 1.5, padding: '8px 12px 0' }}>
             As 4 questões de cada exame, com o padrão de resposta oficial da FGV. A peça não entra.
           </div>
           {linhaDoPerfil}
-        </div>
+        </aside>
 
         <div style={s.main}>
-          <div style={s.topbar}>
+          <header style={s.topbar}>
             <div>
-              <div style={s.pageTitle}>{fase.titulo}</div>
+              <h1 style={s.pageTitle}>{fase.titulo}</h1>
               <div style={s.pageSub}>{fase.sub}</div>
             </div>
-          </div>
-          <div style={s.content}>
+          </header>
+          <main style={s.content}>
             {faixaDeErro}
             {segundaFase}
-          </div>
+          </main>
         </div>
       </div>
     );
@@ -1072,6 +1084,9 @@ export default function App() {
         fontSize: 13.5, fontWeight: active ? 600 : 500, cursor: 'pointer',
         color: active ? theme.primaryDark : '#4f4b45',
         background: active ? theme.primarySoft : 'transparent',
+        // É <button> (Tab e Enter de graça); sem preflight ele viria com borda,
+        // fundo cinza e largura do conteúdo do navegador.
+        border: 'none', width: '100%', textAlign: 'left',
       },
     };
   });
@@ -1086,7 +1101,7 @@ export default function App() {
 
   return (
     <div style={s.app}>
-      <div data-testid="barra-lateral" data-recolhida={recolhida ? 'sim' : 'nao'} style={{ ...s.sidebar, width: recolhida ? 72 : 232, overflowX: 'hidden' }}>
+      <aside data-testid="barra-lateral" data-recolhida={recolhida ? 'sim' : 'nao'} style={{ ...s.sidebar, width: recolhida ? 72 : 232, overflowX: 'hidden' }}>
         {/* Recolhida, a barra fica só com a marca: trocar de fase pede o
             seletor inteiro, então é preciso abrir o menu para isso. */}
         {recolhida ? (
@@ -1099,23 +1114,28 @@ export default function App() {
           <SeletorDeFase theme={theme} s={s} fase={fase} onTrocar={trocarFase} />
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
-          {navItems.map((item) => (
-            <div
-              key={item.key}
-              data-testid={`nav-${item.key}`}
-              onClick={() => goTo(item.key)}
-              style={item.style}
-              title={recolhida ? item.label : undefined}
-              aria-label={recolhida ? item.label : undefined}
-            >
-              <div style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-                <Icon name={item.icon} color={item.active ? theme.primaryDark : '#9a958d'} size={20} />
-              </div>
-              {!recolhida && <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>}
-            </div>
-          ))}
-        </div>
+        <nav aria-label="Navegação principal" style={{ marginTop: 8 }}>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {navItems.map((item) => (
+              <li key={item.key}>
+                <button
+                  type="button"
+                  data-testid={`nav-${item.key}`}
+                  onClick={() => goTo(item.key)}
+                  style={item.style}
+                  title={recolhida ? item.label : undefined}
+                  aria-label={recolhida ? item.label : undefined}
+                  aria-current={item.active ? 'page' : undefined}
+                >
+                  <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }} aria-hidden="true">
+                    <Icon name={item.icon} color={item.active ? theme.primaryDark : '#9a958d'} size={20} />
+                  </span>
+                  {!recolhida && <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
 
         {/* O "Foco de hoje" que morava aqui virou o Kepy, no canto da tela
             (components/ui/Kepy.jsx): a mesma sugestão, mais a meta, as revisões,
@@ -1146,47 +1166,62 @@ export default function App() {
           // aqui quem empurra é o botão de recolher, logo acima dela.
           cloneElement(linhaDoPerfil, { style: { ...linhaDoPerfil.props.style, marginTop: 0 } })
         )}
-      </div>
+      </aside>
 
       <div style={s.main}>
-        <div style={s.topbar}>
+        <header style={s.topbar}>
           <div>
-            <div style={s.pageTitle}>{cabecalho.title}</div>
+            <h1 style={s.pageTitle}>{cabecalho.title}</h1>
             <div style={s.pageSub}>{cabecalho.sub}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div
-              style={{ ...s.examCard, cursor: diasProva == null ? 'pointer' : 'default' }}
-              onClick={() => { if (diasProva == null) goTo('configuracoes'); }}
-            >
-              <Icon name="graduation-cap" color={theme.primary} size={20} />
-              {diasProva != null ? (
+            {/* Só é clicável sem data definida — com a contagem, é informação e
+                fica fora da ordem do Tab. */}
+            {diasProva != null ? (
+              <div style={s.examCard}>
+                <Icon name="graduation-cap" color={theme.primary} size={20} />
                 <div>
                   <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Faltam</div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: '#1c1b19' }}>{diasProva} dias</div>
                   <div style={{ fontSize: 10.5, color: '#7a766f' }}>para a prova da OAB</div>
                 </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: 11, color: theme.primary, fontWeight: 600 }}>Sua prova</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1c1b19' }}>Definir data</div>
-                  <div style={{ fontSize: 10.5, color: '#7a766f' }}>para contar os dias</div>
-                </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => goTo('configuracoes')}
+                style={{ ...s.examCard, border: 'none', textAlign: 'left', color: 'inherit', font: 'inherit' }}
+              >
+                <Icon name="graduation-cap" color={theme.primary} size={20} />
+                <span style={{ display: 'block' }}>
+                  <span style={{ display: 'block', fontSize: 11, color: theme.primary, fontWeight: 600 }}>Sua prova</span>
+                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: '#1c1b19' }}>Definir data</span>
+                  <span style={{ display: 'block', fontSize: 10.5, color: '#7a766f' }}>para contar os dias</span>
+                </span>
+              </button>
+            )}
             <div style={{ position: 'relative' }}>
-              <div data-testid="sino" style={{ ...s.bellWrap, cursor: 'pointer' }} onClick={() => setNotifOpen((v) => !v)}>
+              <button
+                type="button"
+                data-testid="sino"
+                aria-label={notificacoes.length > 0 ? `Avisos (${notificacoes.length})` : 'Avisos'}
+                aria-expanded={notifOpen}
+                aria-controls="painel-notificacoes"
+                style={{ ...s.bellWrap, border: 'none', padding: 0 }}
+                onClick={() => setNotifOpen((v) => !v)}
+              >
                 <Icon name="bell" color="#4f4b45" size={19} />
                 {notificacoes.length > 0 && (
-                  <HaloBadge tabularNums translucent={false} interactive={false} layout={false} style={{ position: 'absolute', top: -9, right: -9 }}>
+                  <HaloBadge tabularNums translucent={false} interactive={false} layout={false} aria-hidden="true" style={{ position: 'absolute', top: -9, right: -9 }}>
                     {notificacoes.length}
                   </HaloBadge>
                 )}
-              </div>
+              </button>
 
               {notifOpen && (
                 <div
                   className="entra"
+                  id="painel-notificacoes"
                   data-testid="painel-notificacoes"
                   style={{
                     position: 'absolute', right: 0, top: 48, width: 320, zIndex: 500,
@@ -1196,7 +1231,14 @@ export default function App() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1c1b19' }}>Avisos</div>
-                    <span onClick={() => setNotifOpen(false)} style={{ color: '#7a766f', cursor: 'pointer', fontWeight: 700 }}>×</span>
+                    <button
+                      type="button"
+                      aria-label="Fechar avisos"
+                      onClick={() => setNotifOpen(false)}
+                      style={{ color: '#7a766f', fontWeight: 700, background: 'none', border: 'none', padding: '0 4px', fontSize: 'inherit' }}
+                    >
+                      ×
+                    </button>
                   </div>
 
                   {notificacoes.length === 0 ? (
@@ -1215,6 +1257,7 @@ export default function App() {
                             <div style={{ fontSize: 11.5, color: '#7a766f', marginTop: 2 }}>{n.texto}</div>
                             {n.acao && (
                               <button
+                                type="button"
                                 onClick={() => { setNotifOpen(false); goTo(n.acao.ir); }}
                                 style={{ ...s.btnOutline, marginTop: 6, padding: '5px 10px', fontSize: 11.5 }}
                               >
@@ -1230,16 +1273,17 @@ export default function App() {
               )}
             </div>
           </div>
-        </div>
+        </header>
 
         {/* O dock do Kepy flutua no canto de baixo (52px de barra + 24px de
             margem). Sem este respiro no fim, o que mora no rodapé da tela —
             "Anterior"/"Próxima" do quiz, por exemplo — ficava embaixo dele,
             sem como rolar para fora.
             O `padding` vai inteiro, e não `paddingBottom` por cima do de
-            `s.content`: ao trocar de fase o React reaproveita este div, e
-            tirar só a parte de baixo de um atalho gera aviso no console. */}
-        <div style={{ ...s.content, padding: '0 32px 104px' }}>
+            `s.content`: ao trocar de fase o React reaproveita este <main> (por
+            isso a 2ª fase usa a mesma tag), e tirar só a parte de baixo de um
+            atalho gera aviso no console. */}
+        <main style={{ ...s.content, padding: '0 32px 104px' }}>
           {faixaDeErro}
           {/* `key` na tela: a entrada escalonada (`.tela` no index.css) toca a cada
               navegação e não a cada render. */}
@@ -1327,7 +1371,7 @@ export default function App() {
             />
           )}
           </div>
-        </div>
+        </main>
       </div>
 
       <Kepy

@@ -461,7 +461,11 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
               {doCartao.historicoAberto && historico?.total > 0 && <ListaDoHistorico historico={historico} id={idHistorico} />}
               <div data-testid="enunciado" style={{ fontSize: 15, color: '#1c1b19', lineHeight: 1.65, marginTop: 16, whiteSpace: 'pre-wrap' }}>{current.enunciado}</div>
 
-              <div role="radiogroup" aria-label="Alternativas" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
+              {/* Na correção o grupo é só leitura (`aria-readonly`), não desabilitado:
+                  a alternativa continua legível e clicável sem efeito. Com
+                  `aria-disabled` nos rádios, quem clica (e o Playwright) trata
+                  o elemento como inerte. */}
+              <div role="radiogroup" aria-label="Alternativas" aria-readonly={corrigindo || undefined} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
                 {alternativas.map((alt) => (
                   <div
                     key={`${current.id}-${alt.i}`}
@@ -471,8 +475,18 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
                     data-marcada={alt.marcada ? 'sim' : 'nao'}
                     role="radio"
                     aria-checked={alt.escolhida}
+                    // Não dá para ser <button>: a tesoura (BotaoRiscar) mora dentro
+                    // e botão não pode conter botão. Então o foco e o Enter/Espaço
+                    // vêm à mão; o `currentTarget` evita que Enter na tesoura,
+                    // que borbulha até aqui, marque a alternativa junto com o risco.
+                    tabIndex={alt.answered ? -1 : 0}
                     style={alt.style}
                     onClick={() => marcar(alt.i)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                      e.preventDefault();
+                      marcar(alt.i);
+                    }}
                   >
                     <div style={alt.radioStyle} />
                     <b style={{ fontSize: 13.5, color: '#7a766f', flex: 'none', opacity: alt.riscada ? 0.5 : 1 }}>{letra(alt.i)})</b>
@@ -560,7 +574,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
           <div data-testid="tela-revisao" className="entra" style={s.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ ...s.pageTitle, fontSize: 22 }}>Revise antes de finalizar</div>
+                <h2 style={{ ...s.pageTitle, fontSize: 22 }}>Revise antes de finalizar</h2>
                 <div style={{ fontSize: 13, color: '#7a766f', marginTop: 6, maxWidth: 560, lineHeight: 1.5 }}>
                   Clique numa questão para voltar a ela e mudar a resposta. O gabarito só aparece depois de finalizar.
                 </div>
@@ -638,7 +652,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
             </div>
 
             <div style={s.card}>
-              <div style={s.sectionTitle}>Gabarito</div>
+              <h2 style={s.sectionTitle}>Gabarito</h2>
               <ol style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, display: 'flex', flexDirection: 'column', borderTop: '1px solid #eeebe5' }}>
                 {quest.quiz.map((q, pos) => {
                   const dada = conferidas[pos];

@@ -125,10 +125,10 @@ export function LineChart({
       {largura > 0 && (
         <svg
           width={w} height={height} viewBox={`0 0 ${w} ${height}`}
-          role="img" aria-label={ariaLabel} tabIndex={0}
+          role="img" aria-label={ariaLabel} tabIndex={0} className="foco-visivel"
           onPointerMove={aoMover} onPointerLeave={() => setAtivo(null)}
           onFocus={() => setAtivo((a) => a ?? ultimo)} onBlur={() => setAtivo(null)} onKeyDown={aoTeclar}
-          style={{ display: 'block', overflow: 'visible', outline: 'none', touchAction: 'pan-y' }}
+          style={{ display: 'block', overflow: 'visible', touchAction: 'pan-y' }}
         >
           {ticks.map((t) => (
             <g key={t}>
@@ -236,10 +236,10 @@ export function BarChart({ points, labels, fullLabels, color, height = 140, form
       {largura > 0 && (
         <svg
           width={w} height={height + altRotulo} viewBox={`0 0 ${w} ${height + altRotulo}`}
-          role="img" aria-label={ariaLabel} tabIndex={0}
+          role="img" aria-label={ariaLabel} tabIndex={0} className="foco-visivel"
           onPointerLeave={() => setAtivo(null)} onBlur={() => setAtivo(null)}
           onFocus={() => setAtivo((a) => a ?? 0)} onKeyDown={aoTeclar}
-          style={{ display: 'block', overflow: 'visible', outline: 'none' }}
+          style={{ display: 'block', overflow: 'visible' }}
         >
           {points.map((v, i) => (
             <g key={i} onPointerEnter={() => setAtivo(i)}>

@@ -285,7 +285,7 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={s.card}>
-          <div style={s.sectionTitle}>Onde você está no acervo</div>
+          <h2 style={s.sectionTitle}>Onde você está no acervo</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
             <div style={{ width: 88, height: 88, borderRadius: '50%', background: `conic-gradient(#4A7A4A 0% ${fatiaAcertos}%, #B4413A ${fatiaAcertos}% ${fatiaAcertos + fatiaErros}%, #e6e2da ${fatiaAcertos + fatiaErros}% 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
               <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -304,7 +304,7 @@ export default function Revisoes({ theme, s, rev, setRev, favoritos, toggleFavor
         </div>
 
         <div style={s.card}>
-          <div style={s.sectionTitle}>Disciplinas com menor desempenho</div>
+          <h2 style={s.sectionTitle}>Disciplinas com menor desempenho</h2>
           {piores.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginTop: 14 }}>
               {piores.map((d) => (
