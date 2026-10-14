@@ -10,6 +10,30 @@
 // entra em "Errei" é a ÚLTIMA tentativa dela, não a primeira nem a média —
 // quem errou e depois acertou já corrigiu o problema.
 
+// Por que a pessoa errou — a anotação do Caderno de Erros. É o que separa
+// lacuna de conteúdo ("não conhecia") de erro de atenção ("li errado"), e só
+// quem errou sabe. Opcional: obrigar faria a pessoa marcar qualquer coisa.
+//
+// `valor` vai para o servidor, que não tem lista fechada (o vocabulário é do
+// produto, ADR-001 do estudo-service) e aceita até 40 caracteres. Por isso
+// trocar um rótulo aqui não pede migration — mas trocar um `valor` deixa as
+// anotações antigas com o valor velho, que `rotuloDoMotivo` ainda mostra.
+export const MOTIVOS_DO_ERRO = [
+  { valor: 'nao-conhecia', rotulo: 'Não conhecia o conteúdo' },
+  { valor: 'confundi', rotulo: 'Confundi com outro instituto' },
+  { valor: 'li-errado', rotulo: 'Li errado o enunciado' },
+  { valor: 'faltou-tempo', rotulo: 'Faltou tempo' },
+];
+
+// O mesmo teto do servidor: passar dele só trocaria o aviso da tela por um 400.
+export const NOTA_DO_MOTIVO_MAX = 280;
+
+/** Texto do motivo para a tela; valor fora da lista aparece como veio. */
+export function rotuloDoMotivo(valor) {
+  if (!valor) return null;
+  return MOTIVOS_DO_ERRO.find((m) => m.valor === valor)?.rotulo || valor;
+}
+
 function historico(tentativas, id) {
   const registro = tentativas?.[String(id)] || tentativas?.[id];
   return registro?.tentativas || [];
@@ -84,6 +108,9 @@ export function classificarRevisao(questoes = [], tentativas = {}, favoritos = [
       respondidas: respondidas.length,
       acertos,
       erros: errei.length,
+      // Erros cujo motivo ninguém anotou. Só o erro da ÚLTIMA tentativa conta:
+      // errar de novo é um erro novo, e o motivo do anterior pode não valer.
+      errosSemMotivo: errei.filter((x) => !x.ultima?.motivo).length,
       emAberto: emAberto.length,
       favoritas: favoritas.length,
       pct: respondidas.length > 0 ? Math.round((acertos / respondidas.length) * 100) : null,

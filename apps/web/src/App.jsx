@@ -11,12 +11,12 @@ import { montarDisciplinas } from './lib/disciplinas';
 import { planoDaSemana, diasDeEstudoDaFicha, blocoDeEstudo, retornoDoGoogle } from './lib/agenda';
 import { tamanhoDoQuiz, sortearQuiz } from './lib/quiz';
 import { classificarRevisao } from './lib/revisao';
-import { mesclarTentativas } from './lib/historico';
+import { mesclarTentativas, substituirTentativa } from './lib/historico';
 import { enviarEmFila } from './lib/fila';
 import { payloadDoToken, saudacao, nomeDeExibicao } from './lib/perfil';
 import {
   TOKEN_KEY, getToken, logout, listarTentativas, listarQuestoes, registrarTentativa,
-  buscarPerfil, salvarPerfil, salvarRespostaDiscursiva,
+  buscarPerfil, salvarPerfil, salvarRespostaDiscursiva, anotarMotivoDoErro,
 } from './lib/api/api';
 import SeletorDeFase from './components/ui/SeletorDeFase';
 import UserMenu from './components/ui/user-menu';
@@ -711,6 +711,25 @@ export default function App() {
     }
   };
 
+  // Motivo do erro, anotado na revisão. Devolve null quando salvou, ou a
+  // mensagem de erro: a falha aparece ao lado do formulário que a pessoa está
+  // preenchendo, e não na faixa do topo, longe dele.
+  const anotarMotivo = async (questaoId, tentativaId, { motivo, nota }) => {
+    const epoch = sessaoEpoch.current;
+    try {
+      const tentativa = await anotarMotivoDoErro({ tentativaId, motivo, nota });
+      // Mesma guarda de `registrar`: a resposta de uma sessão que já acabou
+      // não entra na tela de quem entrou depois.
+      if (sessaoEpoch.current !== epoch) return null;
+      setUsuarioTentativas((atual) => substituirTentativa(atual, String(questaoId), tentativa));
+      return null;
+    } catch (err) {
+      if (sessaoEpoch.current !== epoch) return null;
+      if (err.status === 401) { encerrarSessao(); return null; }
+      return `O motivo não foi salvo: ${err.message}`;
+    }
+  };
+
   // "Revisar agora" e "Iniciar estudo" existiam como botões que não faziam
   // nada. Agora montam um quiz de verdade com as questões pedidas.
   const revisarQuestoes = (questoes) => {
@@ -1267,6 +1286,7 @@ export default function App() {
               setRev={(p) => updateSlice('revisoes', p)}
               favoritos={state.favoritos}
               toggleFavorito={toggleFavorito}
+              anotarMotivo={anotarMotivo}
             />
           )}
           {state.screen === 'desempenho' && (

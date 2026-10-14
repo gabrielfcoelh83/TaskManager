@@ -43,3 +43,23 @@ export function mesclarTentativas(carregadas = {}, recentes = {}) {
 
   return resultado;
 }
+
+/**
+ * Troca uma tentativa já conhecida pela versão que o servidor devolveu (depois
+ * de anotar o motivo do erro, por exemplo), sem mexer na ordem do histórico.
+ *
+ * Tentativa que não está no estado fica de fora em vez de ser acrescentada:
+ * aqui só se atualiza o que a tela já mostra. Acrescentar poria no fim do
+ * array — no lugar da "última tentativa" — uma resposta que pode ser antiga.
+ */
+export function substituirTentativa(tentativas = {}, questaoId, nova) {
+  const registro = tentativas[questaoId];
+  if (!registro || nova?.id == null) return tentativas;
+
+  const indice = registro.tentativas.findIndex((t) => String(t.id) === String(nova.id));
+  if (indice === -1) return tentativas;
+
+  const lista = registro.tentativas.slice();
+  lista[indice] = nova;
+  return { ...tentativas, [questaoId]: { ...registro, tentativas: lista } };
+}
