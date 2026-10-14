@@ -2,10 +2,17 @@ services:
   # Nginx — proxy reverso, TLS e único ponto de entrada
   nginx:
     image: nginx:1.27-alpine
+    # Toda porta deste compose (o de dev) vai presa ao loopback. Sem o
+    # `127.0.0.1:` o Docker publica em 0.0.0.0 por DNAT, por fora do firewall
+    # do host: a stack de dev ficava alcançável por qualquer máquina da rede —
+    # com o override (NODE_ENV=test) criando conta já ativada, e com os
+    # serviços na 3001–3005 sem o `limit_req` do nginx na frente. Quem usa
+    # estas portas (o proxy do Vite, o gateway rodando fora do Docker) está
+    # na mesma máquina. O compose de produção publica só 80/443, de propósito.
     ports:
-      - "80:80"      # validação do Let's Encrypt e redirecionamento
-      - "443:443"    # a aplicação sobre TLS
-      - "3000:8080"  # rota de fuga em HTTP puro, ver conf.d/default.conf
+      - "127.0.0.1:80:80"      # validação do Let's Encrypt e redirecionamento
+      - "127.0.0.1:443:443"    # a aplicação sobre TLS
+      - "127.0.0.1:3000:8080"  # rota de fuga em HTTP puro, ver conf.d/default.conf
     volumes:
       # Diretórios, não arquivos: ver a explicação em docker-compose.prod.yml.
       # Em dev o efeito é o mesmo — editar a config e não ver mudança nenhuma.
@@ -46,7 +53,7 @@ services:
   auth-service:
     build: ./auth-service
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
       PORT: 3001
       DB_HOST: postgres
@@ -75,7 +82,7 @@ services:
   user-service:
     build: ./user-service
     ports:
-      - "3002:3002"
+      - "127.0.0.1:3002:3002"
     environment:
       PORT: 3002
       DB_HOST: postgres
@@ -119,7 +126,7 @@ services:
       - microservices-network
 
   # Banco de Dados PostgreSQL
-  # Backup diário dos três bancos. Fica no mesmo host do Postgres, o que
+  # Backup diário dos quatro bancos. Fica no mesmo host do Postgres, o que
   # protege contra erro humano e corrupção lógica — mas não contra perda da
   # VM. Cópia fora da máquina continua sendo o passo seguinte.
   backup:
@@ -148,7 +155,7 @@ services:
   questoes-service:
     build: ./questoes-service
     ports:
-      - "3005:3005"
+      - "127.0.0.1:3005:3005"
     environment:
       PORT: 3005
       DB_HOST: postgres
@@ -166,7 +173,7 @@ services:
   estudo-service:
     build: ./estudo-service
     ports:
-      - "3004:3004"
+      - "127.0.0.1:3004:3004"
     environment:
       PORT: 3004
       DB_HOST: postgres
