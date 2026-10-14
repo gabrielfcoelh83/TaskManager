@@ -79,6 +79,37 @@ describe('gateway downstream behavior', () => {
 
     expect(adapter).toHaveBeenCalledTimes(3);
   });
+
+  test('routes simulado finish to the estudo service with the id in the path', async () => {
+    const response = await request(app)
+      .post('/api/simulados/7/finalizar')
+      .send({ acertos: 40, anuladas: 0 });
+
+    expect(response.status).toBe(200);
+    const config = adapter.mock.calls[0][0];
+    expect(config.url).toMatch(/\/simulados\/7\/finalizar$/);
+    expect(JSON.parse(config.data)).toEqual({ acertos: 40, anuladas: 0 });
+  });
+
+  test('passes the open simulado id through on 409', async () => {
+    const error = new axios.AxiosError('conflict', 'ERR_BAD_REQUEST', {}, {}, {
+      status: 409,
+      data: { error: 'Já existe um simulado aberto', simulado_id: 7 },
+    });
+    adapter.mockRejectedValueOnce(error);
+
+    const response = await request(app).post('/api/simulados').send({ exame: 44, tipo: 1 });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ error: 'Já existe um simulado aberto', simulado_id: 7 });
+  });
+
+  test('forwards the query string when listing simulados', async () => {
+    await request(app).get('/api/simulados?paginado=1&limite=10&offset=20');
+
+    const config = adapter.mock.calls[0][0];
+    expect(config.params).toEqual({ paginado: '1', limite: '10', offset: '20' });
+  });
 });
 
 describe('gateway: Google Agenda', () => {

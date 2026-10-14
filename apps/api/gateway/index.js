@@ -298,6 +298,58 @@ app.patch('/api/tentativas/:id', async (req, res) => {
   }
 });
 
+// Simulados de prova real. Abrir, finalizar e abandonar são POST e, como todo
+// POST aqui, não têm retry: repetir "finalizar" depois de um timeout que na
+// verdade gravou responderia 409 a quem já tinha terminado.
+//
+// O 409 de "já existe simulado aberto" leva `simulado_id` no corpo, e o front
+// precisa dele para oferecer "continuar": por isso o corpo de erro do serviço
+// é repassado inteiro, e não só o campo `error`.
+const repassarErroDeSimulado = (res, error, padrao) =>
+  res
+    .status(error.response?.status || 500)
+    .json(error.response?.data?.error ? error.response.data : { error: padrao });
+
+app.post('/api/simulados', async (req, res) => {
+  try {
+    const response = await downstream('estudo', 'post', `${services.estudo}/simulados`, req.body, {
+      headers: { authorization: req.headers.authorization },
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    repassarErroDeSimulado(res, error, 'Erro ao abrir simulado');
+  }
+});
+
+app.get('/api/simulados', async (req, res) => {
+  try {
+    const response = await downstream('estudo', 'get', `${services.estudo}/simulados`, {
+      headers: { authorization: req.headers.authorization },
+      params: req.query, // limite, offset, paginado
+    });
+    res.json(response.data);
+  } catch (error) {
+    repassarErroDeSimulado(res, error, 'Erro ao buscar simulados');
+  }
+});
+
+for (const acao of ['finalizar', 'abandonar']) {
+  app.post(`/api/simulados/:id/${acao}`, async (req, res) => {
+    try {
+      const response = await downstream(
+        'estudo',
+        'post',
+        `${services.estudo}/simulados/${encodeURIComponent(req.params.id)}/${acao}`,
+        req.body,
+        { headers: { authorization: req.headers.authorization } }
+      );
+      res.status(response.status).json(response.data);
+    } catch (error) {
+      repassarErroDeSimulado(res, error, 'Erro ao encerrar simulado');
+    }
+  });
+}
+
 // ===== ROTAS DE QUESTÕES (acervo da OAB) =====
 //
 // Só leitura. A carga do acervo é feita por `carregar.js`, rodado à mão
