@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { montarFontes } from '../lib/questions/acervo';
+import { montarCadernos } from '../lib/cadernos';
 import { metaDiaria } from '../lib/metrics';
-import { tamanhoDoQuiz, sortearQuiz } from '../lib/quiz';
+import { tamanhoDoQuiz, sortearQuiz, sortearMisto } from '../lib/quiz';
 import { alternarRisco, historicoDaQuestao } from '../lib/cardDeQuestao';
 import {
   BotaoRiscar, GabaritoComentado, ListaDoHistorico, OrigemDaQuestao, SeloRespondida, TrilhaDaQuestao,
@@ -46,6 +47,68 @@ function Aviso({ s, icone, cor, titulo, texto, acao }) {
   );
 }
 
+// Quantos cadernos de matéria aparecem antes de "Escolher outra matéria":
+// com o misto e o card de explorar, fecha duas linhas de três.
+const CADERNOS_INICIAIS = 4;
+
+// Selos dos cadernos. Cada um vem de um dado (ver lib/cadernos.js), nenhum é
+// rótulo de marketing: "plano" é a matéria do Cronograma, "peso" a que mais
+// cai na prova, "fraco" a de pior taxa com amostra suficiente.
+//
+// Cores da paleta do DESIGN.md (atenção / acerto / erro), com o véu `${cor}14`
+// por fundo; `null` é a cor primária do tema, resolvida no card.
+const SELOS = {
+  recomendado: { rotulo: 'Recomendado do dia', cor: null },
+  misto: { rotulo: 'Todas as matérias', cor: null },
+  plano: { rotulo: 'Do seu plano', cor: '#B07A1F' },
+  peso: { rotulo: 'Maior peso', cor: '#4A7A4A' },
+  fraco: { rotulo: 'Ponto fraco', cor: '#B4413A' },
+  nova: { rotulo: 'Nunca estudada', cor: null },
+};
+
+// Um caderno: card com a lombada na cor da matéria (a mesma das outras telas,
+// `corDaDisciplina`), selo, dois números e a ação de estudar.
+function CadernoCard({ theme, s, testid, cor, selo, canto, titulo, descricao, dados, rodape, acao, onClick }) {
+  return (
+    <article
+      data-testid={testid}
+      style={{ ...s.card, borderLeft: `5px solid ${cor}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 16, minHeight: 200 }}
+    >
+      <div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, minHeight: 22 }}>
+          {selo ? (
+            <span style={{ ...s.pill(`${selo.cor || theme.primary}14`, selo.cor || theme.primaryDark), whiteSpace: 'nowrap' }}>
+              {selo.rotulo}
+            </span>
+          ) : <span />}
+          {canto && <span style={{ fontSize: 12, fontWeight: 600, color: '#5f5b55', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{canto}</span>}
+        </div>
+        <h3 style={{ ...s.sectionTitle, fontSize: 17, marginTop: 10, marginBottom: 0 }}>{titulo}</h3>
+        <div style={{ fontSize: 12.5, color: '#5f5b55', marginTop: 4, lineHeight: 1.5 }}>{descricao}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14, paddingTop: 12, borderTop: '1px solid #eeebe5' }}>
+          {dados.map(([rotulo, valor]) => (
+            <div key={rotulo}>
+              <div style={{ fontSize: 10.5, color: '#7a766f' }}>{rotulo}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#1c1b19', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{valor}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 12, borderTop: '1px solid #eeebe5' }}>
+        <span style={{ fontSize: 11.5, color: '#7a766f' }}>{rodape}</span>
+        <button
+          type="button"
+          data-testid={`${testid}-estudar`}
+          onClick={onClick}
+          style={{ ...s.btnOutline, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', cursor: 'pointer', flex: 'none' }}
+        >
+          <Icon name="play" color={theme.primary} size={11} /> {acao}
+        </button>
+      </div>
+    </article>
+  );
+}
+
 export default function Questoes({ theme, s, data, quest, setQuest, registrar, acervo, recarregarAcervo, usuarioTentativas, config, resultados_historico, materiaDeHoje }) {
   const [tempoInicio, setTempoInicio] = useState(null);
   // O que é só desta tela, para a questão aberta: as alternativas riscadas e
@@ -57,7 +120,9 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
   const [cartao, setCartao] = useState({ questaoId: null, riscadas: [], historicoAberto: false });
   const idHistorico = useId();
 
-  const all = data.QUESTOES || [];
+  // Memorizado: `|| []` criaria um array novo a cada render, e os cadernos
+  // (useMemo abaixo) seriam recalculados toda vez.
+  const all = useMemo(() => data.QUESTOES || [], [data.QUESTOES]);
   const estado = acervo?.estado || 'pronto';
 
   // O cronômetro de cada questão. Antes ele só começava a contar em
@@ -87,17 +152,42 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
   // tamanho, do que falta para a meta. Quem chega pelo "Praticar" de
   // Disciplinas ou Simulados troca a matéria só desta vez — e a tela diz
   // isso, com o caminho de volta para a matéria do plano.
-  const { chaveDe, fontes } = montarFontes(all);
+  //
+  // Três jeitos de montar o quiz, à escolha da pessoa:
+  //   recomendado — a matéria do plano (`materiaDeHoje`);
+  //   misto       — um pouco de cada matéria, na proporção da prova;
+  //   escolhida   — a matéria que ela escolhe na lista.
+  // Sem matéria no plano, o recomendado É o misto: é o que cobre a prova.
+  const { criterio, chaveDe, fontes } = montarFontes(all);
   const existe = (chave) => fontes.some((f) => f.chave === chave);
   const rotuloDe = (chave) => fontes.find((f) => f.chave === chave)?.rotulo || chave;
   const filtro = (quest.selected || []).filter(existe);
   const doPlano = materiaDeHoje?.disciplina && existe(materiaDeHoje.disciplina) ? [materiaDeHoje.disciplina] : [];
-  const escolhidaFora = filtro.length > 0 && filtro.join() !== doPlano.join();
-  const materias = filtro.length > 0 ? filtro : doPlano;
-  const nomeDaMateria = materias.map(rotuloDe).join(', ');
-  const voltarAoPlano = () => setQuest({ selected: null });
+  const escolhidaFora = !quest.misto && filtro.length > 0 && filtro.join() !== doPlano.join();
+  const modo = escolhidaFora ? 'escolhida' : quest.misto || doPlano.length === 0 ? 'misto' : 'recomendado';
+  const materias = modo === 'escolhida' ? filtro : modo === 'recomendado' ? doPlano : [];
+  // O misto só tem proporção a seguir quando o acervo tem matéria.
+  const nomeDaMateria = modo === 'misto'
+    ? (criterio === 'disciplina' ? 'todas as matérias' : '')
+    : materias.map(rotuloDe).join(', ');
+  const voltarAoPlano = () => setQuest({ selected: null, misto: false });
+  const escolherMateria = (chave) => setQuest({ selected: chave ? [chave] : null, misto: false });
 
-  // Sem matéria (acervo ainda sem classificação), a meta vale para o acervo todo.
+  // Os cadernos (lib/cadernos.js). Só existem com matéria no acervo; a conta
+  // percorre o acervo por matéria, então só refaz quando ele, o histórico, o
+  // plano ou a ordem mudam.
+  const [ordemDosCadernos, setOrdemDosCadernos] = useState('peso');
+  const [todosOsCadernos, setTodosOsCadernos] = useState(false);
+  const materiaDoPlano = doPlano[0] || null;
+  const cadernos = useMemo(
+    () => (criterio === 'disciplina'
+      ? montarCadernos(all, usuarioTentativas, { materiaDoPlano, ordem: ordemDosCadernos })
+      : { misto: { disponiveis: 0, nuncaRespondidas: 0, materias: 0, pct: null }, materias: [] }),
+    [criterio, all, usuarioTentativas, materiaDoPlano, ordemDosCadernos],
+  );
+  const cadernosVisiveis = todosOsCadernos ? cadernos.materias : cadernos.materias.slice(0, CADERNOS_INICIAIS);
+
+  // No misto (ou sem matéria nenhuma), o quiz sai do acervo todo.
   const availablePool = materias.length > 0 ? all.filter((q) => materias.includes(chaveDe(q))) : all;
 
   // O quiz tem o tamanho da meta do dia (ver lib/quiz.js), não o das fontes.
@@ -105,8 +195,27 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
   const tamanhoAlvo = tamanhoDoQuiz(meta);
   const tamanho = Math.min(tamanhoAlvo, availablePool.length);
 
+  // Um clique no caderno já abre o quiz: `null` é o misto, um nome é a
+  // matéria. A escolha fica gravada em `quest` (como a do "Praticar" de
+  // Disciplinas), e o card da meta passa a mostrá-la.
+  const iniciarCaderno = (materia) => {
+    const pool = materia ? all.filter((q) => chaveDe(q) === materia) : all;
+    const quiz = materia
+      ? sortearQuiz(pool, tamanhoAlvo, usuarioTentativas)
+      : sortearMisto(pool, tamanhoAlvo, usuarioTentativas);
+    setQuest({
+      selected: materia ? [materia] : null, misto: !materia,
+      quiz, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false,
+    });
+    tempos.current = {};
+    setTempoInicio(Date.now());
+  };
+
   const startQuiz = () => {
-    setQuest({ quiz: sortearQuiz(availablePool, tamanhoAlvo, usuarioTentativas), idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false });
+    const quiz = modo === 'misto'
+      ? sortearMisto(availablePool, tamanhoAlvo, usuarioTentativas)
+      : sortearQuiz(availablePool, tamanhoAlvo, usuarioTentativas);
+    setQuest({ quiz, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false });
     tempos.current = {};
     setTempoInicio(Date.now());
   };
@@ -309,30 +418,36 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
         )}
 
         {semQuiz && estado === 'pronto' && all.length > 0 && (
-          <div className="entra" data-testid="meta-do-dia" style={{ ...s.card, padding: 28, maxWidth: 640 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '1.2px', textTransform: 'uppercase', color: theme.accent }}>
-              {meta.batida ? 'Meta de hoje batida' : 'Meta de hoje'}
-            </div>
-            <div data-testid="titulo-da-meta" style={{ ...s.pageTitle, fontSize: 26, marginTop: 8 }}>
-              {meta.batida && 'Mais '}{tamanho} {tamanho === 1 ? 'questão' : 'questões'}
-              {nomeDaMateria && <> de {nomeDaMateria}</>}
-            </div>
-            <div style={{ fontSize: 13.5, color: '#7a766f', marginTop: 6, lineHeight: 1.55, textWrap: 'pretty' }}>
-              {escolhidaFora
-                ? 'Matéria escolhida por você, no lugar da do plano.'
-                : materiaDeHoje?.motivo
-                  ? `Do seu plano de estudo: ${materiaDeHoje.motivo}.`
-                  : 'Questões dos Exames de Ordem, com o gabarito oficial da FGV.'}
-            </div>
-
-            <div style={{ marginTop: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#7a766f', marginBottom: 6, fontVariantNumeric: 'tabular-nums' }}>
-                <span>Feitas hoje</span>
-                <span>{meta.respondidas} de {meta.meta}</span>
+          <div className="entra" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+          <div data-testid="meta-do-dia" style={{ ...s.card, padding: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: theme.primarySoft, color: theme.primaryDark, borderRadius: 999, padding: '3px 10px', fontSize: 10.5, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: theme.primary }} />
+                  {meta.batida ? 'Meta de hoje batida' : 'Meta de hoje'}
+                </span>
+                <div data-testid="titulo-da-meta" style={{ ...s.pageTitle, fontSize: 26, marginTop: 10 }}>
+                  {meta.batida && 'Mais '}{tamanho} {tamanho === 1 ? 'questão' : 'questões'}
+                  {nomeDaMateria && <> de {nomeDaMateria}</>}
+                </div>
+                <div style={{ fontSize: 13.5, color: '#7a766f', marginTop: 6, lineHeight: 1.55, textWrap: 'pretty' }}>
+                  {modo === 'escolhida'
+                    ? 'Matéria escolhida por você, no lugar da do plano.'
+                    : modo === 'misto' && criterio === 'disciplina'
+                      ? 'Um pouco de cada matéria, na proporção em que a prova cobra.'
+                      : modo === 'recomendado' && materiaDeHoje?.motivo
+                        ? `Do seu plano de estudo: ${materiaDeHoje.motivo}.`
+                        : 'Questões dos Exames de Ordem, com o gabarito oficial da FGV.'}
+                </div>
               </div>
-              <div style={s.progressTrack}>
-                <div style={{ height: '100%', width: `${Math.min(100, Math.round((meta.respondidas / Math.max(1, meta.meta)) * 100))}%`, background: theme.primary, borderRadius: 3 }} />
-              </div>
+              <button
+                data-testid="gerar-quiz"
+                style={{ ...s.btnPrimary, padding: '11px 20px', fontSize: 13.5, flex: 'none', opacity: availablePool.length === 0 ? 0.5 : 1, cursor: availablePool.length === 0 ? 'not-allowed' : 'pointer' }}
+                onClick={startQuiz}
+                disabled={availablePool.length === 0}
+              >
+                <Icon name="play" color="#fff" size={14} /> Começar meta do dia ({tamanho} {tamanho === 1 ? 'questão' : 'questões'})
+              </button>
             </div>
 
             {escolhidaFora && (
@@ -349,22 +464,125 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
               </div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 22, flexWrap: 'wrap' }}>
-              <button
-                data-testid="gerar-quiz"
-                style={{ ...s.btnPrimary, padding: '11px 20px', fontSize: 13.5, opacity: availablePool.length === 0 ? 0.5 : 1, cursor: availablePool.length === 0 ? 'not-allowed' : 'pointer' }}
-                onClick={startQuiz}
-                disabled={availablePool.length === 0}
+            {/* Acervo sem matéria: não há caderno por matéria a mostrar, e a
+                única divisão real é o exame. */}
+            {criterio !== 'disciplina' && (
+              <select
+                data-testid="escolher-materia"
+                aria-label="Escolher exame"
+                value={modo === 'escolhida' ? filtro[0] : ''}
+                onChange={(e) => (e.target.value ? escolherMateria(e.target.value) : voltarAoPlano())}
+                style={{ marginTop: 16, font: 'inherit', fontSize: 12.5, fontWeight: 600, borderRadius: 10, padding: '7px 10px', border: '1px solid rgba(0,0,0,.08)', background: '#fff', color: '#4f4b45' }}
               >
-                <Icon name="play" color="#fff" size={14} /> Começar ({tamanho} {tamanho === 1 ? 'questão' : 'questões'})
-              </button>
+                <option value="">Todos os exames</option>
+                {fontes.map((f) => (
+                  <option key={f.chave} value={f.chave}>{f.rotulo} ({f.total})</option>
+                ))}
+              </select>
+            )}
+
+            <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid rgba(0,0,0,.06)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#5f5b55', marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>
+                <span>Feitas hoje</span>
+                <span style={{ fontWeight: 600, color: '#1c1b19' }}>{meta.respondidas} de {meta.meta} questões</span>
+              </div>
+              <div style={s.progressTrack}>
+                <div style={{ height: '100%', width: `${Math.min(100, Math.round((meta.respondidas / Math.max(1, meta.meta)) * 100))}%`, background: theme.primary, borderRadius: 3 }} />
+              </div>
               {/* Quando a matéria tem menos questões que a meta, o número do
                   botão não bate com o que falta — e precisa dizer por quê. */}
-              <div data-testid="tamanho-do-quiz" style={{ fontSize: 12, color: '#7a766f', lineHeight: 1.5 }}>
+              <div data-testid="tamanho-do-quiz" style={{ fontSize: 12, color: '#7a766f', lineHeight: 1.5, marginTop: 8 }}>
                 {availablePool.length < tamanhoAlvo && `${nomeDaMateria || 'O acervo'} tem só ${availablePool.length}. `}
                 Nunca respondidas vêm primeiro.
               </div>
             </div>
+          </div>
+
+          {criterio === 'disciplina' && (
+            <section data-testid="cadernos">
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+                <div>
+                  <h2 style={{ ...s.sectionTitle, fontSize: 17 }}>Cadernos de questões</h2>
+                  <div style={{ fontSize: 12.5, color: '#7a766f', marginTop: 2 }}>Escolha um caderno para estudar agora, fora da meta do dia.</div>
+                </div>
+                {/* Botões com `aria-pressed`, não `role="radio"`: rádio exige um só
+                    Tab no grupo e setas para trocar, que aqui não existem. */}
+                <div role="group" aria-label="Ordenar cadernos" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+                  <span style={{ color: '#7a766f' }} aria-hidden="true">Ordenar:</span>
+                  {[['peso', 'Mais cobradas na prova'], ['pendentes', 'Mais pendentes']].map(([valor, rotulo]) => (
+                    <button
+                      key={valor}
+                      type="button"
+                      aria-pressed={ordemDosCadernos === valor}
+                      data-testid={`ordem-${valor}`}
+                      onClick={() => setOrdemDosCadernos(valor)}
+                      style={{ background: ordemDosCadernos === valor ? '#efece6' : 'none', border: 'none', borderRadius: 8, padding: '5px 10px', fontSize: 12.5, fontWeight: 500, color: '#1c1b19', cursor: 'pointer' }}
+                    >
+                      {rotulo}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+                <CadernoCard
+                  theme={theme}
+                  s={s}
+                  testid="caderno-misto"
+                  cor={theme.primary}
+                  selo={SELOS[doPlano.length === 0 ? 'recomendado' : 'misto']}
+                  canto={cadernos.misto.pct != null ? `${cadernos.misto.pct}% acertos` : null}
+                  titulo="Todas as matérias"
+                  descricao={`Um pouco de cada uma das ${cadernos.misto.materias} matérias do acervo, na proporção em que a prova cobra.`}
+                  dados={[
+                    ['Meta de hoje', `${tamanhoAlvo} ${tamanhoAlvo === 1 ? 'questão' : 'questões'}`],
+                    ['Inéditas para você', `${cadernos.misto.nuncaRespondidas}`],
+                  ]}
+                  rodape={`${cadernos.misto.disponiveis} questões no acervo`}
+                  acao="Praticar"
+                  onClick={() => iniciarCaderno(null)}
+                />
+                {cadernosVisiveis.map((m) => (
+                  <CadernoCard
+                    key={m.nome}
+                    theme={theme}
+                    s={s}
+                    testid={`caderno-${m.nome}`}
+                    cor={m.cor}
+                    selo={SELOS[m.selo]}
+                    canto={m.pct != null
+                      ? `${m.pct}% acertos`
+                      : m.tentativas > 0 ? `${m.tentativas} ${m.tentativas === 1 ? 'resposta' : 'respostas'}` : 'sem histórico'}
+                    titulo={m.nome}
+                    descricao={m.temas.length > 0 ? `Temas: ${m.temas.join(', ')}.` : 'Questões dos Exames de Ordem, com o gabarito oficial da FGV.'}
+                    dados={[
+                      ['Peso na prova', m.peso != null ? `${m.peso} questões` : '—'],
+                      ['Disponíveis', `${m.disponiveis} ${m.disponiveis === 1 ? 'questão' : 'questões'}`],
+                    ]}
+                    rodape={`${m.nuncaRespondidas} nunca respondidas`}
+                    acao="Estudar"
+                    onClick={() => iniciarCaderno(m.nome)}
+                  />
+                ))}
+                {cadernos.materias.length > CADERNOS_INICIAIS && (
+                  <button
+                    type="button"
+                    data-testid="explorar-materias"
+                    onClick={() => setTodosOsCadernos((v) => !v)}
+                    style={{ background: '#f7f5ee', border: '2px dashed #d6d1c7', borderRadius: 14, padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center', cursor: 'pointer', minHeight: 200 }}
+                  >
+                    <span style={{ width: 44, height: 44, borderRadius: 12, background: '#fff', border: '1px solid rgba(0,0,0,.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="library" color={theme.primary} size={20} />
+                    </span>
+                    <span style={{ ...s.sectionTitle, fontSize: 16 }}>{todosOsCadernos ? 'Mostrar menos' : 'Escolher outra matéria'}</span>
+                    <span style={{ fontSize: 12.5, color: '#7a766f' }}>
+                      {todosOsCadernos ? `Voltar às ${CADERNOS_INICIAIS} primeiras` : `Ver todas as ${cadernos.materias.length} matérias do acervo`}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
           </div>
         )}
 

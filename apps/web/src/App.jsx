@@ -64,7 +64,7 @@ const DEFAULT_STATE = {
   screen: 'dashboard',
   dashboard: { period: '7' },
   cronograma: {},
-  questoes: { selected: null, quiz: null, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
+  questoes: { selected: null, misto: false, quiz: null, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
   simulados: { running: {}, resultados_historico: [] },
   revisoes: { tab: 'todas' },
   desempenho: { period: '6' },
@@ -754,8 +754,11 @@ export default function App() {
     const daMateria = acervo.questoes.filter((q) => (q.disciplina || 'Sem classificação') === nome);
     if (daMateria.length === 0) { goTo('questoes'); return; }
 
+    // `misto: false` nos dois caminhos: escolher uma matéria aqui desfaz o
+    // caderno "Todas as matérias". Herdado do estado salvo, o misto ganhava da
+    // matéria escolhida e a tela de Questões sorteava o acervo todo.
     if (!iniciar) {
-      setState((st) => ({ ...st, screen: 'questoes', questoes: { ...st.questoes, selected: [nome], quiz: null, done: false } }));
+      setState((st) => ({ ...st, screen: 'questoes', questoes: { ...st.questoes, selected: [nome], misto: false, quiz: null, done: false } }));
       return;
     }
 
@@ -766,7 +769,7 @@ export default function App() {
     setState((st) => ({
       ...st,
       screen: 'questoes',
-      questoes: { ...st.questoes, selected: [nome], quiz: lista, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
+      questoes: { ...st.questoes, selected: [nome], misto: false, quiz: lista, idx: 0, selectedAlt: null, marcadas: {}, conferidas: {}, certas: 0, erradas: 0, done: false, revisando: false, corrigindo: false },
     }));
   };
 

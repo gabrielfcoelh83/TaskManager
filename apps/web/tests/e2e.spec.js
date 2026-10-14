@@ -1173,6 +1173,83 @@ test.describe('Simulado por matéria', () => {
   });
 });
 
+test.describe('Cadernos de questões', () => {
+  // Mesmo motivo do "Foco do dia": os cadernos só existem com matéria no
+  // acervo, e classificar o seed mudaria o agrupamento da suíte inteira.
+  const questao = (id, disciplina, n) => ({
+    id,
+    exame: 96,
+    tipo_prova: 1,
+    numero: n,
+    banca: 'FGV',
+    ano: null,
+    enunciado: `Questão ${n} de ${disciplina}, montada para o teste dos cadernos.`,
+    alternativas: [`c${id} A`, `c${id} B`, `c${id} C`, `c${id} D`],
+    gabarito: 0,
+    anulada: false,
+    disciplina,
+    tema: null,
+    explicacao: null,
+    explicacao_fonte: null,
+    revisada: false,
+  });
+  const PENAL = [1, 2, 3].map((n) => questao(9200 + n, 'Direito Penal', n));
+  const CIVIL = [4, 5, 6].map((n) => questao(9200 + n, 'Direito Civil', n));
+
+  const servirAcervo = (page, acervo) =>
+    page.route('**/api/questoes*', (rota) =>
+      rota.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(acervo) }));
+
+  // As matérias do quiz em andamento, lidas do estado salvo: o quiz não
+  // mostra todas as questões de uma vez, e é a mistura que importa aqui.
+  const materiasDoQuiz = (page) => page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('ma-questoes-state-v1') || '{}');
+    return [...new Set((st.questoes?.quiz || []).map((q) => q.disciplina))].sort();
+  });
+
+  test('o caderno de uma matéria abre o quiz só com questões dela', async ({ page }) => {
+    await servirAcervo(page, [...PENAL, ...CIVIL]);
+    await entrar(page);
+    await page.click('[data-testid="nav-questoes"]');
+
+    await expect(page.locator('[data-testid="cadernos"]')).toBeVisible();
+    await page.click('[data-testid="caderno-Direito Penal-estudar"]');
+
+    await expect(page.locator('[data-testid="enunciado"]')).toBeVisible();
+    await expect(page.locator('[data-testid="disciplina-da-questao"]')).toHaveText('Direito Penal');
+    expect(await materiasDoQuiz(page)).toEqual(['Direito Penal']);
+  });
+
+  test('o caderno "Todas as matérias" mistura as matérias do acervo', async ({ page }) => {
+    await servirAcervo(page, [...PENAL, ...CIVIL]);
+    await entrar(page);
+    await page.click('[data-testid="nav-questoes"]');
+
+    await page.click('[data-testid="caderno-misto-estudar"]');
+
+    await expect(page.locator('[data-testid="enunciado"]')).toBeVisible();
+    // Pesos iguais na prova (6 e 6): com duas vagas ou mais, o D'Hondt dá
+    // vaga às duas. Sem o misto, o sorteio comum podia trazer uma só.
+    expect(await materiasDoQuiz(page)).toEqual(['Direito Civil', 'Direito Penal']);
+  });
+
+  test('depois do misto, "Praticar" em Disciplinas mostra a matéria escolhida', async ({ page }) => {
+    // Uma matéria só: o "Praticar" de Disciplinas fica sem ambiguidade.
+    await servirAcervo(page, PENAL);
+    await entrar(page);
+    await page.click('[data-testid="nav-questoes"]');
+    await page.click('[data-testid="caderno-misto-estudar"]');
+    await expect(page.locator('[data-testid="enunciado"]')).toBeVisible();
+
+    // O bug: `misto: true` ficava no estado salvo e ganhava da matéria
+    // escolhida — o card dizia "todas as matérias" e o quiz saía misto.
+    await page.click('[data-testid="nav-disciplinas"]');
+    await page.click('[data-testid="praticar-disciplina"]');
+    await expect(page.locator('[data-testid="titulo-da-meta"]')).toContainText('de Direito Penal');
+    await expect(page.locator('[data-testid="titulo-da-meta"]')).not.toContainText('todas as matérias');
+  });
+});
+
 test.describe('Simulados com o acervo fora do ar', () => {
   test('erro de carga vira aviso com botão, não "acervo sem questões"', async ({ page }) => {
     let falhar = true;
