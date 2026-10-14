@@ -176,7 +176,7 @@ export default function Questoes({ theme, s, data, quest, setQuest, registrar, a
       if (correta) certas += 1; else erradas += 1;
       const ms = tempos.current[pos];
       // A tela muda na hora; cada registro vai junto e, se falhar, o App avisa.
-      registrar({ questaoId: q.id, correta, alternativa: alt, tempoSeg: ms ? Math.round(ms / 1000) : null });
+      registrar({ questaoId: q.id, correta, alternativa: alt, tempoSeg: ms ? Math.round(ms / 1000) : null, origem: 'quiz' });
     }
     setQuest({ conferidas: novas, certas, erradas, done: true, revisando: false, corrigindo: false, selectedAlt: null });
   };

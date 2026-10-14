@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../lib/icons';
 import { ICONE_POR_DISCIPLINA } from '../lib/navegacao';
-import { corrigirSimulado, situacaoDaResposta, sortearQuestoes, tempoDeProvaMinutos } from '../lib/simulado';
+import { corrigirSimulado, respostasParaRegistrar, situacaoDaResposta, sortearQuestoes, tempoDeProvaMinutos } from '../lib/simulado';
 import ConfigSimulado from '../components/ui/ConfigSimulado';
 import Cronometro from '../components/ui/Cronometro';
 import { GabaritoComentado, OrigemDaQuestao, TrilhaDaQuestao } from '../components/ui/CardDeQuestao';
@@ -89,15 +89,15 @@ export default function Simulados({ theme, s, data, sim, setSim, setResultadosHi
     // passava do limite do nginx numa prova de 80 questões. A fila corre em
     // segundo plano — a tela de resultado abre na hora — e o App avisa na
     // faixa do topo se alguma não foi salva.
+    //
+    // A questão em branco também vai, como errada e sem alternativa (o
+    // servidor lê `alternativa` nula como "não respondeu"). Antes ela ficava
+    // de fora, e o que a pessoa deixou em branco na prova — "não sabia" ou
+    // "faltou tempo" — nunca chegava ao Caderno de Erros, justamente o que ele
+    // existe para pegar. A taxa de acerto de quem deixa muito em branco cai;
+    // a queda é real, esconder era o problema.
     if (registrarRespostas) {
-      const respostas = simulado.questoes_pool
-        .filter((q) => simulado.respostas[q.id] !== undefined)   // em branco não é resposta
-        .map((q) => ({
-          questaoId: q.id,
-          correta: simulado.respostas[q.id] === q.correta,
-          alternativa: simulado.respostas[q.id],
-          tempoSeg: null,
-        }));
+      const respostas = respostasParaRegistrar(simulado.questoes_pool, simulado.respostas);
       registrarRespostas(respostas);
     }
 

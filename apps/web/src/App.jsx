@@ -634,13 +634,13 @@ export default function App() {
   // `emLote`: a fila do simulado (`registrarRespostas`) cuida da faixa de erro
   // uma vez só, no fim — resposta por resposta, cada chamada apagaria a
   // mensagem da falha anterior.
-  const registrar = ({ questaoId, correta, alternativa, tempoSeg }, { emLote = false } = {}) => {
+  const registrar = ({ questaoId, correta, alternativa, tempoSeg, origem }, { emLote = false } = {}) => {
     if (!emLote) setErroSync(null);
     const epoch = sessaoEpoch.current;
 
     const pendente = (async () => {
       try {
-        const tentativa = await registrarTentativa({ questaoId, correta, alternativa, tempoSeg });
+        const tentativa = await registrarTentativa({ questaoId, correta, alternativa, tempoSeg, origem });
 
         // Saiu enquanto o POST estava no ar: a tentativa foi gravada e
         // pertence a quem a respondeu, mas não pode voltar para a tela de

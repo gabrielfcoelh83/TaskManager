@@ -289,6 +289,8 @@ function paraFormatoLocal(linha) {
     // do localStorage de um jeito difícil de rastrear.
     tipo: linha.tipo ?? null,
     certeza: linha.certeza ?? null,
+    // De onde veio (migration 007); nula nas tentativas anteriores a ela.
+    origem: linha.origem ?? null,
   };
 }
 
@@ -436,7 +438,7 @@ export async function listarQuestoes(filtros = {}) {
   return acervo;
 }
 
-export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg }) {
+export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg, origem }) {
   const linha = await req('/api/tentativas', {
     method: 'POST',
     body: {
@@ -446,6 +448,9 @@ export async function registrarTentativa({ questaoId, correta, alternativa, temp
       correta: correta === true,
       alternativa: Number.isInteger(alternativa) ? alternativa : null,
       tempo_seg: Number.isInteger(tempoSeg) && tempoSeg >= 0 ? tempoSeg : null,
+      // 'quiz', 'simulado' ou 'revisao' (migration 007). Servidor anterior a
+      // ela ignora o campo, então mandar sempre é seguro.
+      origem: origem || null,
     },
   });
 

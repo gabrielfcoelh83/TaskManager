@@ -9,6 +9,7 @@ import {
   tempoDeProvaMinutos,
   corrigirSimulado,
   situacaoDaResposta,
+  respostasParaRegistrar,
 } from '../src/lib/simulado.js';
 
 const falhas = [];
@@ -78,6 +79,26 @@ exigir(tempoDeProvaMinutos(0) === 0, 'tempo de prova vazia');
   exigir(situacaoDaResposta(q(1), { 1: 3 }) === 'errada', 'situação errada');
   exigir(situacaoDaResposta(q(1), {}) === 'em-branco', 'situação em branco');
   exigir(situacaoDaResposta(q(5, { correta: 0 }), { 5: 0 }) === 'certa', 'situação com alternativa A');
+}
+
+// --- o que vai para o servidor ---
+{
+  // Três questões: acertada, errada e em branco. A alternativa A (índice 0)
+  // é a armadilha clássica: `if (marcada)` a trataria como em branco.
+  const prova = [q(1, { correta: 0 }), q(2, { correta: 1 }), q(3, { correta: 2 })];
+  const enviadas = respostasParaRegistrar(prova, { 1: 0, 2: 3 });
+
+  exigir(enviadas.length === 3, `a questão em branco também vai: esperava 3, vieram ${enviadas.length}`);
+  exigir(enviadas.every((r) => r.origem === 'simulado'), 'toda resposta do simulado leva origem "simulado"');
+  exigir(enviadas.every((r) => r.tempoSeg === null), 'simulado não inventa tempo por questão');
+
+  const [certa, errada, branco] = enviadas;
+  exigir(certa.correta === true && certa.alternativa === 0, 'alternativa A certa virou outra coisa');
+  exigir(errada.correta === false && errada.alternativa === 3, 'resposta errada mal registrada');
+  exigir(branco.correta === false && branco.alternativa === null, 'em branco deveria ir errada e sem alternativa');
+
+  const nulo = respostasParaRegistrar([q(4)], { 4: null });
+  exigir(nulo[0].alternativa === null && nulo[0].correta === false, 'resposta null deveria contar como em branco');
 }
 
 if (falhas.length > 0) {
