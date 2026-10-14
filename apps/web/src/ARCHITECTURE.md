@@ -39,6 +39,8 @@ src/
     ├── api/retentativa.js  # Repete pedido recusado com 429 pelo nginx (puro, testado)
     ├── questions/acervo.js  # Tradução acervo → tela, embaralhar, fontes do quiz
     ├── simulado.js       # Sorteio, correção e origem da questão (simulado e quiz)
+    ├── quiz.js           # Tamanho do quiz pela meta, sorteio e quiz misto (proporção da prova)
+    ├── cadernos.js       # Cadernos da tela de Questões: um por matéria, selos, misto
     ├── historico.js      # Mescla a carga do histórico com o que foi respondido durante ela
     ├── fila.js           # Envio um a um, que para quando a sessão acaba (respostas do simulado)
     ├── storage.js        # localStorage: estado da interface e dados por conta
@@ -180,7 +182,7 @@ recarregar a página volta para ela — mas não há URL por tela.
 | — | `Login.jsx` | Entrar e criar conta | só `theme`, `s` e `onEntrar` — não recebe as comuns |
 | `dashboard` | `Dashboard.jsx` | Resumo do dia, próximo passo, evolução | `dash`, `setDash`, `acervo` |
 | `cronograma` | `Cronograma.jsx` | Sugestão de semana, calendário e Google Agenda (ver "Cronograma") | `diasDeEstudo`, `bloco`, `salvarAgenda`, `perfilCarregado`, `sessaoExpirou` |
-| `questoes` | `Questoes.jsx` | Escolha de fonte e quiz | `quest`, `setQuest`, `registrar`, `acervo`, `recarregarAcervo` |
+| `questoes` | `Questoes.jsx` | Meta do dia, cadernos por matéria e quiz (ver "Questões") | `quest`, `setQuest`, `registrar`, `acervo`, `recarregarAcervo` |
 | `simulados` | `Simulados.jsx` | Hub, formulário, prova e resultado do simulado (ver "Simulados") | `sim`, `setSim`, `setResultadosHistorico`, `registrarRespostas`, `acervo`, `recarregarAcervo` |
 | `revisoes` | `Revisoes.jsx` | Erradas, favoritas, menor desempenho | `rev`, `setRev`, `favoritos`, `toggleFavorito` |
 | `desempenho` | `Desempenho.jsx` | Evolução ao longo do tempo | `perf`, `setPerf` |
@@ -191,6 +193,37 @@ recarregar a página volta para ela — mas não há URL por tela.
 | `configuracoes` | `Configuracoes.jsx` | Nome, meta, data da prova, "Meu perfil de estudo", tema | `perfil`, `nome`, `atualizarNome`, `atualizarConfig`, `themeKey`, `setTheme`, `salvarFicha`, `fase`, `opcoesDeDificuldade`, `acervoCarregando`, `ancora`/`ancoraUsada` |
 | — (perfil sem ficha) | `FichaDeBoasVindas.jsx` | Ficha obrigatória antes do app (ver "Ficha de boas-vindas") | não recebe as comuns: `theme`, `s`, `email`, `iniciais`, `opcoesDeDificuldade`, `acervoCarregando`, `onSalvar`, `onEntrar`, `onSair` |
 | — (`state.fase`) | `SegundaFase.jsx` | 2ª fase: questões discursivas (ver "Fases") | não recebe as comuns: `theme`, `s`, `fase`, `estado`/`setEstado` (`state.segundaFase`), `gravarResposta`, `sessaoExpirou` |
+
+### Questões: meta do dia e cadernos
+
+A tela abre com a **meta do dia** (o `btnPrimary` "Começar meta do dia") e,
+quando o acervo tem matéria, os **cadernos**: um card por matéria mais o
+"Todas as matérias". Um clique num caderno já abre o quiz, fora da meta.
+
+O quiz sai em um de três modos, decididos em `Questoes.jsx`:
+- **recomendado**: a matéria do plano (`materiaDeHoje`);
+- **escolhida**: a matéria de um caderno, de Disciplinas ou do "Praticar";
+- **misto**: um pouco de cada matéria (`quest.misto = true`). Sem matéria no
+  plano, o recomendado é o próprio misto.
+
+`quest.misto` vai para o localStorage com o resto de `quest`, então **todo**
+caminho que escolhe uma matéria grava `misto: false`. Sem isso, o misto
+salvo ganhava da matéria escolhida em `praticarDisciplina`, e o quiz saía do
+acervo todo (há um e2e para isso).
+
+- **`montarCadernos`** (`lib/cadernos.js`) só usa dado real: acervo,
+  tentativas e `QUESTOES_NA_PROVA`. A taxa de acerto só aparece com
+  `AMOSTRA_MINIMA` (10) tentativas: 2 de 2 viraria "100%". Selos: "Do seu
+  plano", "Maior peso", "Ponto fraco" (pior taxa, abaixo de 50%) e "Nunca
+  estudada", no máximo um por card e nessa prioridade.
+- **`sortearMisto`** (`lib/quiz.js`) distribui as vagas pelo método D'Hondt
+  sobre o peso de cada matéria na prova. Assim, quiz curto espalha pelas
+  matérias que mais caem, em vez de dar tudo à maior. Dentro de cada matéria
+  vale `sortearQuiz` (nunca respondidas primeiro).
+- **`QUESTOES_NA_PROVA`** (`lib/quiz.js`) copia a distribuição de
+  `BLOCOS_44_45` em `questoes-service/disciplinas.js` (TaskManager). Se o
+  edital mudar, as duas tabelas mudam juntas; o teste `misto.test.js` confere
+  20 matérias somando 80.
 
 ### Simulados (layout "estilo LEGJUR")
 
