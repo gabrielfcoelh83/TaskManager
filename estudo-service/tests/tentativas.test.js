@@ -105,6 +105,88 @@ describe('POST /tentativas — registro', () => {
     );
     expect(rows).toHaveLength(0);
   });
+
+  it('alternativa e tempo_seg fora da faixa do tipo da coluna são 400, não 500', async () => {
+    const corpos = [
+      { alternativa: 32768 },
+      { alternativa: -1 },
+      { tempo_seg: 2147483648 },
+      { tempo_seg: -1 },
+    ];
+    for (const extra of corpos) {
+      const res = await request(app)
+        .post('/tentativas')
+        .set('Authorization', como(DONO))
+        .send({ questao_id: 'q-fora-da-faixa', correta: true, ...extra });
+      expect(res.status).toBe(400);
+    }
+
+    const { rows } = await pool.query(
+      'SELECT 1 FROM tentativas WHERE questao_id = $1',
+      ['q-fora-da-faixa']
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('aceita os tetos exatos de alternativa e tempo_seg', async () => {
+    const res = await request(app)
+      .post('/tentativas')
+      .set('Authorization', como(DONO))
+      .send({ questao_id: 'q-no-teto', correta: true, alternativa: 32767, tempo_seg: 2147483647 });
+
+    expect(res.status).toBe(201);
+  });
+});
+
+describe('POST /tentativas — origem', () => {
+  it('grava a origem e a devolve no GET', async () => {
+    const res = await request(app)
+      .post('/tentativas')
+      .set('Authorization', como(DONO))
+      .send({ questao_id: 'q-origem', correta: true, alternativa: 2, origem: ' quiz ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.origem).toBe('quiz');
+
+    const lista = await request(app).get('/tentativas').set('Authorization', como(DONO));
+    expect(lista.body.find((t) => t.questao_id === 'q-origem').origem).toBe('quiz');
+  });
+
+  it('questão em branco do simulado: errada, sem alternativa, com origem', async () => {
+    const res = await request(app)
+      .post('/tentativas')
+      .set('Authorization', como(DONO))
+      .send({ questao_id: 'q-branco', correta: false, alternativa: null, origem: 'simulado' });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ correta: false, alternativa: null, origem: 'simulado' });
+  });
+
+  it('sem origem, segue nula — front antigo continua funcionando', async () => {
+    const res = await request(app)
+      .post('/tentativas')
+      .set('Authorization', como(DONO))
+      .send({ questao_id: 'q-sem-origem', correta: true });
+
+    expect(res.status).toBe(201);
+    expect(res.body.origem).toBeNull();
+  });
+
+  it('recusa origem vazia, longa demais ou que não é texto', async () => {
+    for (const origem of ['   ', 'x'.repeat(21), 7]) {
+      const res = await request(app)
+        .post('/tentativas')
+        .set('Authorization', como(DONO))
+        .send({ questao_id: 'q-origem-invalida', correta: true, origem });
+      expect(res.status).toBe(400);
+    }
+
+    const { rows } = await pool.query(
+      'SELECT 1 FROM tentativas WHERE questao_id = $1',
+      ['q-origem-invalida']
+    );
+    expect(rows).toHaveLength(0);
+  });
 });
 
 describe('GET /tentativas — leitura por dono', () => {
@@ -531,5 +613,93 @@ describe('PATCH /tentativas/:id — feedback', () => {
     const res = await request(app).patch(`/tentativas/${id}`).send({ tipo: 'chute' });
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe('PATCH /tentativas/:id — motivo do erro (Caderno de Erros)', () => {
+  const criarErrada = async (questaoId) => {
+    const { rows } = await pool.query(
+      `INSERT INTO tentativas (user_id, questao_id, correta) VALUES ($1, $2, false)
+       RETURNING id`,
+      [DONO, questaoId]
+    );
+    return rows[0].id;
+  };
+
+  it('grava motivo e nota, e o GET devolve os dois', async () => {
+    const id = await criarErrada('q-motivo');
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ motivo: ' confundi ', motivo_nota: 'troquei usucapião ordinária e extraordinária' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.motivo).toBe('confundi');
+
+    const lista = await request(app).get('/tentativas').set('Authorization', como(DONO));
+    const linha = lista.body.find((t) => t.questao_id === 'q-motivo');
+    expect(linha.motivo).toBe('confundi');
+    expect(linha.motivo_nota).toBe('troquei usucapião ordinária e extraordinária');
+  });
+
+  it('anotar o motivo depois não apaga o feedback de certeza', async () => {
+    const id = await criarErrada('q-motivo-depois');
+    await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ tipo: 'chute', certeza: 20 });
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ motivo: 'não conhecia' });
+
+    expect(res.body).toMatchObject({ tipo: 'chute', certeza: 20, motivo: 'não conhecia' });
+  });
+
+  it('null limpa o motivo', async () => {
+    const id = await criarErrada('q-motivo-limpa');
+    await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ motivo: 'li errado' });
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ motivo: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.motivo).toBeNull();
+  });
+
+  it('recusa nota acima de 280 caracteres e motivo vazio', async () => {
+    const id = await criarErrada('q-motivo-invalido');
+
+    const longa = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ motivo_nota: 'x'.repeat(281) });
+    expect(longa.status).toBe(400);
+
+    const vazio = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(DONO))
+      .send({ motivo: '   ' });
+    expect(vazio.status).toBe(400);
+  });
+
+  it('não anota motivo em tentativa de outra pessoa', async () => {
+    const id = await criarErrada('q-motivo-alheio');
+
+    const res = await request(app)
+      .patch(`/tentativas/${id}`)
+      .set('Authorization', como(OUTRO))
+      .send({ motivo: 'confundi' });
+
+    expect(res.status).toBe(404);
+    const { rows } = await pool.query('SELECT motivo FROM tentativas WHERE id = $1', [id]);
+    expect(rows[0].motivo).toBeNull();
   });
 });

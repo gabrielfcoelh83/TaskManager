@@ -15,7 +15,7 @@ Plataforma de microserviços para educação jurídica (preparação OAB/Magistr
 | **API Gateway** | 3000 | - | Roteamento único (Express) |
 | **Auth Service** | 3001 | `auth_db` | Registro, login, JWT |
 | **User Service** | 3002 | `user_db` | Perfis de usuário |
-| **Estudo Service** | 3004 | `estudo_db` | Tentativas de questões e respostas às discursivas |
+| **Estudo Service** | 3004 | `estudo_db` | Tentativas de questões (com motivo do erro e origem), simulados de prova real e respostas às discursivas |
 | **Questões Service** | 3005 | `questoes_db` | Questões do Exame de Ordem (objetivas e discursivas da 2ª fase) |
 
 ---
@@ -24,60 +24,37 @@ Plataforma de microserviços para educação jurídica (preparação OAB/Magistr
 
 ```
 TaskManager/
-├── shared/                      # (NOVO) Código compartilhado
-│   ├── middleware/
-│   │   ├── auth.js             # verifyToken (CENTRALIZADO)
-│   │   └── errorHandler.js     # Tratamento de erro unificado
-│   ├── validators/             # (Vazio por agora)
-│   │   ├── user.js
-│   │   └── question.js
-│   ├── utils/
-│   │   ├── db.js               # Configuração PostgreSQL
-│   │   └── redis.js            # Configuração Redis
-│   ├── package.json            # npm package local
-│   └── README.md
 ├── gateway/                     # API Gateway
-│   ├── routes/
-│   ├── package.json            # Adiciona: "@shared": "file:../shared"
-│   ├── app.js
-│   └── index.js
-├── auth-service/               # Autenticação
-│   ├── app.js
+│   ├── index.js                # rotas explícitas, X-Request-ID, logs
+│   ├── circuit-breaker.js
+│   └── gateway.test.js
+├── auth-service/               # Autenticação, e-mail, Google Calendar
+│   ├── app.js                  # rotas + verificação do JWT (exporta app/pool)
+│   ├── index.js                # roda as migrations e só então escuta
+│   ├── migrate.js
 │   ├── migrations/
-│   ├── tests/
-│   ├── package.json            # Adiciona: "@shared": "file:../shared"
-│   └── index.js
-├── user-service/               # Perfis
-│   ├── app.js
-│   ├── migrations/
-│   ├── tests/
-│   ├── package.json            # Adiciona: "@shared": "file:../shared"
-│   └── index.js
-├── estudo-service/             # Registro de tentativas
-│   ├── app.js
-│   ├── migrations/
-│   ├── tests/
-│   ├── package.json            # Adiciona: "@shared": "file:../shared"
-│   └── index.js
+│   └── tests/
+├── user-service/               # Perfis (mesma estrutura do auth-service)
+├── estudo-service/             # Tentativas e respostas às discursivas
 ├── questoes-service/           # Banco de questões
-│   ├── app.js
-│   ├── migrations/
-│   ├── tests/
-│   ├── package.json            # Adiciona: "@shared": "file:../shared"
-│   └── index.js
-├── nginx/                       # Proxy reverso
+│   ├── importador/             # parsers Python dos PDFs da FGV (fora da imagem)
+│   └── carregar*.js, classificar.js, explicar.js   # scripts de carga
+├── nginx/                       # Proxy reverso, TLS, CORS, rate limit
 │   ├── conf.d/
 │   ├── snippets/
-│   └── certs/
-├── scripts/                     # Scripts úteis
-├── docs/                        # Documentação (NOVO)
+│   └── certs/                  # não versionado
+├── scripts/                     # backup, restore, certificados
+├── docs/
 │   └── ARCHITECTURE.md          # Este arquivo
-├── docker-compose.yml           # Orquestração local
-├── docker-compose.prod.yml      # Orquestração produção
+├── docker-compose.yml           # Orquestração local (build do código)
+├── docker-compose.prod.yml      # Orquestração produção (imagens do GHCR)
 ├── .github/workflows/           # CI/CD
 ├── README.md
-└── init.sql                     # Schema inicial
+└── init.sql                     # Só cria os bancos; schema vem das migrations
 ```
+
+Não há código compartilhado entre serviços: cada um tem o próprio
+`package.json`, `migrate.js` e middleware `verifyToken`.
 
 ---
 
@@ -87,7 +64,7 @@ Cada serviço possui seu próprio banco de dados PostgreSQL:
 
 - `auth_db` - usuários, tokens
 - `user_db` - perfis, preferências
-- `estudo_db` - tentativas de questões (`tentativas`), respostas às discursivas (`respostas_discursivas`)
+- `estudo_db` - tentativas de questões (`tentativas`), simulados de prova real (`simulados`), respostas às discursivas (`respostas_discursivas`)
 - `questoes_db` - objetivas (`questoes`), discursivas da 2ª fase (`questoes_discursivas`)
 
 **Benefício:** Escalabilidade independente, sem acoplamento de dados
@@ -321,6 +298,52 @@ No gateway, `/respostas` é declarada antes de `/:id`.
 
 ---
 
+## 📕 Caderno de Erros e simulados de prova real
+
+**Motivo do erro** (migration 005). `tentativas.motivo` (até 40 caracteres)
+e `tentativas.motivo_nota` (texto livre, até 280), anotados depois pelo
+`PATCH /api/tentativas/:id`, que já recebia `tipo` e `certeza`. Os dois são
+opcionais e não têm CHECK no vocabulário (mesmo raciocínio do `tipo`). O
+motivo fica na tentativa, e não na questão: errar de novo é um erro novo.
+O caderno em si não tem tabela; o front o calcula a partir da última
+tentativa de cada questão (`lib/revisao.js` no MlDireito).
+
+**Origem da tentativa** (migration 007). `tentativas.origem` (`quiz`,
+`simulado`, `revisao`; até 20 caracteres, sem CHECK) separa o erro feito sob
+pressão de prova do erro de estudo. Nula nas tentativas anteriores à
+migration. O simulado grava também as questões em branco, como erradas e com
+`alternativa` nula.
+
+**Simulados** (migration 006). Uma prova inteira (exame + tipo de caderno),
+80 questões, 5 horas. `simulados` guarda status (`aberto`, `finalizado`,
+`abandonado`), `refeito`, início/fim, `acertos` e `anuladas`; nota =
+acertos + anuladas, comparada ao corte de 40. `tentativas.simulado_id` liga a
+resposta à prova (FK, mesmo banco).
+
+- Um aberto por pessoa, garantido pelo índice único parcial
+  `uq_simulados_um_aberto`, e não pela rota.
+- `refeito` olha só o exame: os tipos 1 a 4 são a mesma prova embaralhada.
+  Abandonado só conta se teve alguma resposta.
+- Passar das 5 horas não bloqueia; o simulado sai com `fora_do_tempo = true`
+  (nulo enquanto aberto e no abandonado, que não tem nota).
+- Resposta com `simulado_id` tem `origem = 'simulado'` (preenchida se vier
+  ausente; outra origem é 400). O INSERT confere o simulado aberto com
+  `FOR SHARE`, para não gravar numa prova que outra aba está finalizando.
+- **Limite conhecido:** `acertos` e `anuladas` vêm do front, que tem o
+  gabarito (o questoes_db não é acessível daqui). A pessoa pode declarar a
+  nota que quiser, e só engana a si mesma. Se houver ranking entre alunos, o
+  finalizar precisa corrigir a prova consultando o questoes-service.
+
+| Gateway | Serviço | Retorno |
+|---------|---------|---------|
+| `POST /api/simulados` | estudo | corpo `{exame, tipo}` → 201; 409 `{error, simulado_id}` se já houver um aberto |
+| `GET /api/simulados` | estudo | do próprio usuário, mais recente primeiro, teto 200; `?paginado=1&limite&offset` → `{simulados, total, limite, offset}` |
+| `POST /api/simulados/:id/finalizar` | estudo | corpo `{acertos, anuladas}` → 200; 409 se já encerrado; 404 se não é seu |
+| `POST /api/simulados/:id/abandonar` | estudo | encerra sem nota; as tentativas ficam |
+| `POST /api/tentativas` | estudo | aceita `simulado_id` e `origem` opcionais; 409 se o simulado já encerrou, 404 se não é seu |
+
+---
+
 ## 📡 Comunicação Entre Serviços
 
 ### Síncrona (HTTP)
@@ -329,22 +352,22 @@ No gateway, `/respostas` é declarada antes de `/:id`.
 
 ### Assíncrona (Redis Streams)
 - Auth Service → User Service (via `user-events` stream)
-- Rastreamento via `XREAD` com grupos de consumidores
-
-**Problema Atual:** Stream `user-events` SEM MAXLEN (vazamento de memória)  
-**Solução:** Adicionar `MAXLEN ~10000` em `xadd()`
+- O auth-service publica com `XADD ... MAXLEN ~ 10000`; o user-service consome
+  com `XREADGROUP` num consumer group e confirma com `XACK`.
 
 ---
 
 ## 🔐 Autenticação (JWT)
 
 **Fluxo:**
-1. Cliente envia `email` + `password` para `/auth/register` ou `/auth/login`
-2. Auth Service gera JWT com `userId` no payload
+1. Cliente envia `email` + `password` para `/api/auth/register` ou `/api/auth/login`
+2. Auth Service gera JWT com `{ id, email }` no payload, válido por 7 dias
+   (sem denylist: um token emitido vale até expirar)
 3. Cliente armazena JWT
 4. Cada request inclui `Authorization: Bearer <JWT>`
-5. Middleware `verifyToken` (em shared/) valida o token
-6. `req.user` contém `{ userId, email }`
+5. O gateway só repassa o cabeçalho; cada serviço valida a assinatura
+   localmente no próprio `verifyToken` (`app.js`), com o `JWT_SECRET` compartilhado
+6. `req.user` contém `{ id, email, iat, exp }`; o dono do recurso é `req.user.id`
 
 **Login com o Google:** `POST /auth/google` recebe o ID token do Google
 Identity Services, confere assinatura e audiência com `GOOGLE_CLIENT_ID` e
@@ -389,29 +412,39 @@ e confirm ficam fora do breaker (o `code` do Google é de uso único).
 5. `GET /status` → `{connected, connectedAt}`. `DELETE /api/calendar/google`
    apaga a conexão e tenta revogar o token no Google (melhor esforço).
 
-**Problema Atual:** `verifyToken` duplicado em 4 lugares  
-**Solução:** Centralizar em `shared/middleware/auth.js` + `@shared` no package.json
+**Dívida conhecida:** `verifyToken` está duplicado em user, estudo e
+questoes-service (o auth-service tem a própria verificação). Mudança na regra
+de validação precisa ser repetida em cada um.
 
 ---
 
 ## 📊 Schema (Exemplo auth_db)
 
+Tabela `users` como fica depois das migrations 001 a 006 (conferido com
+`\d users`; a 007 só cria a tabela de pendências do Google Agenda):
+
 ```sql
 CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  name VARCHAR(255),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  id                SERIAL PRIMARY KEY,
+  email             VARCHAR(255) UNIQUE NOT NULL,
+  password_hash     VARCHAR(255),          -- NULL em conta só Google
+  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  google_sub        VARCHAR(255),          -- único quando não nulo
+  status            VARCHAR(20) NOT NULL DEFAULT 'active', -- pending | active | blocked
+  email_verified_at TIMESTAMPTZ,
+  blocked_at        TIMESTAMPTZ,
+  blocked_reason    TEXT
 );
 
 CREATE TABLE schema_migrations (
-  version BIGINT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL UNIQUE,
-  executed_at TIMESTAMP DEFAULT NOW()
+  version    TEXT PRIMARY KEY,             -- nome do arquivo .sql
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
+
+Outras tabelas do auth_db: `email_verification_tokens`,
+`password_reset_tokens`, `google_calendar_connections`,
+`google_calendar_pending_connections`.
 
 ---
 
@@ -429,11 +462,8 @@ Sobe:
 - 5 serviços Node.js
 
 ### Produção (GitHub Actions + Docker)
-1. Audit: `npm audit` por serviço
-2. Build: Imagens Docker multi-stage
-3. Deploy: GitHub Container Registry (GHCR)
-4. Smoke tests: Health checks
-5. Rollback: Automático se falhar
+Ver a seção seguinte. O deploy vai por SSH para `/srv/projects/TaskManager`
+na VPS e usa `docker-compose.prod.yml`, com as imagens do GHCR.
 
 ---
 
@@ -442,37 +472,44 @@ Sobe:
 **Arquivo:** `.github/workflows/ci-cd.yml`
 
 **Stages:**
-1. **Audit** - npm audit em cada serviço
-2. **Build** - Compile código, crie imagens Docker
-3. **Deploy** - Push para GHCR, atualiza containers
+1. **Audit**: `npm audit --omit=dev --audit-level=high` em cada serviço
+2. **Test**: `npm test` por serviço, contra Postgres e Redis reais (service containers)
+3. **Build & push**: imagem de cada serviço para o GHCR, com as tags `latest` e `${sha}`
+4. **Deploy**: SSH na VPS, gera o `.env`, testa a config do nginx num container
+   descartável, sobe o nginx e depois o resto da stack
+5. **Smoke test**: nginx/TLS, `/health/services` sem `DOWN`, todos os containers
+   na tag nova, exatamente um `Access-Control-Allow-Origin` correto. Se passar,
+   grava `.last_good_tag`
+6. **Rollback**: se algo falhar, volta para `.last_good_tag` e verifica de novo
 
-**Triggers:** Push to main, Pull requests
+**Triggers:** push na `main`, pull request para `main` (só audit e testes,
+sem publicar imagem) e `workflow_dispatch` manual. Mudança só em `.md` não
+dispara pull request nem execução manual.
 
 ---
 
 ## 📝 Migrações
 
-**Tool:** Node + PostgreSQL advisory locks
-
-**Exemplo:**
-```bash
-cd auth-service
-node migrate.js                    # Rodar todas
-node migrate.js --rollback 001     # Reverter uma
-```
+**Ferramenta:** `migrate.js` próprio de cada serviço (sem biblioteca), chamado
+pelo `index.js` antes do `listen`. Não tem CLI nem rollback: migration errada
+se corrige com outra migration.
 
 **Estrutura:**
-- `migrations/001-create-users.sql`
-- `migrations/002-add-index.sql`
+- `migrations/001_baseline.sql`, `migrations/002_feedback.sql`, ...
+- Aplicadas em ordem lexicográfica do nome, cada uma numa transação
+- Registradas em `schema_migrations.version` pelo nome do arquivo, então
+  editar um arquivo já aplicado não tem efeito
 
-**Segurança:** Advisory locks previnem conflitos
+**Concorrência:** `pg_advisory_lock` impede que duas réplicas apliquem a mesma
+migration ao mesmo tempo. O lock vale por banco, por isso serviços diferentes
+podem usar o mesmo `LOCK_ID`.
 
 ---
 
 ## 🎯 Próximas Melhorias
 
 ### Curto Prazo (1-2 semanas)
-- [x] Centralizar `verifyToken` em `shared/`
+- [ ] Centralizar `verifyToken` (hoje duplicado em cada serviço)
 - [x] Adicionar MAXLEN ao Redis Streams
 - [ ] Padronizar validação (Zod/Yup)
 
@@ -480,7 +517,7 @@ node migrate.js --rollback 001     # Reverter uma
 - [x] Request tracing (X-Request-ID)
 - [x] Logging estruturado no gateway
 - [x] Circuit breaker no gateway
-- [ ] Rate limiting por usuário
+- [ ] Rate limiting por usuário (hoje só por IP, no nginx)
 - [x] Índices operacionais principais em BD
 
 ### Longo Prazo (2-3 meses)
@@ -500,18 +537,24 @@ node migrate.js --rollback 001     # Reverter uma
 
 ## 🧪 Testes
 
-**Cobertura atual:**
-- auth-service: ✅ Testes de integração
-- user-service: ✅ Testes de integração
-- estudo-service: ✅ Testes básicos
-- questoes-service: ✅ Testes básicos
-- gateway: ⚠️ Apenas health check
+**Cobertura atual** (contagem de 2026-10-14):
+- auth-service: 70 testes de integração (inclui o Google Agenda)
+- user-service: 19 testes de integração
+- estudo-service: 119 testes de integração
+- questoes-service: 379 testes, entre eles os `unittest` Python do importador,
+  chamados pelo Jest
+- gateway: 22 testes (request ID, repasse de status/erro, timeout sem retry,
+  circuit breaker, simulados, Google Agenda), com o adapter do axios mockado
 
 **Rodando testes:**
 ```bash
 cd {service-name}
 npm test
 ```
+
+Exceto os do gateway, os testes precisam de Postgres (bancos de `init.sql`) e
+Redis reais. As variáveis estão no job `test` do workflow (`DB_*`,
+`JWT_SECRET`, `NODE_ENV=test`, `RESEND_API_KEY`, `REDIS_URL`).
 
 ---
 
@@ -525,9 +568,9 @@ npm test
 - Eventos assíncronos via Redis
 
 ❌ **Falta**
-- Observabilidade (apenas logs de console)
-- Resiliência avançada (sem circuit breaker)
-- Rate limiting
+- Métricas (hoje só logs: estruturados no gateway, console nos serviços)
+- Retry entre serviços (o gateway tem timeout e circuit breaker, mas nenhum retry)
+- Rate limiting por usuário (só existe por IP, no nginx)
 - Centralização de logs
 
 ---
@@ -550,7 +593,7 @@ R: Separação de responsabilidades. Cada serviço é escalável independentemen
 R: Gateway retorna 503. Frontend mostra erro. Usuário pode tentar novamente.
 
 **P: Como adicionar novo serviço?**  
-R: 1) Criar pasta `novo-service/` 2) Copiar `app.js` de outro 3) Criar migrations 4) Adicionar ao docker-compose.yml
+R: 1) Criar pasta `novo-service/` 2) Copiar `app.js`, `index.js` e `migrate.js` de outro 3) Criar migrations 4) Criar o banco em `init.sql` (e manualmente nos ambientes que já existem, porque `init.sql` só roda com volume novo) 5) Adicionar aos dois composes 6) Incluir o banco em `BANCOS` no `scripts/backup.sh` 7) Incluir o serviço nas listas do workflow (audit, test, build, smoke test) 8) Criar as rotas no gateway
 
 ---
 

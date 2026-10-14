@@ -1,0 +1,13 @@
+-- De onde veio a tentativa: quiz, simulado ou revisão.
+--
+-- A revisão trata erros dos dois cenários de jeitos diferentes: o erro do
+-- simulado foi feito sob pressão de tempo (e a questão em branco no fim da
+-- prova aponta ritmo, não conteúdo), e o acerto na validação da revisão não
+-- deve contar como acerto de estudo novo. Só o simulado de prova real tem
+-- `simulado_id`; o sorteado não deixava rastro nenhum.
+--
+-- Anulável: as tentativas anteriores a esta migration não têm origem
+-- conhecida, e inventar 'quiz' para elas seria mentir sobre o simulado.
+-- Sem CHECK, pelo mesmo motivo do `tipo` (002, ADR-001): o vocabulário é do
+-- produto. O limite de tamanho é validado na rota.
+ALTER TABLE tentativas ADD COLUMN IF NOT EXISTS origem TEXT;
