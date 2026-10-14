@@ -1,25 +1,62 @@
-# CODING AGENTS: READ THIS FIRST
+# MA Questões
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+Front-end de estudo para o Exame da OAB: questões reais da 1ª fase (OAB/FGV),
+simulados, revisões, cronograma semanal (com envio opcional ao Google
+Calendar) e a 2ª fase de Direito Civil com conferência de fundamentos.
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+SPA em React 19 + Vite (TypeScript entrando aos poucos), publicada na Vercel. Os dados vêm do gateway da
+plataforma de microserviços (repo **TaskManager**), mais algumas funções
+serverless em `api/` (DataJud e a camada de IA).
 
-## What you should do — IMPORTANT
+## Rodar em desenvolvimento
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+Requisitos: Node 20+, Docker (para o backend) e `jq`.
 
-**Read `project/MA Questoes.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+```bash
+npm ci
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+# 1. Backend: o mesmo que a CI usa. Sobe postgres, redis, auth, user, estudo,
+#    questoes e gateway (porta 3000), semeia o acervo e cria o usuário de teste
+#    maria.lais@email.com / senha-de-teste-123
+export E2E_JWT_SECRET=$(openssl rand -hex 32)
+./scripts/e2e-backend.sh
+#    (alternativa: `docker compose up -d` no repo TaskManager)
 
-## About the design files
+# 2. Funções de api/ (opcional; só DataJud/IA). Fica fora da 3000, que é do gateway
+PORT=3100 VITE_API_URL=http://localhost:3000 node server/dev-api.js
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+# 3. Front em http://localhost:5173
+npm run dev
+```
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+Em dev, `VITE_API_URL` fica vazia: o proxy do `vite.config.js` manda as rotas
+do gateway para a porta 3000 e o resto de `/api` para o dev-api na 3100. Se a
+3000 estiver ocupada, `GATEWAY_PORT=3300` vale para o script, o compose e o
+proxy. Cada variável de ambiente está explicada em [.env.example](.env.example);
+segredos (`GEMINI_API_KEY`, `VITE_GOOGLE_CLIENT_ID`) vão em `.env.local`.
 
-## Bundle contents
+## Testes
 
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `Design web inspirado em mockups` project files (HTML prototypes, assets, components)
+| Comando | O que roda |
+|---|---|
+| `npm run ci` | lint + testes de lib + build (sem backend) |
+| `npm run test:lib` | todo `tests/*.test.js` (menos `api.test.js`), em UTC e America/Sao_Paulo |
+| `npm run test:e2e` | Playwright contra o backend do passo 1 |
+| `npm run test:api` | rotas de `api/` (backend + dev-api no ar) |
+
+Para derrubar o backend e limpar os volumes: `./scripts/e2e-backend.sh down`.
+
+## Deploy
+
+Push na `main` roda `.github/workflows/ci.yml` (lint → testes de lib → e2e →
+build) e publica na Vercel quando o `VERCEL_TOKEN` está configurado. Em
+produção, `VITE_API_URL` precisa estar nas variáveis do projeto na Vercel.
+
+## Documentação
+
+- [src/ARCHITECTURE.md](src/ARCHITECTURE.md): estado, sessão, API, fases e pendências conhecidas.
+- [DESIGN.md](DESIGN.md): linguagem visual ("Papel e tinta").
+- [CLAUDE.md](CLAUDE.md): guia para agentes de código.
+
+`project/` e `chats/` guardam os protótipos HTML e a conversa do Claude
+Design que deram origem às telas. São referência histórica, não código do app.
