@@ -1,0 +1,26 @@
+{
+  // Migração gradual para TypeScript: os .js/.jsx continuam como estão e não
+  // são checados (checkJs: false); arquivo .ts/.tsx novo ou convertido já
+  // nasce em strict. Converter começa por src/lib/ (funções puras, com teste).
+  // Substitui o jsconfig.json: o alias @/ mora aqui agora.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}
