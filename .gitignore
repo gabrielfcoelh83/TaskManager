@@ -3,6 +3,11 @@ node_modules/
 npm-debug.log*
 .last_good_tag
 
+# Override local do compose de dev (NODE_ENV=test pula a confirmação de
+# e-mail). O Compose carrega este arquivo sozinho: versionado, valeria para
+# qualquer máquina que rodasse `docker compose up`.
+docker-compose.override.yml
+
 # Certificados e chaves privadas nunca são versionados.
 # Gerados na VM pelo scripts/bootstrap-cert.sh e pelo certbot.
 nginx/certs/

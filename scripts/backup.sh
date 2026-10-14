@@ -1,5 +1,5 @@
 #!/bin/sh
-# Dump dos três bancos, comprimido, com retenção por dias.
+# Dump dos bancos listados em BANCOS, comprimido, com retenção por dias.
 set -eu
 
 DESTINO="${DESTINO:-/backups}"
