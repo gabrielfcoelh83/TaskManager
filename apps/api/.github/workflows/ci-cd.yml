@@ -218,6 +218,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Login com o Google e Google Agenda estão em produção: sem estas
+      # variáveis o auth-service sobe, mas as rotas respondem 503 e o front
+      # quebra em silêncio. Melhor reprovar o deploy antes de tocar na VM.
+      # A redirect URI precisa apontar para o callback desta mesma API (é a
+      # URL cadastrada no console do Google), por isso é comparada com
+      # APP_BASE_URL em vez de ter o domínio repetido aqui.
+      - name: Validar variáveis do Google
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_TOKEN_ENCRYPTION_KEY: ${{ secrets.GOOGLE_TOKEN_ENCRYPTION_KEY }}
+          GOOGLE_CALENDAR_REDIRECT_URI: ${{ vars.GOOGLE_CALENDAR_REDIRECT_URI }}
+        run: |
+          set -euo pipefail
+          base="${APP_BASE_URL:-https://api.mlkoab.tech}"
+          esperada="${base%/}/api/calendar/google/callback"
+          [ -n "$GOOGLE_CLIENT_ID" ] \
+            || { echo "::error::GOOGLE_CLIENT_ID ausente no ambiente production"; exit 1; }
+          [ -n "$GOOGLE_CLIENT_SECRET" ] \
+            || { echo "::error::GOOGLE_CLIENT_SECRET ausente no ambiente production"; exit 1; }
+          printf '%s' "$GOOGLE_TOKEN_ENCRYPTION_KEY" | grep -Eq '^[a-fA-F0-9]{64}$' \
+            || { echo "::error::GOOGLE_TOKEN_ENCRYPTION_KEY deve ter 64 caracteres hexadecimais no ambiente production"; exit 1; }
+          [ "$GOOGLE_CALENDAR_REDIRECT_URI" = "$esperada" ] \
+            || { echo "::error::GOOGLE_CALENDAR_REDIRECT_URI deve ser $esperada"; exit 1; }
+
       - name: Preparar chave SSH
         env:
           KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
@@ -276,7 +302,8 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           FRONTEND_BASE_URL: ${{ vars.FRONTEND_BASE_URL }}
           # Variável, não secret: o Client ID do Google é público (vai no
-          # bundle do front). Vazia, a rota /google responde 503.
+          # bundle do front). As quatro GOOGLE_* já foram exigidas no passo
+          # "Validar variáveis do Google", por isso não têm valor padrão aqui.
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_TOKEN_ENCRYPTION_KEY: ${{ secrets.GOOGLE_TOKEN_ENCRYPTION_KEY }}
@@ -295,10 +322,10 @@ jobs:
             EMAIL_FROM="${EMAIL_FROM:-noreply@api.mlkoab.tech}" \
             APP_BASE_URL="${APP_BASE_URL:-https://api.mlkoab.tech}" \
             FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-https://mlkoab.tech}" \
-            GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}" \
-            GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}" \
-            GOOGLE_TOKEN_ENCRYPTION_KEY="${GOOGLE_TOKEN_ENCRYPTION_KEY:-}" \
-            GOOGLE_CALENDAR_REDIRECT_URI="${GOOGLE_CALENDAR_REDIRECT_URI:-https://api.mlkoab.tech/api/calendar/google/callback}" \
+            GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+            GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
+            GOOGLE_TOKEN_ENCRYPTION_KEY="$GOOGLE_TOKEN_ENCRYPTION_KEY" \
+            GOOGLE_CALENDAR_REDIRECT_URI="$GOOGLE_CALENDAR_REDIRECT_URI" \
             'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /srv/projects/TaskManager
