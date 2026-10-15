@@ -203,7 +203,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./apps/api/${{ matrix.service }}
-          push: true
+          # Fora da main o build roda (valida Dockerfile e contexto), mas nada
+          # é publicado: :latest só pode vir do que está em produção.
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
