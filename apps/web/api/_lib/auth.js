@@ -13,7 +13,15 @@
 
 import axios from 'axios';
 
-const API_URL = process.env.VITE_API_URL || 'https://api.mlkoab.tech';
+// Só o deploy de produção da Vercel pode cair na API de produção sem
+// VITE_API_URL. Preview, dev-api local e CI caem no gateway local: antes o
+// padrão era sempre api.mlkoab.tech, e um Preview sem a variável validava
+// tokens contra produção sem ninguém perceber.
+const API_URL =
+  process.env.VITE_API_URL ||
+  (process.env.VERCEL_ENV === 'production'
+    ? 'https://api.mlkoab.tech'
+    : 'http://localhost:3000');
 
 export async function exigirAutenticacao(req, res) {
   const token = req.headers.authorization;

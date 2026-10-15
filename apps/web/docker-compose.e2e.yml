@@ -4,16 +4,14 @@
 # só com o navegador: ela exerce login de verdade e gravação de verdade. Mockar
 # a API aqui esconderia exatamente o que esses testes existem para verificar.
 #
-# As imagens são as mesmas publicadas pelo pipeline da plataforma (repo
-# TaskManager) e são públicas no ghcr, então não há login nem token envolvido.
+# Os serviços são CONSTRUÍDOS a partir de ../api/<serviço>, o código do mesmo
+# commit do monorepo — não mais as imagens `:latest` do ghcr. Assim o e2e testa
+# o front contra o backend que ele vai encontrar quando os dois forem juntos
+# para a main, e um vermelho aqui é deste commit, não de outro repositório.
 #
 # Roda igual no CI e na sua máquina:
-#   docker compose -f docker-compose.e2e.yml up -d --wait
-#   ./scripts/e2e-backend.sh          # sobe e já cria o usuário
+#   ./scripts/e2e-backend.sh          # constrói, sobe e já cria o usuário
 #
-# `latest` e não um SHA fixo: é intencional. O front passa a quebrar no CI
-# quando o backend muda de contrato, que é a hora certa de descobrir. O preço é
-# que um build vermelho aqui pode ter origem no outro repo.
 name: ma-questoes-e2e
 
 services:
@@ -43,7 +41,7 @@ services:
       retries: 20
 
   auth-service:
-    image: ghcr.io/gabrielfcoelh83/microservices-auth-service:latest
+    build: ../api/auth-service
     environment:
       PORT: 3001
       DB_HOST: postgres
@@ -69,7 +67,7 @@ services:
       retries: 20
 
   estudo-service:
-    image: ghcr.io/gabrielfcoelh83/microservices-estudo-service:latest
+    build: ../api/estudo-service
     environment:
       PORT: 3004
       DB_HOST: postgres
@@ -95,7 +93,7 @@ services:
   # produção uma vez; deixar de fora agora repetiria o mesmo erro num teste que
   # deveria pegá-lo.
   user-service:
-    image: ghcr.io/gabrielfcoelh83/microservices-user-service:latest
+    build: ../api/user-service
     environment:
       PORT: 3002
       DB_HOST: postgres
@@ -119,7 +117,7 @@ services:
       retries: 20
 
   questoes-service:
-    image: ghcr.io/gabrielfcoelh83/microservices-questoes-service:latest
+    build: ../api/questoes-service
     environment:
       PORT: 3005
       DB_HOST: postgres
@@ -138,7 +136,7 @@ services:
       retries: 20
 
   api-gateway:
-    image: ghcr.io/gabrielfcoelh83/microservices-gateway:latest
+    build: ../api/gateway
     # A única porta publicada: é onde o proxy do Vite vai bater.
     ports:
       # Preso ao loopback. Sem o `127.0.0.1:` o Docker publica em 0.0.0.0, e
