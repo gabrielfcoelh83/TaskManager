@@ -149,7 +149,8 @@ exigirChaves('art. 186, cc', ['?:186']);
 {
   const { readFileSync, readdirSync, statSync } = await import('node:fs');
   const path = await import('node:path');
-  const raiz = new URL('..', import.meta.url).pathname;
+  const { fileURLToPath } = await import('node:url');
+  const raiz = fileURLToPath(new URL('..', import.meta.url));
   const arquivos = [];
   const varrer = (pasta) => {
     for (const nome of readdirSync(pasta)) {
