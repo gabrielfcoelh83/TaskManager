@@ -63,12 +63,18 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       RESEND_API_KEY: ${RESEND_API_KEY:?RESEND_API_KEY is required}
-      EMAIL_FROM: ${EMAIL_FROM:-noreply@api.mlkoab.tech}
-      APP_BASE_URL: ${APP_BASE_URL:-https://api.mlkoab.tech}
+      # Padrões de DEV, não de produção: sem .env, links de e-mail e o
+      # callback do Google apontam para esta máquina, nunca para
+      # api.mlkoab.tech. O remetente onboarding@resend.dev é o de teste do
+      # Resend, aceito sem domínio verificado. Produção recebe os valores
+      # reais do workflow (apps/api/docker-compose.prod.yml + api.yml).
+      EMAIL_FROM: ${EMAIL_FROM:-onboarding@resend.dev}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_TOKEN_ENCRYPTION_KEY: ${GOOGLE_TOKEN_ENCRYPTION_KEY:-}
-      GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-https://api.mlkoab.tech/api/calendar/google/callback}
+      GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-http://localhost:3000/api/calendar/google/callback}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
