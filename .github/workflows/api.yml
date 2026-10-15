@@ -1,22 +1,32 @@
-name: CI/CD
+name: API (apps/api)
 
+# Só roda quando algo da API muda. `paths` com negação no lugar do antigo
+# paths-ignore: os dois não convivem no mesmo evento. O paths-ignore que
+# estava sob workflow_dispatch nunca teve efeito (o GitHub ignora filtro de
+# caminho em disparo manual) — saiu; disparo manual roda sempre, que era a
+# intenção declarada no comentário.
 on:
   push:
     branches: [main]
+    paths:
+      - 'apps/api/**'
+      - '!apps/api/**.md'
+      - '.github/workflows/api.yml'
   workflow_dispatch:
-    # Mudança só de documentação não justifica rebuildar as imagens nem
-    # reiniciar a stack em produção. workflow_dispatch continua disponível
-    # para forçar uma execução quando necessário.
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
+    paths:
+      - 'apps/api/**'
+      - '!apps/api/**.md'
+      - '.github/workflows/api.yml'
+
+# `run:` roda dentro de apps/api. Atenção: `working-directory` explícito num
+# passo e os caminhos de `with:` (cache-dependency-path, context, path) são
+# relativos à RAIZ do repositório, não a este default — por isso levam o
+# prefixo apps/api/ por extenso.
+defaults:
+  run:
+    working-directory: apps/api
 
 env:
   REGISTRY: ghcr.io
@@ -78,8 +88,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: audit-reports
-          path: audit-reports
+          name: api-audit-reports
+          path: apps/api/audit-reports
           retention-days: 14
 
   # ────────────────────────────────────────────────────────────
@@ -131,7 +141,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+          cache-dependency-path: apps/api/${{ matrix.service }}/package-lock.json
 
       - name: Criar schema
         env:
@@ -139,11 +149,11 @@ jobs:
         run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f init.sql
 
       - name: Instalar dependências
-        working-directory: ${{ matrix.service }}
+        working-directory: apps/api/${{ matrix.service }}
         run: npm ci
 
       - name: Rodar testes
-        working-directory: ${{ matrix.service }}
+        working-directory: apps/api/${{ matrix.service }}
         env:
           DB_HOST: localhost
           DB_PORT: 5432
@@ -192,13 +202,13 @@ jobs:
       - name: Build e push
         uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.service }}
+          context: ./apps/api/${{ matrix.service }}
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          cache-from: type=gha,scope=api-${{ matrix.service }}
+          cache-to: type=gha,scope=api-${{ matrix.service }},mode=max
 
   # ────────────────────────────────────────────────────────────
   # 4. Deploy na VPS Hostinger via SSH

@@ -1,8 +1,21 @@
-name: PR Checks
+name: Web PR Checks
 
 on:
   pull_request:
     branches: [main, develop]
+    paths:
+      - 'apps/web/**'
+      - '!apps/web/**.md'
+      # O e2e constrói o backend de apps/api: mudança lá também testa o front.
+      - 'apps/api/**'
+      - '!apps/api/**.md'
+      - '.github/workflows/web-pr.yml'
+
+# `run:` roda dentro de apps/web. Caminhos de `with:` (cache-dependency-path,
+# path de artefato) são relativos à RAIZ, por isso levam apps/web/ por extenso.
+defaults:
+  run:
+    working-directory: apps/web
 
 jobs:
   check-code:
@@ -17,6 +30,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -43,7 +57,7 @@ jobs:
         run: ./scripts/e2e-backend.sh
 
       # ⚠️ continue-on-error deixa este passo incapaz de reprovar o check. Quem
-      # de fato barra o PR é o job test-e2e do ci.yml. Mantido como estava para
+      # de fato barra o PR é o job test-e2e do web.yml. Mantido como estava para
       # não mudar a política de merge junto com a mudança de infra.
       - name: Run E2E tests
         run: npm run test:e2e

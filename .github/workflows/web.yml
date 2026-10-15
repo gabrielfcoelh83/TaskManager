@@ -1,10 +1,30 @@
-name: CI/CD Pipeline
+name: Web (apps/web)
 
 on:
   push:
     branches: [main, develop]
+    paths:
+      - 'apps/web/**'
+      - '!apps/web/**.md'
+      # O e2e constrói o backend de apps/api: mudança lá também testa o front.
+      - 'apps/api/**'
+      - '!apps/api/**.md'
+      - '.github/workflows/web.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'apps/web/**'
+      - '!apps/web/**.md'
+      # O e2e constrói o backend de apps/api: mudança lá também testa o front.
+      - 'apps/api/**'
+      - '!apps/api/**.md'
+      - '.github/workflows/web.yml'
+
+# `run:` roda dentro de apps/web. Caminhos de `with:` (cache-dependency-path,
+# path de artefato) são relativos à RAIZ, por isso levam apps/web/ por extenso.
+defaults:
+  run:
+    working-directory: apps/web
 
 jobs:
   # Job 1: Lint & Format
@@ -18,6 +38,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -47,6 +68,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -58,9 +80,10 @@ jobs:
         run: echo "E2E_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
       # A suíte exerce login e gravação de verdade desde que as tentativas
-      # saíram do localStorage. Sobe o mesmo backend que roda em produção, a
-      # partir das imagens publicadas pelo pipeline da plataforma — mockar aqui
-      # esconderia justamente o que estes testes verificam.
+      # saíram do localStorage. Mockar aqui esconderia justamente o que estes
+      # testes verificam.
+      # Constrói os serviços de apps/api deste mesmo commit (ver
+      # docker-compose.e2e.yml) — não depende mais de imagem publicada.
       - name: Subir o backend (auth + estudo + gateway)
         run: ./scripts/e2e-backend.sh
 
@@ -98,8 +121,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
+          name: web-playwright-report
+          path: apps/web/playwright-report/
           if-no-files-found: ignore
 
   # Job 3: Build
@@ -114,6 +137,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -124,8 +148,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build
-          path: dist/
+          name: web-build
+          path: apps/web/dist/
 
   # Job 4: Deploy to Vercel (só em push na main, e só se VERCEL_TOKEN configurado)
   deploy:
@@ -153,13 +177,18 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
 
       - name: Install Vercel CLI
         if: steps.creds.outputs.ok == 'true'
         run: npm install -g vercel
 
+      # Da RAIZ do repositório, não de apps/web: o projeto na Vercel tem Root
+      # Directory = apps/web, e a CLI aplica esse diretório sobre o que envia.
+      # Rodando de dentro de apps/web ela procuraria apps/web/apps/web.
       - name: Deploy to Vercel
         if: steps.creds.outputs.ok == 'true'
+        working-directory: .
         run: vercel deploy --prod --token="$VERCEL_TOKEN"
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
