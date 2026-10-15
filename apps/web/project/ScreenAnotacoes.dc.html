@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<div style="display:grid;grid-template-columns:200px 1fr 1.3fr;gap:16px;align-items:start">
+  <div style="{{ s.card }};padding:14px">
+    <div style="{{ s.sectionTitle }};font-size:13.5px">Pastas</div>
+    <div style="display:flex;flex-direction:column;gap:2px;margin-top:10px">
+      <sc-for list="{{ folders }}" as="f" hint-placeholder-count="6">
+        <div style="{{ f.style }}" onClick="{{ f.onClick }}">{{ f.name }}</div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="{{ s.card }};padding:14px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="{{ s.sectionTitle }};font-size:13.5px">Minhas anotações ({{ visibleNotes.length }})</div>
+      <button style="{{ newNoteBtn }}" onClick="{{ newNote }}">+ Nova</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:640px;overflow:auto">
+      <sc-for list="{{ visibleNotes }}" as="n" hint-placeholder-count="6">
+        <div style="{{ n.rowStyle }}" onClick="{{ n.onClick }}">
+          <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+            <div style="font-size:13px;font-weight:700;color:#2c2530">{{ n.titulo }}</div>
+            <span style="{{ n.tagStyle }}">{{ n.tag }}</span>
+          </div>
+          <div style="font-size:11.5px;color:#8b8391;margin-top:4px">{{ n.disciplina }} · {{ n.data }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="{{ s.card }}">
+    <sc-if value="{{ activeNote }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <input style="{{ titleInput }}" value="{{ activeNote.titulo }}" onChange="{{ onTitleChange }}"/>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <span style="{{ s.pill('#f3f1f5','#8b8391') }}">{{ activeNote.disciplina }}</span>
+          <span style="{{ tagPill }}">{{ activeNote.tag }}</span>
+        </div>
+        <textarea style="{{ contentArea }}" value="{{ activeNote.conteudo }}" onChange="{{ onContentChange }}"></textarea>
+      </div>
+    </sc-if>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  state = { folder: 'Todas', activeId: null, edits: {} };
+
+  componentDidMount() {
+    const first = (this.props.data.ANOTACOES || [])[0];
+    if (first) this.setState({ activeId: first.id });
+  }
+
+  select = (id) => this.setState({ activeId: id });
+  setFolder = (f) => this.setState({ folder: f });
+  editField = (id, field, value) => this.setState(s => ({ edits: { ...s.edits, [id]: { ...s.edits[id], [field]: value } } }));
+
+  newNote = () => {
+    const id = 'new-' + Date.now();
+    const note = { id, titulo:'Nova anotação', disciplina:'Direito Constitucional', tag:'Resumo', data:'Agora', conteudo:'' };
+    this.setState(s => ({ extra: [...(s.extra||[]), note], activeId: id }));
+  };
+
+  renderVals() {
+    const { theme, s, data } = this.props;
+    const base = data.ANOTACOES || [];
+    const all = [...(this.state.extra||[]), ...base].map(n => ({ ...n, ...(this.state.edits[n.id]||{}) }));
+    const folders = data.ANOTACOES_FOLDERS || ['Todas'];
+    const visible = this.state.folder === 'Todas' ? all : all.filter(n => n.disciplina === this.state.folder);
+    const active = all.find(n => n.id === this.state.activeId) || all[0];
+
+    const tagColor = { 'Resumo':['#EDE9FE',theme.primaryDark], 'Mapa mental':['#FCE7F3','#BE185D'], 'Lei seca':['#FEF3C7','#B45309'] };
+
+    return {
+      s, theme,
+      folders: folders.map(f => ({
+        name: f, onClick: () => this.setFolder(f),
+        style: { padding:'8px 10px', borderRadius:9, fontSize:13, cursor:'pointer', background: this.state.folder===f ? theme.primarySoft : 'transparent', color: this.state.folder===f ? theme.primaryDark : '#5c5462', fontWeight: this.state.folder===f?600:500 }
+      })),
+      newNoteBtn: { ...s.btnPrimary, padding:'6px 12px', fontSize:12 },
+      newNote: this.newNote,
+      visibleNotes: visible.map(n => ({
+        ...n, onClick: () => this.select(n.id),
+        rowStyle: { padding:'10px 12px', borderRadius:10, cursor:'pointer', background: this.state.activeId===n.id ? theme.primarySoft : '#faf9fb' },
+        tagStyle: s.pill((tagColor[n.tag]||['#f3f1f5','#8b8391'])[0], (tagColor[n.tag]||['#f3f1f5','#8b8391'])[1]),
+      })),
+      activeNote: active,
+      titleInput: { fontSize:19, fontWeight:700, color:'#2c2530', border:'none', outline:'none', width:'100%', fontFamily:"'Poppins',sans-serif" },
+      onTitleChange: (e) => active && this.editField(active.id, 'titulo', e.target.value),
+      tagPill: active ? s.pill((tagColor[active.tag]||['#f3f1f5','#8b8391'])[0], (tagColor[active.tag]||['#f3f1f5','#8b8391'])[1]) : {},
+      contentArea: { width:'100%', minHeight:420, marginTop:18, border:'none', outline:'none', resize:'vertical', fontSize:14, lineHeight:1.7, color:'#3a3540', fontFamily:'inherit' },
+      onContentChange: (e) => active && this.editField(active.id, 'conteudo', e.target.value),
+    };
+  }
+}
+
+</script>
+</body>
+</html>

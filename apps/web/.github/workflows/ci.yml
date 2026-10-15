@@ -1,0 +1,169 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Job 1: Lint & Format
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Testes de lib/: puros, rodam no node sem backend nem navegador. Ficam
+      # neste job leve porque o test-e2e depende dele — erro de lógica reprova
+      # em segundos, antes de subir a plataforma inteira para o e2e.
+      - name: Testes de lib
+        run: npm run test:lib
+
+  # Job 2: E2E + API Tests
+  test-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Gerar segredo efêmero do backend E2E
+        run: echo "E2E_JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      # A suíte exerce login e gravação de verdade desde que as tentativas
+      # saíram do localStorage. Sobe o mesmo backend que roda em produção, a
+      # partir das imagens publicadas pelo pipeline da plataforma — mockar aqui
+      # esconderia justamente o que estes testes verificam.
+      - name: Subir o backend (auth + estudo + gateway)
+        run: ./scripts/e2e-backend.sh
+
+      # O dev server (porta 5173) é iniciado pelo webServer do playwright.config.js
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+      # Roda ANTES de derrubar o backend: as rotas de api/ exigem login
+      # (api/_lib/auth.js), e o token do usuário de teste sai do gateway em
+      # localhost:3000. VITE_API_URL aponta o dev-api para esse mesmo backend —
+      # sem ela, a validação do token cairia na API de produção.
+      # dev-api na 3100 (a 3000 é do gateway), como no vite.config.js.
+      - name: Run API tests
+        run: |
+          node server/dev-api.js &
+          for i in $(seq 1 20); do curl -s -o /dev/null http://localhost:3100 && break; sleep 0.5; done
+          npm run test:api
+        env:
+          PORT: 3100
+          API_URL: http://localhost:3100
+          GATEWAY_URL: http://localhost:3000
+          VITE_API_URL: http://localhost:3000
+
+      # Sem isto, uma falha de teste vira "elemento não encontrado" sem pista
+      # de que a causa foi um serviço que não subiu.
+      - name: Logs do backend (só quando falha)
+        if: failure()
+        run: docker compose -f docker-compose.e2e.yml logs --tail=50
+
+      - name: Derrubar o backend
+        if: always()
+        run: ./scripts/e2e-backend.sh down
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+
+  # Job 3: Build
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test-e2e]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: dist/
+
+  # Job 4: Deploy to Vercel (só em push na main, e só se VERCEL_TOKEN configurado)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy credentials
+        id: creds
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "VERCEL_TOKEN não configurado — pulando deploy."
+          fi
+
+      - name: Setup Node
+        if: steps.creds.outputs.ok == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Vercel CLI
+        if: steps.creds.outputs.ok == 'true'
+        run: npm install -g vercel
+
+      - name: Deploy to Vercel
+        if: steps.creds.outputs.ok == 'true'
+        run: vercel deploy --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          # OPENROUTER_API_KEY não vai aqui: env do passo só chega ao processo
+          # da CLI, não às funções publicadas. A chave da IA (api/_lib/ia.js)
+          # mora nas variáveis de ambiente do projeto na Vercel.

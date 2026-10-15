@@ -1,0 +1,517 @@
+import { paraQuestaoDeTela } from '../questions/acervo.js';
+import { paraPagina, percorrerPaginas } from './paginas.js';
+import { repetirEm429 } from './retentativa.js';
+
+// Cliente da API da plataforma (gateway :3000 atrás do nginx).
+//
+// O front é servido pela Vercel e a API num servidor próprio: origens diferentes,
+// então toda chamada é cross-origin e depende do CORS configurado no nginx.
+// O token vai no header Authorization — cookie exigiria SameSite=None e
+// configuração extra sem ganho nenhum aqui.
+
+// Vazio em dev: o proxy do Vite manda /api/auth e /api/tentativas para o
+// gateway em localhost:3000, então as chamadas saem como mesma origem e o
+// CORS nem entra na história. Em produção precisa ser a URL absoluta da API.
+const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
+// Chave separada do estado da interface: apagar `ma-questoes-state-v1` não
+// pode derrubar a sessão, e limpar a sessão não pode apagar o tema.
+export const TOKEN_KEY = 'ma-questoes-token-v1';
+
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setToken(token) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // modo privado ou quota: a sessão vale só enquanto a aba estiver aberta
+  }
+}
+
+export function logout() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // nada a fazer: o token já não será usado nesta sessão
+  }
+}
+
+async function req(caminho, { method = 'GET', body, auth = true, tempoMaximoMs } = {}) {
+  if (import.meta.env.PROD && !BASE) {
+    // Sem isto, um build sem a variável mandaria /api/auth/login para a
+    // própria Vercel e o erro visível seria um 404 sem explicação.
+    throw new ApiError('VITE_API_URL não foi definida neste build', 0);
+  }
+
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  // O token desta requisição, guardado para o 401 abaixo.
+  const token = auth ? getToken() : null;
+  if (auth) {
+    if (!token) throw new ApiError('Sessão não iniciada', 401);
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  // `tempoMaximoMs`: sem ele, um servidor que aceita a conexão e não
+  // responde prende a promessa para sempre — e quem espera por ela (a tela
+  // de "carregando seu perfil") junto. Cada tentativa tem o seu prazo.
+  const chamar = async () => {
+    const controle = tempoMaximoMs ? new AbortController() : null;
+    const prazo = controle ? setTimeout(() => controle.abort(), tempoMaximoMs) : null;
+    try {
+      return await fetch(`${BASE}${caminho}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controle?.signal,
+      });
+    } catch (err) {
+      if (controle?.signal.aborted) throw new ApiError('O servidor demorou demais para responder', 0);
+      throw err;
+    } finally {
+      clearTimeout(prazo);
+    }
+  };
+
+  let res;
+  try {
+    // Pedido autenticado recusado por excesso (429 do nginx) é repetido com
+    // espera — ver `retentativa.js`. Login e cadastro ficam de fora: lá o
+    // limite existe justamente contra quem tenta senha atrás de senha.
+    res = await (auth ? repetirEm429(chamar) : chamar());
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    // fetch só rejeita por falha de rede ou bloqueio de CORS. Distinguir os
+    // dois no navegador é impossível de propósito, então a mensagem cobre
+    // ambos em vez de mentir sobre a causa.
+    throw new ApiError('Não foi possível falar com o servidor', 0);
+  }
+
+  // 204 não tem corpo; um .json() nele lançaria SyntaxError.
+  const dados = res.status === 204 ? null : await res.json().catch(() => null);
+
+  if (res.status === 401) {
+    // Token expirado (a janela é de 7 dias) ou assinado com outro segredo.
+    // Descartar aqui evita a tela ficar tentando com credencial morta — mas
+    // só se ele ainda for o salvo. Um pedido lento da sessão anterior que
+    // volta 401 depois de alguém já ter entrado de novo apagaria o token novo,
+    // e a próxima chamada mandaria essa pessoa de volta ao login sem motivo.
+    if (getToken() === token) logout();
+    throw new ApiError(dados?.error || 'Sessão expirada', 401);
+  }
+
+  if (!res.ok) throw new ApiError(dados?.error || `Erro ${res.status}`, res.status);
+
+  return dados;
+}
+
+export async function login(email, password) {
+  const dados = await req('/api/auth/login', {
+    method: 'POST',
+    body: { email, password },
+    auth: false,
+  });
+
+  if (!dados?.token) throw new ApiError('Resposta de login sem token', 502);
+
+  setToken(dados.token);
+  return dados.user;
+}
+
+// O /register já devolve token, então criar conta e entrar são a mesma ida ao
+// servidor. Fazer um login logo depois seria uma volta inteira só para repetir
+// o que o servidor acabou de confirmar.
+export async function criarConta({ nome, email, password }) {
+  const dados = await req('/api/auth/register', {
+    method: 'POST',
+    // `name` é opcional para o auth-service, mas não é decorativo: viaja no
+    // evento `user.registered` e vira o perfil no user-service. Omitido, o
+    // consumidor cai no trecho antes do @ do e-mail.
+    body: { email, password, name: nome || undefined },
+    auth: false,
+  });
+
+  if (dados?.token) setToken(dados.token);
+  return { ...dados.user, confirmacaoPendente: !dados?.token };
+}
+
+export async function solicitarRedefinicaoSenha(email) {
+  return req('/api/auth/forgot-password', {
+    method: 'POST',
+    body: { email },
+    auth: false,
+  });
+}
+
+export async function redefinirSenha(token, password) {
+  return req('/api/auth/reset-password', {
+    method: 'POST',
+    body: { token, password },
+    auth: false,
+  });
+}
+
+// Google Agenda (rotas do auth-service, pelo gateway).
+//
+// A conexão é um OAuth em duas pernas: `start` devolve a URL do Google; depois
+// de autorizar, o servidor manda o navegador de volta para
+// `/?calendar=confirmar&codigo=…`, e é o `confirm` — autenticado, com o token
+// da sessão — que liga a conta do Google à conta do app. Sem esse segundo
+// passo, quem tivesse o link de retorno ligaria a agenda dele em conta alheia.
+export async function iniciarConexaoGoogleCalendar() {
+  return req('/api/calendar/google/start');
+}
+
+export async function confirmarGoogleCalendar(codigo) {
+  return req('/api/calendar/google/confirm', { method: 'POST', body: { codigo } });
+}
+
+/** `{ connected, connectedAt }`. */
+export async function statusGoogleCalendar() {
+  return req('/api/calendar/google/status');
+}
+
+/**
+ * Um evento por dia de estudo (`eventosDoPlano`), sem id: o servidor gera o
+ * id pelo dia e APAGA os eventos dos dias de `intervalo` (`{ de, ate }`,
+ * 'YYYY-MM-DD') que não vierem na lista. Devolve `{ sincronizados, removidos }`.
+ */
+export async function sincronizarGoogleCalendar({ events, intervalo }) {
+  return req('/api/calendar/google/sync', { method: 'POST', body: { events, intervalo } });
+}
+
+export async function desconectarGoogleCalendar() {
+  return req('/api/calendar/google', { method: 'DELETE' });
+}
+
+// Login com o Google: o navegador recebeu do Google um ID token
+// (`credential`), e o auth-service é quem confere assinatura e audiência e
+// devolve o JWT da plataforma — o mesmo que o login por senha. Conta nova é
+// criada ali mesmo, então não há "criar conta com o Google" separado.
+export async function entrarComGoogle(credential) {
+  const dados = await req('/api/auth/google', {
+    method: 'POST',
+    body: { credential },
+    auth: false,
+  });
+
+  // Sem token, o servidor diz o porquê (ex.: conta pendente de confirmação).
+  // Mostrar a mensagem dele, não um "sem token" que ninguém entende.
+  if (!dados?.token) {
+    throw new ApiError(dados?.message || 'Não foi possível entrar com o Google. Tente de novo.', 502);
+  }
+
+  setToken(dados.token);
+  return dados.user;
+}
+
+// ---------------------------------------------------------------------------
+// Perfil e preferências
+// ---------------------------------------------------------------------------
+//
+// O nome e o e-mail moram no user-service, criado no cadastro pelo evento
+// `user.registered`. O front não guardava nem consultava nada disso: mostrava
+// um nome fixo no código para todo mundo.
+//
+// `profile_data` é uma coluna JSONB que o PUT já aceita, e é onde ficam as
+// preferências que precisam seguir a pessoa entre navegadores — meta diária,
+// data da prova e a ficha de boas-vindas. O PUT MESCLA no primeiro nível
+// (chave com null grava null): mande só as chaves que mudaram. O tema de
+// cores fica no localStorage: é preferência do aparelho, não da conta.
+
+// 10 s por tentativa: a ficha de boas-vindas espera pelo perfil antes de
+// abrir o app, e o App repete a busca quando ela falha.
+const TEMPO_MAXIMO_DO_PERFIL_MS = 10_000;
+
+export async function buscarPerfil(id) {
+  const perfil = await req(`/api/users/${id}`, { tempoMaximoMs: TEMPO_MAXIMO_DO_PERFIL_MS });
+  return {
+    id: perfil?.user_id ?? id,
+    name: perfil?.name ?? null,
+    email: perfil?.email ?? null,
+    preferencias: perfil?.profile_data || {},
+  };
+}
+
+export async function salvarPerfil(id, { nome, preferencias }) {
+  // O nome usa COALESCE: mandar `undefined` (que some no JSON) preserva o
+  // valor de lá. `profile_data` é mesclado no primeiro nível. Mandar string vazia apagaria o nome — daí o `|| undefined`.
+  const perfil = await req(`/api/users/${id}`, {
+    method: 'PUT',
+    body: {
+      name: nome?.trim() || undefined,
+      profile_data: preferencias === undefined ? undefined : preferencias,
+    },
+  });
+
+  return {
+    id: perfil?.user_id ?? id,
+    name: perfil?.name ?? null,
+    email: perfil?.email ?? null,
+    preferencias: perfil?.profile_data || {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tentativas
+// ---------------------------------------------------------------------------
+//
+// A API guarda uma linha por tentativa; o front pensa em "histórico por
+// questão". A tradução entre os dois formatos mora só aqui — espalhada pelas
+// telas, cada uma acabaria com a sua versão ligeiramente diferente.
+
+function paraFormatoLocal(linha) {
+  return {
+    id: linha.id,
+    data: linha.respondida_em,
+    resposta: linha.alternativa,
+    correta: linha.correta,
+    tempo_gasto_segundos: linha.tempo_seg,
+    // Só tentativas antigas trazem valor: o pop-up "como você chegou nessa
+    // resposta?" que os preenchia saiu do quiz, e as novas vêm nulas.
+    // `?? null` porque uma linha gravada antes da migration 002 nem traz as
+    // chaves, e `undefined` vazando para o estado quebraria o `JSON.stringify`
+    // do localStorage de um jeito difícil de rastrear.
+    tipo: linha.tipo ?? null,
+    certeza: linha.certeza ?? null,
+    // Motivo do erro, anotado no Caderno de Erros (migration 005 do
+    // estudo-service). Mesmo `?? null`, pelo mesmo motivo: servidor anterior
+    // à migration não manda as chaves.
+    motivo: linha.motivo ?? null,
+    motivo_nota: linha.motivo_nota ?? null,
+    // De onde veio (migration 007); nula nas tentativas anteriores a ela.
+    origem: linha.origem ?? null,
+  };
+}
+
+export function agruparPorQuestao(linhas) {
+  const porQuestao = {};
+
+  for (const linha of linhas) {
+    const registro =
+      porQuestao[linha.questao_id] ||
+      (porQuestao[linha.questao_id] = { tentativas: [], desempenho: 'necessita' });
+    registro.tentativas.push(paraFormatoLocal(linha));
+  }
+
+  // A API ordena da mais recente para a mais antiga; o front assume ordem
+  // cronológica — a mesclagem põe as respostas novas no fim do array, e a
+  // revisão lê a última como a mais recente.
+  for (const registro of Object.values(porQuestao)) registro.tentativas.reverse();
+
+  return porQuestao;
+}
+
+// Uma página do histórico. Mesmo desenho de `buscarPaginaDeQuestoes`: o
+// envelope é opt-in (`paginado=1`), e `paraPagina` aceita também o array de
+// um serviço anterior a ele.
+async function buscarPaginaDeTentativas({ limite = 1000, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limite: String(limite), paginado: '1' });
+  if (offset) params.set('offset', String(offset));
+
+  return paraPagina(await req(`/api/tentativas?${params}`), 'tentativas');
+}
+
+// O serviço entrega no máximo 1000 por pedido, e pedir uma vez só cortava o
+// histórico de quem passasse disso — sem erro, só com meta, sequência e
+// revisão calculadas sobre as 1000 mais recentes. Agora as páginas são
+// percorridas até o `total`.
+//
+// O teto de páginas segue o raciocínio de `MAX_PAGINAS` do acervo: só existe
+// para um serviço que devolva sempre a mesma página não prender o laço.
+// 50 páginas de 1000 são anos de uso diário.
+const MAX_PAGINAS_DE_TENTATIVAS = 50;
+
+export async function listarTentativas() {
+  const { itens, completo } = await percorrerPaginas(
+    (offset) => buscarPaginaDeTentativas({ offset }),
+    {
+      maxPaginas: MAX_PAGINAS_DE_TENTATIVAS,
+      // Uma resposta gravada enquanto as páginas são lidas entra no topo e
+      // empurra o resto uma posição: a última linha de uma página volta como
+      // a primeira da seguinte. Descartar pelo id resolve, e nada se perde —
+      // o serviço grava sempre com `NOW()`, então linha nova só entra no topo.
+      chaveDe: (linha) => linha.id,
+    },
+  );
+
+  if (!completo) {
+    console.warn(
+      `listarTentativas parou em ${MAX_PAGINAS_DE_TENTATIVAS} páginas com ${itens.length} tentativas — o histórico pode estar incompleto.`,
+    );
+  }
+
+  return agruparPorQuestao(itens);
+}
+
+// ---------------------------------------------------------------------------
+// Acervo de questões
+// ---------------------------------------------------------------------------
+//
+// As questões vêm do questoes-service, que só serve o que foi extraído das
+// provas e dos gabaritos publicados pela própria FGV. Não existe rota de
+// escrita: o acervo entra por carga administrativa, conferida antes.
+//
+// A tradução entre o formato do acervo e o das telas mora em `acervo.js`, que
+// não depende de rede e por isso pode ser testada no `node`.
+
+// Uma página do acervo. Devolve o envelope do serviço — `total` é o tamanho
+// do filtro inteiro, não o desta página, e é o que distingue "acabou" de
+// "bateu no teto".
+export async function buscarPaginaDeQuestoes({
+  disciplina, exame, aleatorio, limite = 200, offset = 0,
+} = {}) {
+  const params = new URLSearchParams();
+  if (disciplina) params.set('disciplina', disciplina);
+  if (exame !== undefined && exame !== null) params.set('exame', String(exame));
+  if (aleatorio) params.set('aleatorio', '1');
+  params.set('limite', String(limite));
+  if (offset) params.set('offset', String(offset));
+  // Sem este parâmetro a rota devolve array puro, que é o contrato antigo e
+  // segue valendo para o front já publicado. O envelope é opt-in justamente
+  // porque serviço e front sobem em ritmos diferentes.
+  params.set('paginado', '1');
+
+  const envelope = await req(`/api/questoes?${params}`);
+
+  // Um serviço mais antigo que este código responde com array. Aceitar as duas
+  // formas evita que a tela morra durante a janela em que as versões
+  // divergem — foi exatamente esse descompasso que derrubou o acervo em
+  // produção quando o envelope entrou sem retrocompatibilidade.
+  if (Array.isArray(envelope)) {
+    const questoes = envelope.map(paraQuestaoDeTela);
+    return { questoes, total: questoes.length, limite, offset };
+  }
+
+  return {
+    questoes: (envelope?.questoes || []).map(paraQuestaoDeTela),
+    total: envelope?.total ?? 0,
+    limite: envelope?.limite ?? limite,
+    offset: envelope?.offset ?? offset,
+  };
+}
+
+// Antes daqui existia uma chamada só, com `limite=200`, e o comentário dizia
+// que 200 bastava "com um exame carregado". Bastava mesmo — e é exatamente
+// esse o problema: no dia em que o acervo passasse de 200, a tela receberia as
+// primeiras 200 sem erro nenhum e o acervo pareceria menor do que é. Uma lista
+// truncada que se apresenta como completa não tem sintoma; só tem consequência.
+//
+// Agora as páginas são percorridas até somar `total`. O teto de segurança
+// existe para um caso específico: se o serviço passar a devolver página vazia
+// com `total` alto, o laço pararia mesmo assim — mas se algum dia devolver
+// sempre a mesma página, é ele que evita o laço infinito.
+const MAX_PAGINAS = 60;
+
+export async function listarQuestoes(filtros = {}) {
+  // `aleatorio` sorteia a cada consulta: paginar sobre ele repetiria e
+  // perderia questão, e o serviço recusa a combinação. Uma página só.
+  if (filtros.aleatorio) {
+    const { questoes } = await buscarPaginaDeQuestoes(filtros);
+    return questoes;
+  }
+
+  const acervo = [];
+  let offset = 0;
+
+  for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
+    const { questoes, total } = await buscarPaginaDeQuestoes({ ...filtros, offset });
+    acervo.push(...questoes);
+
+    if (questoes.length === 0 || acervo.length >= total) return acervo;
+    offset = acervo.length;
+  }
+
+  console.warn(
+    `listarQuestoes parou em ${MAX_PAGINAS} páginas com ${acervo.length} questões — o acervo pode estar incompleto.`,
+  );
+  return acervo;
+}
+
+export async function registrarTentativa({ questaoId, correta, alternativa, tempoSeg, origem }) {
+  const linha = await req('/api/tentativas', {
+    method: 'POST',
+    body: {
+      // O serviço recusa questao_id vazio e exige `correta` booleano; mandar
+      // já no formato certo evita depender da mensagem de erro para descobrir.
+      questao_id: String(questaoId),
+      correta: correta === true,
+      alternativa: Number.isInteger(alternativa) ? alternativa : null,
+      tempo_seg: Number.isInteger(tempoSeg) && tempoSeg >= 0 ? tempoSeg : null,
+      // 'quiz', 'simulado' ou 'revisao' (migration 007). Servidor anterior a
+      // ela ignora o campo, então mandar sempre é seguro.
+      origem: origem || null,
+    },
+  });
+
+  return paraFormatoLocal(linha);
+}
+
+/**
+ * Anota por que a pessoa errou. É PATCH sobre a tentativa já gravada: o
+ * motivo chega na revisão, às vezes dias depois do erro. `null` limpa.
+ */
+export async function anotarMotivoDoErro({ tentativaId, motivo, nota }) {
+  const linha = await req(`/api/tentativas/${encodeURIComponent(tentativaId)}`, {
+    method: 'PATCH',
+    body: {
+      motivo: motivo || null,
+      // O serviço recusa texto só de espaços; vazio aqui quer dizer "sem nota".
+      motivo_nota: nota && nota.trim() ? nota.trim() : null,
+    },
+  });
+
+  return paraFormatoLocal(linha);
+}
+
+// ---------------------------------------------------------------------------
+// 2ª fase: questões discursivas
+// ---------------------------------------------------------------------------
+//
+// Acervo à parte do da 1ª fase: enunciado, itens com a pergunta, o valor e o
+// gabarito comentado da FGV (padrão de resposta). A conferência dos
+// fundamentos roda no navegador (`lib/fundamentos.js`); o servidor só guarda
+// a resposta e o resumo da conferência.
+
+const lista = (dados) => (Array.isArray(dados) ? dados : []);
+
+export async function listarDiscursivas(area) {
+  const params = new URLSearchParams();
+  if (area) params.set('area', area);
+  return lista(await req(`/api/discursivas?${params}`));
+}
+
+export async function buscarDiscursiva(id) {
+  const q = await req(`/api/discursivas/${encodeURIComponent(id)}`);
+  // Um item sem letra não tem onde guardar a resposta; sem `itens`, a tela
+  // mostraria o enunciado sem nenhum campo para responder.
+  return { ...q, itens: lista(q?.itens).filter((i) => i && i.letra) };
+}
+
+export async function salvarRespostaDiscursiva({ questaoId, respostas, fundamentos }) {
+  return req('/api/discursivas/respostas', {
+    method: 'POST',
+    body: { questao_id: questaoId, respostas, fundamentos },
+  });
+}
+
+/** Respostas da própria conta a uma questão, da mais recente para a mais antiga. */
+export async function listarRespostasDiscursivas(questaoId) {
+  const params = new URLSearchParams({ questao_id: String(questaoId) });
+  return lista(await req(`/api/discursivas/respostas?${params}`));
+}

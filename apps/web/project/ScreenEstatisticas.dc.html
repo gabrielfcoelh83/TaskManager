@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<div style="display:flex;flex-direction:column;gap:18px">
+  <div style="{{ s.card }};display:flex;flex-wrap:wrap;gap:16px;align-items:end">
+    <div style="{{ fieldWrap }}"><div style="{{ fieldLabel }}">Período</div>
+      <select style="{{ selectStyle }}" value="{{ range }}" onChange="{{ setRange }}">
+        <option value="7d">Últimos 7 dias</option><option value="30d">Últimos 30 dias</option><option value="all">Desde o início</option>
+      </select>
+    </div>
+    <div style="{{ fieldWrap }}"><div style="{{ fieldLabel }}">Disciplina</div>
+      <select style="{{ selectStyle }}" value="{{ disc }}" onChange="{{ setDisc }}">
+        <sc-for list="{{ discOptions }}" as="o" hint-placeholder-count="9"><option value="{{ o }}">{{ o }}</option></sc-for>
+      </select>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+    <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="4">
+      <div style="{{ s.card }}">
+        <div style="{{ s.statLabel }}">{{ m.label }}</div>
+        <div style="{{ s.statNum }};margin-top:6px">{{ m.value }}</div>
+        <div style="{{ m.deltaStyle }}">{{ m.delta }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+    <div style="{{ s.card }}">
+      <div style="{{ s.sectionTitle }}">Questões por dificuldade</div>
+      <div style="display:flex;align-items:center;gap:20px;margin-top:16px">
+        <div style="{{ donutOuter }}"><div style="{{ donutInner }}"><div style="font-size:16px;font-weight:700">{{ totalQ }}</div><div style="font-size:9px;color:#8b8391">questões</div></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px">
+          <div style="display:flex;align-items:center;gap:6px"><span style="{{ dot('#10B981') }}"></span>Fácil <b style="margin-left:auto">42%</b></div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="{{ dot('#F59E0B') }}"></span>Média <b style="margin-left:auto">38%</b></div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="{{ dot('#EF4444') }}"></span>Difícil <b style="margin-left:auto">20%</b></div>
+        </div>
+      </div>
+    </div>
+    <div style="{{ s.card }}">
+      <div style="{{ s.sectionTitle }}">Questões por banca</div>
+      <div style="display:flex;flex-direction:column;gap:11px;margin-top:16px">
+        <sc-for list="{{ bancas }}" as="b" hint-placeholder-count="3">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px"><span>{{ b.nome }}</span><span style="color:#8b8391">{{ b.pct }}%</span></div>
+            <div style="{{ s.progressTrack }};margin-top:5px"><div style="{{ b.bar }}"></div></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+
+class Component extends DCLogic {
+  state = { range:'30d', disc:'Todas' };
+  setRange = (e) => this.setState({ range: e.target.value });
+  setDisc = (e) => this.setState({ disc: e.target.value });
+
+  renderVals() {
+    const { theme, s, data } = this.props;
+    const disciplinas = data.DISCIPLINAS || [];
+    const mult = { '7d':0.25, '30d':1, 'all':3.4 }[this.state.range];
+
+    return {
+      s, theme,
+      fieldWrap:{display:'flex',flexDirection:'column',gap:5}, fieldLabel:{fontSize:11.5,color:'#8b8391'},
+      selectStyle:{fontSize:13,border:'1px solid rgba(0,0,0,.1)',borderRadius:9,padding:'8px 12px',color:'#2c2530',background:'#fff',minWidth:170},
+      range: this.state.range, setRange: this.setRange,
+      disc: this.state.disc, setDisc: this.setDisc,
+      discOptions: ['Todas', ...disciplinas.map(d=>d.nome)],
+      metrics: [
+        { label:'Questões resolvidas', value: Math.round(1248*mult).toLocaleString('pt-BR'), delta:'+12% vs. período anterior', deltaStyle:{fontSize:11,color:'#10B981',marginTop:4} },
+        { label:'Taxa de acertos', value:'73%', delta:'+3pp vs. período anterior', deltaStyle:{fontSize:11,color:'#10B981',marginTop:4} },
+        { label:'Tempo total de estudo', value: Math.round(96*mult)+'h', delta:'+8% vs. período anterior', deltaStyle:{fontSize:11,color:'#10B981',marginTop:4} },
+        { label:'Dias ativos', value: Math.min(180,Math.round(18*mult)), delta:'sequência atual', deltaStyle:{fontSize:11,color:'#8b8391',marginTop:4} },
+      ],
+      totalQ: Math.round(1248*mult).toLocaleString('pt-BR'),
+      donutOuter:{width:100,height:100,borderRadius:'50%',background:'conic-gradient(#10B981 0% 42%, #F59E0B 42% 80%, #EF4444 80% 100%)',display:'flex',alignItems:'center',justifyContent:'center',flex:'none'},
+      donutInner:{width:74,height:74,borderRadius:'50%',background:'#fff',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'},
+      dot:(c)=>({width:8,height:8,borderRadius:'50%',background:c,display:'inline-block'}),
+      bancas: [ {nome:'FGV',pct:48},{nome:'CEBRASPE',pct:39},{nome:'Outras',pct:13} ].map(b=>({...b,bar:{width:b.pct+'%',height:'100%',background:theme.primary,borderRadius:5}})),
+    };
+  }
+}
+
+</script>
+</body>
+</html>
