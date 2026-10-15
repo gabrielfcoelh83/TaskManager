@@ -61,6 +61,19 @@ describe('POST /register', () => {
     expect((await request(app).post('/register').send({ email: email() })).status).toBe(400);
     expect((await request(app).post('/register').send({ password: 'x' })).status).toBe(400);
   });
+
+  // O nome não fica aqui: vai no evento para o user-service, onde é
+  // VARCHAR(255). Aceito aqui, o INSERT de lá falhava e a conta ficava sem
+  // perfil para sempre — a mensagem não confirmada nunca é relida.
+  it('recusa nome com mais de 255 caracteres, sem criar a conta', async () => {
+    const e = email();
+    const res = await request(app).post('/register')
+      .send({ email: e, password: 'senha-forte-123', name: 'a'.repeat(256) });
+
+    expect(res.status).toBe(400);
+    const { rows } = await pool.query('SELECT 1 FROM users WHERE email = $1', [e]);
+    expect(rows).toHaveLength(0);
+  });
 });
 
 describe('POST /login', () => {

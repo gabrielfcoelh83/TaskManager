@@ -345,6 +345,13 @@ app.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Informe um e-mail válido' });
   }
 
+  // O nome não é gravado aqui: segue no evento para o user-service, onde a
+  // coluna é VARCHAR(255). Aceito aqui, o INSERT de lá falhava e a conta
+  // ficava sem perfil para sempre. Conta por caractere, como o Postgres.
+  if (typeof name === 'string' && Array.from(name).length > 255) {
+    return res.status(400).json({ error: 'O nome pode ter até 255 caracteres' });
+  }
+
   try {
     // Verificar se usuário já existe
     const existingUser = await pool.query('SELECT 1 FROM users WHERE lower(email) = $1', [emailNormalizado]);
