@@ -692,7 +692,7 @@ importa: ver "Rodar e testar".
 
 # Rotas de api/. PORT: a padrão do script é 3000, que é a do gateway.
 # VITE_API_URL: sem ela, _lib/auth.js valida o token no gateway de PRODUÇÃO
-# (o mesmo que a CI evita em ci.yml). Passe só neste processo — no .env.local
+# (o mesmo que a CI evita em web.yml). Passe só neste processo — no .env.local
 # ela valeria também para o Vite e tiraria o front do proxy.
 PORT=3100 VITE_API_URL=http://localhost:3000 node server/dev-api.js
 
@@ -706,7 +706,7 @@ npm run dev
 | `npm run build` | build de produção | sim |
 | `npm run test:e2e` | Playwright contra `npm run dev` + backend do script acima | sim |
 | `npm run test:api` | rotas de `api/`: recusam pedido sem token e com token inválido; com login no gateway, chamam de verdade o DataJud | sim |
-| `npm run test:lib` | todo `tests/*.test.js` menos `api.test.js`, cada um em UTC e em America/Sao_Paulo | sim (job `lint` do ci.yml; job `check-code` do pr.yml) |
+| `npm run test:lib` | todo `tests/*.test.js` menos `api.test.js`, cada um em UTC e em America/Sao_Paulo | sim (job `lint` do web.yml; job `check-code` do web-pr.yml) |
 | `npm run test:estado`, `test:questoes`, `test:paginas`, `test:ia` | um arquivo de `test:lib` só, para rodar à mão — no fuso da máquina, sem a segunda rodada em São Paulo | via `test:lib` |
 | `npm run test:all` | test:e2e + test:api | nenhum workflow chama |
 | `npm run ci` | lint + test:lib + build — a verificação local, o mesmo que a CI roda sem backend | nenhum workflow chama |

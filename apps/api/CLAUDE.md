@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Visão geral
 
-Backend de microserviços de uma plataforma de estudo para o Exame de Ordem (OAB). O front fica em outro repositório (MlDireito, Vite, servido pela Vercel). Produção: `https://api.mlkoab.tech`, numa VPS com ~1 GB de RAM.
+Backend de microserviços de uma plataforma de estudo para o Exame de Ordem (OAB). O front fica em `apps/web` deste mesmo monorepo (Vite, servido pela Vercel); o CLAUDE.md da raiz tem o mapa e a regra de compatibilidade da API. Produção: `https://api.mlkoab.tech`, numa VPS com ~1 GB de RAM.
 
 Stack real (não é a stack padrão do usuário): Node 22 + **Express 4** + **`pg` puro, sem ORM** (SQL escrito à mão), Redis 7, PostgreSQL 15, Nginx, Jest + Supertest. Scripts auxiliares de importação em Python (`questoes-service/importador/`).
 
@@ -56,7 +56,7 @@ cliente → nginx (TLS, CORS, rate limit) → api-gateway :3000 → auth :3001 /
 
 ## Deploy e produção
 
-`.github/workflows/ci-cd.yml`: `npm audit --omit=dev` → testes (matriz por serviço) → build e push para GHCR com tag `${sha}` → deploy por SSH para `/srv/projects/TaskManager` usando `docker-compose.prod.yml` (`name: taskmanager` fixo, para não trocar o volume do banco). O `.env` da VM é regerado a cada deploy a partir dos secrets/vars do GitHub. As quatro `GOOGLE_*` são obrigatórias em produção: o passo "Validar variáveis do Google" reprova o deploy sem elas, ou com a redirect URI diferente de `${APP_BASE_URL}/api/calendar/google/callback` (o código continua tolerante e responde 503; quem exige é o deploy). O smoke test confere nginx/TLS, `/health/services` sem `DOWN`, se todos os containers rodam a tag nova e se há exatamente um `Access-Control-Allow-Origin` correto; só então grava `.last_good_tag`, usado pelo rollback automático.
+`.github/workflows/api.yml` (na raiz do monorepo; `run:` em `apps/api`, dispara só com mudança em `apps/api/**`): `npm audit --omit=dev` → testes (matriz por serviço) → build e push para GHCR com tag `${sha}` → deploy por SSH para `/srv/projects/TaskManager` (caminho da VM mantido de propósito mesmo com o repo renomeado — trocar exige mover o diretório e o volume) usando `docker-compose.prod.yml` (`name: taskmanager` fixo, para não trocar o volume do banco). O `.env` da VM é regerado a cada deploy a partir dos secrets/vars do GitHub. As quatro `GOOGLE_*` são obrigatórias em produção: o passo "Validar variáveis do Google" reprova o deploy sem elas, ou com a redirect URI diferente de `${APP_BASE_URL}/api/calendar/google/callback` (o código continua tolerante e responde 503; quem exige é o deploy). O smoke test confere nginx/TLS, `/health/services` sem `DOWN`, se todos os containers rodam a tag nova e se há exatamente um `Access-Control-Allow-Origin` correto; só então grava `.last_good_tag`, usado pelo rollback automático.
 
 Ao adicionar um serviço novo, é preciso mexer em: `init.sql`, os dois composes, `scripts/backup.sh` (`BANCOS`), as listas de serviços do workflow (audit, test, build, smoke test) e o gateway. Esquecer o backup falha em silêncio.
 

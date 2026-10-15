@@ -27,7 +27,7 @@ node tests/quiz.test.js          # um teste de lib só (fuso da máquina, sem a 
 TZ=America/Sao_Paulo node tests/quiz.test.js
 
 # E2E (Playwright, 1 worker, sobe o `npm run dev` sozinho) — exige o backend real:
-./scripts/e2e-backend.sh         # sobe postgres/redis/auth/user/estudo/questoes/gateway (imagens :latest do ghcr) e semeia
+./scripts/e2e-backend.sh         # constrói auth/user/estudo/questoes/gateway de ../api, sobe com postgres/redis e semeia
 npm run test:e2e
 npx playwright test -g "trecho do nome do teste"
 ./scripts/e2e-backend.sh down    # derruba e apaga volumes
@@ -44,8 +44,8 @@ npm run test:api
 ## Arquitetura em uma página
 
 **Dois backends sob o mesmo prefixo `/api`:**
-1. **Gateway da plataforma de microserviços** (repo separado, TaskManager): `/api/auth`, `/api/tentativas`, `/api/questoes`, `/api/users`, `/api/discursivas`, `/api/calendar` (Google Calendar do Cronograma; OAuth e tokens ficam no auth-service). Em produção via `VITE_API_URL` (absoluta); em dev pelo proxy do Vite para `localhost:3000`. Todo acesso passa por `src/lib/api/api.js` (`fetch`, erros viram `ApiError(message, status)`, `status 0` = rede/CORS, retentativa de 429).
-2. **Funções serverless em `api/`** (Vercel): DataJud e a camada de IA (`api/_lib/ia.js`, Google Gemini no plano gratuito, só modelos "flash"). Em dev rodam pelo `server/dev-api.js` em `:3100`. Exigem login: `api/_lib/auth.js` valida o token no gateway — **sem `VITE_API_URL` no processo, cai no gateway de produção**.
+1. **Gateway da plataforma de microserviços** (`apps/api` neste monorepo): `/api/auth`, `/api/tentativas`, `/api/questoes`, `/api/users`, `/api/discursivas`, `/api/calendar` (Google Calendar do Cronograma; OAuth e tokens ficam no auth-service). Em produção via `VITE_API_URL` (absoluta); em dev pelo proxy do Vite para `localhost:3000`. Todo acesso passa por `src/lib/api/api.js` (`fetch`, erros viram `ApiError(message, status)`, `status 0` = rede/CORS, retentativa de 429).
+2. **Funções serverless em `api/`** (Vercel): DataJud e a camada de IA (`api/_lib/ia.js`, Google Gemini no plano gratuito, só modelos "flash"). Em dev rodam pelo `server/dev-api.js` em `:3100`. Exigem login: `api/_lib/auth.js` valida o token no gateway — sem `VITE_API_URL` no processo, **só o deploy de produção (`VERCEL_ENV=production`) cai em `api.mlkoab.tech`**; Preview, dev-api e CI caem em `http://localhost:3000`.
 
 **Rota nova do gateway precisa de linha própria no `server.proxy` do `vite.config.js`, acima de `/api`**; senão cai no dev-api e falha como se fosse bug de tela.
 
@@ -67,4 +67,4 @@ npm run test:api
 
 ## CI
 
-`.github/workflows/ci.yml`: lint + test:lib → e2e (backend real via `e2e-backend.sh`) + test:api → build → deploy Vercel (só push na `main`, se houver `VERCEL_TOKEN`). O backend usa imagens `:latest`, então um vermelho no e2e pode vir de mudança de contrato no repo da plataforma. No `pr.yml` o e2e tem `continue-on-error`; quem barra o PR é o `ci.yml`.
+Os workflows ficam na raiz do monorepo: `.github/workflows/web.yml` (roda com `working-directory: apps/web`): lint + test:lib → e2e (backend real via `e2e-backend.sh`, **construído de `apps/api` do mesmo commit**) + test:api → build → deploy Vercel (só push na `main`, se houver `VERCEL_TOKEN`; a CLI roda da raiz porque o projeto tem Root Directory `apps/web`). Dispara com mudança em `apps/web/**` ou `apps/api/**`. Um vermelho no e2e é deste commit; mudança de contrato na API tem de ser compatível para trás (ver o CLAUDE.md da raiz). No `web-pr.yml` o e2e tem `continue-on-error`; quem barra o PR é o `web.yml`.

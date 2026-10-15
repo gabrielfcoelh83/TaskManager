@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Chamam o gateway, o dev-api e serviços pagos: rodam em passo próprio da CI,
-// com o backend no ar (`test:api` no ci.yml).
+// com o backend no ar (`test:api` no web.yml).
 const PRECISAM_DE_SERVIDOR = new Set(['api.test.js']);
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -31,7 +31,7 @@ if (arquivos.length === 0) {
 
 // Um teste de lib termina em segundos. O teto existe para o que não termina —
 // um `setInterval` esquecido, uma promessa que nunca resolve —, que sem ele
-// prenderia o job por horas e, no ci.yml, o e2e, o build e o deploy atrás.
+// prenderia o job por horas e, no web.yml, o e2e, o build e o deploy atrás.
 const TEMPO_MAXIMO_MS = 60_000;
 
 // Cada arquivo roda em dois fusos. O runner da CI está em UTC, onde "meia-noite

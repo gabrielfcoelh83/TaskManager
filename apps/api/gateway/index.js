@@ -202,7 +202,7 @@ app.get('/api/calendar/google/callback', async (req, res) => {
 });
 
 // Exposta para consumidores fora da rede interna (as rotas de IA do
-// MlDireito, na Vercel) validarem um token antes de chamar serviço pago —
+// apps/web, na Vercel) validarem um token antes de chamar serviço pago —
 // o auth-service já tinha /verify, só não era alcançável de fora.
 app.post('/api/auth/verify', async (req, res) => {
   try {

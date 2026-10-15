@@ -20,7 +20,7 @@ npm ci
 #    maria.lais@email.com / senha-de-teste-123
 export E2E_JWT_SECRET=$(openssl rand -hex 32)
 ./scripts/e2e-backend.sh
-#    (alternativa: `docker compose up -d` no repo TaskManager)
+#    (alternativa: `docker compose up -d` em `../api`)
 
 # 2. Funções de api/ (opcional; só DataJud/IA). Fica fora da 3000, que é do gateway
 PORT=3100 VITE_API_URL=http://localhost:3000 node server/dev-api.js
@@ -48,7 +48,7 @@ Para derrubar o backend e limpar os volumes: `./scripts/e2e-backend.sh down`.
 
 ## Deploy
 
-Push na `main` roda `.github/workflows/ci.yml` (lint → testes de lib → e2e →
+Push na `main` roda `.github/workflows/web.yml` (na raiz do monorepo) (lint → testes de lib → e2e →
 build) e publica na Vercel quando o `VERCEL_TOKEN` está configurado. Em
 produção, `VITE_API_URL` precisa estar nas variáveis do projeto na Vercel.
 

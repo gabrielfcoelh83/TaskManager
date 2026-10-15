@@ -306,7 +306,7 @@ e `tentativas.motivo_nota` (texto livre, até 280), anotados depois pelo
 opcionais e não têm CHECK no vocabulário (mesmo raciocínio do `tipo`). O
 motivo fica na tentativa, e não na questão: errar de novo é um erro novo.
 O caderno em si não tem tabela; o front o calcula a partir da última
-tentativa de cada questão (`lib/revisao.js` no MlDireito).
+tentativa de cada questão (`apps/web/src/lib/revisao.js`).
 
 **Origem da tentativa** (migration 007). `tentativas.origem` (`quiz`,
 `simulado`, `revisao`; até 20 caracteres, sem CHECK) separa o erro feito sob
@@ -469,7 +469,7 @@ na VPS e usa `docker-compose.prod.yml`, com as imagens do GHCR.
 
 ## 🔄 CI/CD Pipeline
 
-**Arquivo:** `.github/workflows/ci-cd.yml`
+**Arquivo:** `.github/workflows/api.yml` (raiz do monorepo)
 
 **Stages:**
 1. **Audit**: `npm audit --omit=dev --audit-level=high` em cada serviço
