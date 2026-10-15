@@ -156,7 +156,10 @@ export default function Login({ theme, s, onEntrar }) {
         <div style={{ fontSize: 12, color: 'rgba(244,239,232,.55)' }}>Versão beta</div>
       </aside>
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      {/* minWidth 0: item flex não encolhe abaixo do conteúdo por padrão, e o
+          form de 360px + 48px de padding davam 408px — rolagem horizontal em
+          qualquer celular com menos de 408px de largura. */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <form onSubmit={submeter} style={{ width: 360, maxWidth: '100%' }}>
         <div className="flex lg:hidden" style={{ alignItems: 'center', gap: 9, marginBottom: 20 }}>
           <div style={s.logoMark}>

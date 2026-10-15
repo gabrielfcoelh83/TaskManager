@@ -145,6 +145,28 @@ describe('PUT /users/:id — profile_data é mesclado, não substituído', () =>
   });
 });
 
+describe('PUT /users/:id — nome e e-mail longos demais', () => {
+  const put = (body) =>
+    request(app).put(`/users/${DONO}`).set('Authorization', como(DONO)).send(body);
+
+  // Antes estouravam o VARCHAR(255) e voltavam 500. O breaker do gateway conta
+  // 5xx: três desses tiravam o user-service do ar para todos os usuários.
+  it('recusa com 400, e o banco não muda', async () => {
+    expect((await put({ name: 'a'.repeat(256) })).status).toBe(400);
+    expect((await put({ email: `${'a'.repeat(250)}@x.local` })).status).toBe(400);
+
+    const { rows } = await pool.query('SELECT name, email FROM users WHERE user_id = $1', [DONO]);
+    expect(rows[0].name.length).toBeLessThanOrEqual(255);
+    expect(rows[0].email).toBe(`u${DONO}@exemplo.local`);
+  });
+
+  it('conta caracteres como o Postgres: 255 emojis cabem', async () => {
+    const res = await put({ name: '😀'.repeat(255) });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('😀'.repeat(255));
+  });
+});
+
 describe('GET /users — listagem restrita', () => {
   it('recusa usuário comum com 403', async () => {
     const res = await request(app).get('/users').set('Authorization', como(DONO));

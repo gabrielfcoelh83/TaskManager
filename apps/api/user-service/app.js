@@ -198,9 +198,20 @@ app.post('/users', verifyToken, async (req, res) => {
 // crescer sem limite.
 const PROFILE_DATA_MAX = 20000;
 
+// `name` e `email` são VARCHAR(255). Sem esta conferência o Postgres recusava
+// e a rota devolvia 500 — que o circuit breaker do gateway conta como falha do
+// serviço: três nomes longos seguidos derrubavam o perfil de todo mundo.
+// Conta por caractere (Array.from), como o Postgres, e não por unidade UTF-16.
+const TEXTO_MAX = 255;
+const longoDemais = (v) => typeof v === 'string' && Array.from(v).length > TEXTO_MAX;
+
 // Atualizar perfil de usuário
 app.put('/users/:id', verifyToken, requireOwnership, async (req, res) => {
   const { name, email, profile_data } = req.body || {};
+
+  if (longoDemais(name) || longoDemais(email)) {
+    return res.status(400).json({ error: `Nome e e-mail podem ter até ${TEXTO_MAX} caracteres` });
+  }
 
   // `profile_data` é MESCLADO no primeiro nível, não substituído. Antes a
   // coluna inteira era trocada pelo que chegava: uma aba antiga (ou o bundle

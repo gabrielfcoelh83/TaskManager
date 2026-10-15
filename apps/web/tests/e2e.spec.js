@@ -434,6 +434,22 @@ test('sem Client ID, o login não mostra o Google nem carrega o script dele', as
   expect(pedidosAoGoogle).toEqual([]);
 });
 
+// O contêiner do formulário é item flex; sem `minWidth: 0` ele não encolhia
+// abaixo de 408px (form de 360 + padding) e toda tela de celular mais estreita
+// ganhava rolagem horizontal no login.
+test('o login cabe na largura de celulares, sem rolagem horizontal', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+
+  for (const largura of [320, 360, 390]) {
+    await page.setViewportSize({ width: largura, height: 800 });
+    await page.reload();
+    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    const sobra = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(sobra, `rolagem horizontal em ${largura}px`).toBe(0);
+  }
+});
+
 
 // Fora do describe de "Criar conta": estes testes precisam de sessão ativa, e
 // aquele beforeEach começa deslogado de propósito.
