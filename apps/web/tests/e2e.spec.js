@@ -844,6 +844,7 @@ test.describe('Ficha de boas-vindas', () => {
     await expect(outra.locator('[data-testid="ficha"]')).toBeVisible({ timeout: 15000 });
 
     // Aba 1: "já fiz mais de uma vez".
+    await page.bringToFront();
     await expect(titulo(page)).toHaveText('Você');
     await page.click('[data-testid="ficha-continuar"]');
     await page.check('[data-testid="ficha-data-nao-sei"] input');
@@ -857,6 +858,7 @@ test.describe('Ficha de boas-vindas', () => {
     await expect(titulo(page)).toHaveText('Tudo pronto!');
 
     // Aba 2, que ainda mostrava a ficha, responde outra coisa e conclui.
+    await outra.bringToFront();
     await preencherFichaAteOFim(outra);
     await outra.click('[data-testid="ficha-continuar"]');
     await expect(outra.locator('[data-testid="nav-questoes"]')).toBeVisible();
